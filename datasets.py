@@ -165,6 +165,7 @@ class DatasetVideo2Action(Dataset):
                 data = root['data'][demo]
                 for camera in cameras:
                     obs_frames = len(data['obs'][camera])
+                    #for i in range(2):
                     for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
                         self.sequence_paths.append((root, demo, i, task, camera))
 
@@ -201,7 +202,7 @@ class DatasetVideo2Action(Dataset):
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
         video = torch.cat(obs_seq, dim=0)
 
-        return video, actions
+        return video, actions.float() # Will this cause performance issue?
 
     
 

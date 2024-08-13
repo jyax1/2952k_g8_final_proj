@@ -75,7 +75,7 @@ class Trainer:
         if isinstance(self.model, ActionExtractionCNN):
             torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
             torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'a_mlp_{self.model_name}-{epoch}.pth'))
-            with open('val_loss.csv', 'w', newline='') as csvfile:
+            with open(os.path.join(self.results_path, f'd_unet_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])

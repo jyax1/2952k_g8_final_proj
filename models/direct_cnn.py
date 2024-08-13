@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import torch
+import torch.nn as nn
+import numpy as np
+
 class FramesConvolution(nn.Module):
     def __init__(self, latent_size=16):
         super(FramesConvolution, self).__init__()
@@ -22,6 +26,11 @@ class FramesConvolution(nn.Module):
             in_channels = out_channels
             out_channels *= 2
         
+        # Add extra convolutional layers to make it 10 layers in total
+        for _ in range(10 - num_downsamples):
+            layers.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1))
+            layers.append(nn.ReLU())
+
         # Adjust final output to be (2, sqrt(latent_size), sqrt(latent_size))
         layers.append(nn.Conv2d(in_channels, out_channels=2, kernel_size=3, padding=1))
         self.conv = nn.Sequential(*layers)
@@ -33,14 +42,23 @@ class ActionMLP(nn.Module):
     def __init__(self, latent_size=16):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_size
-        self.fc = nn.Sequential(
+        layers = [
             nn.Flatten(),
-            nn.Linear(in_features=2*self.latent_size, out_features=64),
-            nn.ReLU(),
-            nn.Linear(in_features=64, out_features=32),
-            nn.ReLU(),
-            nn.Linear(in_features=32, out_features=7)
-        )
+            nn.Linear(in_features=2*self.latent_size, out_features=512),
+            nn.ReLU()
+        ]
+        
+        # Add extra MLP layers to make it 8 layers in total
+        for _ in range(7):
+            layers.append(nn.Linear(in_features=512, out_features=512))
+            layers.append(nn.ReLU())
+
+        # Final layers
+        layers.append(nn.Linear(in_features=512, out_features=32))
+        layers.append(nn.ReLU())
+        layers.append(nn.Linear(in_features=32, out_features=7))
+        
+        self.fc = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.fc(x)
