@@ -124,7 +124,7 @@ class DatasetVideo(Dataset):
     
 
 class DatasetVideo2Action(Dataset):
-    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=3, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
+    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
         if semantic_map:
             print("Preparing image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:

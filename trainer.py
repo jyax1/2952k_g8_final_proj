@@ -5,22 +5,25 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from models.direct_cnn import ActionExtractionCNN
+import csv
 
 class Trainer:
-    def __init__(self, model, train_set, validation_set, results_folder, batch_size=32, epochs=10, lr=0.001):
+    def __init__(self, model, train_set, validation_set, results_path, model_name, batch_size=32, epochs=10, lr=0.001):
         self.accelerator = Accelerator()
         self.model = model
+        self.model_name = model_name
         self.train_set = train_set
         self.validation_set = validation_set
-        self.results_folder = results_folder
+        self.results_path = results_path
         self.batch_size = batch_size
         self.epochs = epochs
         self.lr = lr
+        self.val_losses = []
 
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
-        self.criterion = nn.MSELoss()  # MSE Loss for regression tasks
+        self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
         # Prepare the model, optimizer, and dataloaders for distributed training
@@ -28,8 +31,8 @@ class Trainer:
             self.model, self.optimizer, self.train_loader, self.validation_loader
         )
 
-        if not os.path.exists(results_folder):
-            os.makedirs(results_folder)
+        if not os.path.exists(results_path):
+            os.makedirs(results_path)
 
     def train(self):
         for epoch in range(self.epochs):
@@ -52,6 +55,7 @@ class Trainer:
             # Validate at the end of each epoch
             val_loss = self.validate()
             print(f'Epoch [{epoch + 1}/{self.epochs}] ended, Validation Loss: {val_loss:.4f}')
+            self.val_losses.append(val_loss)
 
             # Save model after each epoch
             self.save_model(epoch + 1)
@@ -68,9 +72,12 @@ class Trainer:
         return total_val_loss / len(self.validation_loader)
 
     def save_model(self, epoch):
-        model_save_path = os.path.join(self.results_folder, f'model_epoch_{epoch}.pth')
         if isinstance(self.model, ActionExtractionCNN):
-            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_folder, f'frames_convolution_epoch_{epoch}.pth'))
-            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_folder, f'action_mlp_epoch_{epoch}.pth'))
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'a_mlp_{self.model_name}-{epoch}.pth'))
+            with open('val_loss.csv', 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                for value in self.val_losses:
+                    writer.writerow([value])
         else:
-            torch.save(self.model.state_dict(), model_save_path)
+            print('Model not supported')
