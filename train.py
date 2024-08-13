@@ -4,7 +4,7 @@ from datasets import DatasetVideo2Action
 from trainer import Trainer
 from pathlib import Path
 
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88
@@ -13,6 +13,8 @@ else:
     b = 16
 
 def train(args):
+    
+    args.latent_size = args.latent_size**2 #
 
     results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
     model_name = f'{args.architecture}_lat_{args.latent_size}'
@@ -36,7 +38,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--architecture', '-a', type=str, default='direct_unet', choices=['direct_unet'], help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
-    parser.add_argument('--latent_size', '-ls', type=int, default=16, help='Latent size')
+    parser.add_argument('--latent_size', '-ls', type=int, default=4, help='Latent size')
     parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
     parser.add_argument('--batch_size', '-b', type=int, default=b, help='Batch size')
 

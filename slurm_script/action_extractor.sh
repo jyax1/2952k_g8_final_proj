@@ -2,12 +2,6 @@ run()
 {
 jn=ACTIONEXTRACT_${architecture}_dp_${dataset_path}_lat_size${latent_size}_b_size${batch_size}_epochs${epochs}_${date}
 
-parser.add_argument('--architecture', '-a', type=str, default='direct_unet', choices=['direct_unet'], help='Model architecture to train')
-    parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
-    parser.add_argument('--latent_size', '-ls', type=int, default=16, help='Latent size')
-    parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
-    parser.add_argument('--batch_size', '-b', type=int, default=b, help='Batch size')
-
 export train_args=" 
 -a=${architecture}
 -dp=${datasets_path}
@@ -33,4 +27,30 @@ run
 date=0812
 
 
+architecture=direct_unet
+datasets_path="/users/ysong135/scratch/datasets"
+latent_size=4
+batch_size=88
+epochs=100
+train_only
+
+architecture=direct_unet
+datasets_path="/users/ysong135/scratch/datasets"
+latent_size=8
+batch_size=88
+epochs=100
+train_only
+
+architecture=direct_unet
+datasets_path="/users/ysong135/scratch/datasets"
+latent_size=16
+batch_size=88
+epochs=100
+train_only
+
+architecture=direct_unet
+datasets_path="/users/ysong135/scratch/datasets"
+latent_size=32
+batch_size=88
+epochs=100
 train_only

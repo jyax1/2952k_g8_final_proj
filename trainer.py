@@ -52,13 +52,13 @@ class Trainer:
                     print(f'Epoch [{epoch + 1}/{self.epochs}], Step [{i + 1}/{len(self.train_loader)}], Loss: {running_loss / 10:.4f}')
                     running_loss = 0.0
 
-            # Validate at the end of each epoch
+            # Validate
             val_loss = self.validate()
             print(f'Epoch [{epoch + 1}/{self.epochs}] ended, Validation Loss: {val_loss:.4f}')
             self.val_losses.append(val_loss)
 
-            # Save model after each epoch
-            self.save_model(epoch + 1)
+            if epoch % 10 == 9:
+                self.save_model(epoch + 1)
 
     def validate(self):
         self.model.eval()
