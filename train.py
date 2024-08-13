@@ -4,10 +4,10 @@ from datasets import DatasetVideo2Action
 from trainer import Trainer
 from pathlib import Path
 
-oscar = False
+oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
-    b = 88
+    b = 32
 else:
     dp = '/home/yilong/Documents/videopredictor/datasets'
     b = 16
