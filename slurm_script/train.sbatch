@@ -32,5 +32,5 @@ export HYDRA_FULL_ERROR=1
 #export MUJOCO_PY_MJPRO_PATH=$HOME/.mujoco/mujoco210/
 #export MUJOCO_PY_MJKEY_PATH=$HOME/.mujoco/mujoco210/mjkey.txt
 
-export VIDEO_DIR=/users/ysong135/Documents/videopredictor
+export AE_DIR=/users/ysong135/Documents/
 accelerate launch ${VIDEO_DIR}/flowdiffusion/pretrain.py ${train_args}
