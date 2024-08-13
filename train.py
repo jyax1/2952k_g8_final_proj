@@ -38,7 +38,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--architecture', '-a', type=str, default='direct_unet', choices=['direct_unet'], help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
-    parser.add_argument('--latent_size', '-ls', type=int, default=4, help='Latent size')
+    parser.add_argument('--latent_size', '-ls', type=int, default=32, help='Latent size')
     parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
     parser.add_argument('--batch_size', '-b', type=int, default=b, help='Batch size')
 
