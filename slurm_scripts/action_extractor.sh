@@ -1,6 +1,6 @@
 run()
 {
-jn=ACTIONEXTRACT_${architecture}_dp_${dataset_path}_lat_size${latent_size}_b_size${batch_size}_epochs${epochs}_${date}
+jn=ae_${architecture}_dp_${datasets_path}_ls${latent_size}_bs${batch_size}_e${epochs}_${date}
 
 export train_args=" 
 -a=${architecture}
@@ -24,33 +24,33 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0812
+date=0814
 
 
 architecture=direct_unet
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=4
-batch_size=88
+batch_size=64
 epochs=100
 train_only
 
 architecture=direct_unet
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=8
-batch_size=88
+batch_size=64
 epochs=100
 train_only
 
 architecture=direct_unet
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=16
-batch_size=88
+batch_size=64
 epochs=100
 train_only
 
 architecture=direct_unet
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=32
-batch_size=88
+batch_size=64
 epochs=100
 train_only

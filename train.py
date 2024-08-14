@@ -7,7 +7,7 @@ from pathlib import Path
 oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
-    b = 32
+    b = 88
 else:
     dp = '/home/yilong/Documents/videopredictor/datasets'
     b = 16

@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from models.direct_cnn import ActionExtractionCNN
 import csv
+from tqdm import tqdm
 
 class Trainer:
     def __init__(self, model, train_set, validation_set, results_path, model_name, batch_size=32, epochs=10, lr=0.001):
@@ -38,6 +39,8 @@ class Trainer:
         for epoch in range(self.epochs):
             self.model.train()
             running_loss = 0.0
+            epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
+
             for i, (inputs, labels) in enumerate(self.train_loader):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
 
@@ -48,9 +51,17 @@ class Trainer:
                 self.optimizer.step()
 
                 running_loss += loss.item()
-                if i % 10 == 9:  # Print every 10 batches
-                    print(f'Epoch [{epoch + 1}/{self.epochs}], Step [{i + 1}/{len(self.train_loader)}], Loss: {running_loss / 10:.4f}')
+
+                if i % 5 == 4:  # Update every 10 batches
+                    avg_loss = running_loss / 10
+                    epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
+
+                # Update tqdm progress bar
+                epoch_progress.update(1)
+
+            # Close the progress bar after the epoch ends
+            epoch_progress.close()
 
             # Validate
             val_loss = self.validate()
