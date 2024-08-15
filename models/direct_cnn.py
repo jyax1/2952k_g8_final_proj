@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 class FramesConvolution(nn.Module):
-    def __init__(self, latent_size=16, video_length=2):
+    def __init__(self, latent_size=16, video_length=2, latent_length=2):
         super(FramesConvolution, self).__init__()
         self.latent_size = latent_size
         output_dim = int(np.sqrt(latent_size))
@@ -32,19 +32,19 @@ class FramesConvolution(nn.Module):
             layers.append(nn.ReLU())
 
         # Adjust final output to be (2, sqrt(latent_size), sqrt(latent_size))
-        layers.append(nn.Conv2d(in_channels, out_channels=video_length, kernel_size=3, padding=1))
+        layers.append(nn.Conv2d(in_channels, out_channels=latent_length, kernel_size=3, padding=1))
         self.conv = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_size=16, video_length=2):
+    def __init__(self, latent_size=16, latent_length = 2, action_length=1):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_size
         layers = [
             nn.Flatten(),
-            nn.Linear(in_features=video_length*self.latent_size, out_features=512),
+            nn.Linear(in_features=latent_length*self.latent_size, out_features=512),
             nn.ReLU()
         ]
         
@@ -56,7 +56,7 @@ class ActionMLP(nn.Module):
         # Final layers
         layers.append(nn.Linear(in_features=512, out_features=32))
         layers.append(nn.ReLU())
-        layers.append(nn.Linear(in_features=32, out_features=7*video_length))
+        layers.append(nn.Linear(in_features=32, out_features=7*action_length))
         
         self.fc = nn.Sequential(*layers)
 
@@ -64,12 +64,23 @@ class ActionMLP(nn.Module):
         return self.fc(x)
 
 class ActionExtractionCNN(nn.Module):
-    def __init__(self, latent_size=16, video_length=2, motion=False):
+    def __init__(self, latent_size=16, video_length=2, motion=False, image_plus_motion=False):
         super(ActionExtractionCNN, self).__init__()
-        self.video_length = video_length - 1 if motion else video_length
+        assert not (motion and image_plus_motion), "Choose either only motion or only image_plus_motion"
+        if motion:
+            self.video_length = video_length - 1
+            self.latent_length = self.video_length
+        elif image_plus_motion:
+            self.video_length = video_length + 1
+            self.latent_length = video_length
+        else:
+            self.video_length = video_length
+            self.latent_length = video_length
+
+        self.action_length = video_length - 1
         self.latent_size = latent_size
-        self.frames_convolution_model = FramesConvolution(latent_size=latent_size, video_length=self.video_length)
-        self.action_mlp_model = ActionMLP(latent_size=latent_size, video_length=self.video_length)
+        self.frames_convolution_model = FramesConvolution(latent_size=latent_size, video_length=self.video_length, latent_length = self.latent_length)
+        self.action_mlp_model = ActionMLP(latent_size=latent_size, action_length=self.action_length, latent_length = self.latent_length)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)

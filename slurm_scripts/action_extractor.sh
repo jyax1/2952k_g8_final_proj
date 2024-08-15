@@ -1,6 +1,6 @@
 run()
 {
-jn=ae_${architecture}_dp_${datasets_path}_ls${latent_size}_bs${batch_size}_e${epochs}_${date}
+jn=ae_${architecture}_dp_${datasets_path}_ls${latent_size}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
 
 export train_args=" 
 -a=${architecture}
@@ -8,6 +8,7 @@ export train_args="
 -ls=${latent_size}
 -b=${batch_size}
 -e=${epochs}
+--motion
 "
 slurm_args=""
 
@@ -25,6 +26,8 @@ run
 }
 
 date=0814
+motion=True
+ipm=False
 
 
 architecture=direct_unet

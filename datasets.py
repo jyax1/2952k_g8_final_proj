@@ -123,8 +123,9 @@ class DatasetVideo(Dataset):
         return x, task, x_cond
     
 
-class DatasetVideo2Action(Dataset):
-    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False, motion=False):
+class DatasetVideo2DeltaAction(Dataset):
+    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, 
+                 cameras=['frontview_image'], validation=False, random_crop=False, motion=False, image_plus_motion=False):
         if semantic_map:
             print("Preparing image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:
@@ -134,6 +135,9 @@ class DatasetVideo2Action(Dataset):
         self.semantic_map = semantic_map
         self.video_length = video_length
         self.motion = motion
+        self.image_plus_motion = image_plus_motion
+        assert not (self.motion and self.image_plus_motion), "Choose either only motion or only image_plus_motion"
+
         self.sequence_paths = []
 
         # Find all HDF5 files in the directory
@@ -203,7 +207,7 @@ class DatasetVideo2Action(Dataset):
         actions = torch.from_numpy(np.concatenate(actions_seq))
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
 
-        if self.motion:
+        if self.motion or self.image_plus_motion:
             motion_seq = []
 
             for t in range(len(obs_seq)-1):
@@ -211,7 +215,10 @@ class DatasetVideo2Action(Dataset):
                 motion = (motion - torch.min(motion)) / (torch.max(motion) - torch.min(motion))
                 motion_seq.append(motion)
             
-            video = torch.cat(motion_seq, dim=0)
+            if self.motion:
+                video = torch.cat(motion_seq, dim=0)
+            else:
+                video = torch.cat(obs_seq + motion_seq, dim=0)
 
         else:
             video = torch.cat(obs_seq, dim=0)
@@ -221,7 +228,7 @@ class DatasetVideo2Action(Dataset):
     
 
 if __name__ == "__main__":
-    train_set = DatasetVideo2Action(
+    train_set = DatasetVideo2DeltaAction(
             path="/users/ysong135/scratch/datasets",
             video_length=2,
             semantic_map=False,

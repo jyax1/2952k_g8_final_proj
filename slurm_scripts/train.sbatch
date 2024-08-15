@@ -2,7 +2,7 @@
 #SBATCH -N 1
 #SBATCH -n 2
 #SBATCH --time=150:00:00
-#SBATCH -p gpu --gres=gpu:1 --gres-flags=enforce-binding
+#SBATCH -p 3090-gcondo --gres=gpu:1 --gres-flags=enforce-binding
 #SBATCH --mem=8Gb
 
 # Use '%A' for array-job ID, '%J' for job ID and '%a' for task ID
@@ -11,7 +11,6 @@
 
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=yilong_song@brown.edu
-#SBATCH --exclude=gpu2264,gpu2602,gpu2508,gpu2251,gpu2510,gpu2604
 
 module load miniconda
 module load cuda/11.8.0
