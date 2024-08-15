@@ -1,11 +1,11 @@
 run()
 {
-jn=ae_${architecture}_dp_${datasets_path}_ls${latent_size}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
+jn=ae_${architecture}_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
 
 export train_args=" 
 -a=${architecture}
 -dp=${datasets_path}
--ls=${latent_size}
+-ls=${latent_dim}
 -b=${batch_size}
 -e=${epochs}
 "
@@ -31,28 +31,28 @@ ipm=False
 
 architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
-latent_size=4
+latent_dim=4
 batch_size=64
 epochs=100
 train_only
 
 architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
-latent_size=8
+latent_dim=8
 batch_size=64
 epochs=100
 train_only
 
 architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
-latent_size=16
+latent_dim=16
 batch_size=64
 epochs=100
 train_only
 
 architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
-latent_size=32
+latent_dim=32
 batch_size=64
 epochs=100
 train_only
