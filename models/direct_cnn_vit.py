@@ -24,16 +24,14 @@ class ActionTransformerMLP(nn.Module):
         return self.fc(x)
     
 class ActionTransformer(nn.Module):
-    def __init__(self, latent_size=16, latent_length=2, num_heads=8, num_layers=6, hidden_dim=512, action_length=1):
+    def __init__(self, latent_dim=4, latent_length=2, num_heads=8, num_layers=6, hidden_dim=512, action_length=1):
         super(ActionTransformer, self).__init__()
-        self.patch_size = 16
-        self.latent_size = latent_size
+        self.latent_size = latent_dim**2
         self.latent_length = latent_length
-        self.num_patches = int(latent_length*latent_size / self.patch_size)
 
-        # Flatten and create patches
-        self.patch_size = int(np.sqrt(latent_size / 16))  # Assuming latent_size / 16 gives the size of each patch
-        self.patch_dim = latent_size * self.patch_size * self.patch_size
+        self.patch_size = int(np.sqrt(self.latent_size / 16))  # Assuming latent_size / 16 gives the size of each patch
+        self.patch_dim = self.patch_size**2
+        self.num_patches = int(latent_length*self.latent_size / self.patch_dim)
         
         self.linear_projection = nn.Linear(self.patch_dim, hidden_dim)
 
@@ -71,7 +69,7 @@ class ActionTransformer(nn.Module):
     
 
 class ActionExtractionViT(nn.Module):
-    def __init__(self, latent_size=16, video_length=2, motion=False, image_plus_motion=False):
+    def __init__(self, latent_dim=4, video_length=2, motion=False, image_plus_motion=False):
         super(ActionExtractionViT, self).__init__()
         assert not (motion and image_plus_motion), "Choose either only motion or only image_plus_motion"
         if motion:
@@ -85,11 +83,11 @@ class ActionExtractionViT(nn.Module):
             self.latent_length = video_length
 
         self.action_length = video_length - 1
-        self.latent_size = latent_size
+        self.latent_size = latent_dim
 
-        self.frames_convolution_model = FramesConvolution(latent_size=latent_size, video_length=self.video_length, latent_length=self.latent_length)
+        self.frames_convolution_model = FramesConvolution(latent_dim=latent_dim, video_length=self.video_length, latent_length=self.latent_length)
         
-        self.action_transformer_model = ActionTransformer(latent_size=latent_size, latent_length=self.latent_length, action_length=self.action_length)
+        self.action_transformer_model = ActionTransformer(latent_dim=latent_dim, latent_length=self.latent_length, action_length=self.action_length)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)

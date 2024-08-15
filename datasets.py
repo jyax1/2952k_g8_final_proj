@@ -127,9 +127,9 @@ class DatasetVideo2DeltaAction(Dataset):
     def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, 
                  cameras=['frontview_image'], validation=False, random_crop=False, motion=False, image_plus_motion=False):
         if semantic_map:
-            print("Preparing image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
+            print(f"Preparing image data from {path} with semantic channel (RGB/RGBD + semantic) ...")
         else:
-            print("Preparing image data from zarr dataset ...")
+            print(f"Preparing image data from {path} ...")
         
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
