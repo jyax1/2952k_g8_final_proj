@@ -5,9 +5,10 @@ jn=ae_${architecture}_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epo
 export train_args=" 
 -a=${architecture}
 -dp=${datasets_path}
--ls=${latent_dim}
+-ld=${latent_dim}
 -b=${batch_size}
 -e=${epochs}
+-ipm
 "
 slurm_args=""
 
@@ -26,7 +27,7 @@ run
 
 date=0815
 motion=False
-ipm=False
+ipm=True
 
 
 architecture=direct_cnn_vit
