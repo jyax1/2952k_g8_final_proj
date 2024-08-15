@@ -1,10 +1,11 @@
 import argparse
-from models.direct_cnn import ActionExtractionCNN
+from models.direct_cnn_mlp import ActionExtractionCNN
+from models.direct_cnn_vit import ActionExtractionViT
 from datasets import DatasetVideo2DeltaAction
 from trainer import Trainer
 from pathlib import Path
 
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88
@@ -20,8 +21,11 @@ def train(args):
     model_name = f'{args.architecture}_lat_{args.latent_size}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
     # Instantiate model
-    if args.architecture == 'direct_unet':
+    if args.architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_size=args.latent_size, video_length=args.horizon, 
+                                    motion=args.motion, image_plus_motion=args.image_plus_motion)
+    if args.architecture == 'direct_cnn_vit':
+        model = ActionExtractionViT(latent_size=args.latent_size, video_length=args.horizon, 
                                     motion=args.motion, image_plus_motion=args.image_plus_motion)
 
     # Instandiate datasets
@@ -41,7 +45,7 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train action extraction model")
 
-    parser.add_argument('--architecture', '-a', type=str, default='direct_unet', choices=['direct_unet'], help='Model architecture to train')
+    parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', choices=['direct_cnn_mlp', 'direct_cnn_vit'], help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
     parser.add_argument('--latent_size', '-ls', type=int, default=32, help='Latent size')
     parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')

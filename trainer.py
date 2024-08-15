@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
-from models.direct_cnn import ActionExtractionCNN
+from models.direct_cnn_mlp import ActionExtractionCNN
 import csv
 from tqdm import tqdm
 
@@ -86,7 +86,15 @@ class Trainer:
         if isinstance(self.model, ActionExtractionCNN):
             torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
             torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'a_mlp_{self.model_name}-{epoch}.pth'))
-            with open(os.path.join(self.results_path, f'd_unet_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
+            with open(os.path.join(self.results_path, f'd_cnn_mlp_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                for value in self.val_losses:
+                    writer.writerow([value])
+
+        if isinstance(self.model, ActionExtractionCNN):
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'a_vit_{self.model_name}-{epoch}.pth'))
+            with open(os.path.join(self.results_path, f'd_cnn_vit_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])

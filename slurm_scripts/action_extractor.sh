@@ -8,7 +8,6 @@ export train_args="
 -ls=${latent_size}
 -b=${batch_size}
 -e=${epochs}
---motion
 "
 slurm_args=""
 
@@ -25,33 +24,33 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0814
-motion=True
+date=0815
+motion=False
 ipm=False
 
 
-architecture=direct_unet
+architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=4
 batch_size=64
 epochs=100
 train_only
 
-architecture=direct_unet
+architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=8
 batch_size=64
 epochs=100
 train_only
 
-architecture=direct_unet
+architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=16
 batch_size=64
 epochs=100
 train_only
 
-architecture=direct_unet
+architecture=direct_cnn_vit
 datasets_path="/users/ysong135/scratch/datasets"
 latent_size=32
 batch_size=64
