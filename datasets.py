@@ -124,7 +124,7 @@ class DatasetVideo(Dataset):
     
 
 class DatasetVideo2Action(Dataset):
-    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
+    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False, motion=False):
         if semantic_map:
             print("Preparing image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:
@@ -133,6 +133,7 @@ class DatasetVideo2Action(Dataset):
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
         self.video_length = video_length
+        self.motion = motion
         self.sequence_paths = []
 
         # Find all HDF5 files in the directory
@@ -187,6 +188,7 @@ class DatasetVideo2Action(Dataset):
 
             if i != self.video_length - 1:
                 actions_seq.append(action)
+
             obs_seq.append(obs)
 
         return obs_seq, actions_seq
@@ -200,7 +202,19 @@ class DatasetVideo2Action(Dataset):
         
         actions = torch.from_numpy(np.concatenate(actions_seq))
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
-        video = torch.cat(obs_seq, dim=0)
+
+        if self.motion:
+            motion_seq = []
+
+            for t in range(len(obs_seq)-1):
+                motion = obs_seq[t] - obs_seq[t+1]
+                motion = (motion - torch.min(motion)) / (torch.max(motion) - torch.min(motion))
+                motion_seq.append(motion)
+            
+            video = torch.cat(motion_seq, dim=0)
+
+        else:
+            video = torch.cat(obs_seq, dim=0)
 
         return video, actions.float() # Will this cause performance issue?
 
@@ -208,13 +222,14 @@ class DatasetVideo2Action(Dataset):
 
 if __name__ == "__main__":
     train_set = DatasetVideo2Action(
-            path='/home/yilong/Documents/videopredictor/datasets',
+            path="/users/ysong135/scratch/datasets",
             video_length=2,
             semantic_map=False,
             frame_skip=0,
             random_crop=True,
             demo_percentage=0.9,
-            cameras=['frontview_image']
+            cameras=['frontview_image'],
+            motion=True
         )
     
     print(train_set[0][0])

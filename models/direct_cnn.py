@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 class FramesConvolution(nn.Module):
-    def __init__(self, latent_size=16):
+    def __init__(self, latent_size=16, video_length=2):
         super(FramesConvolution, self).__init__()
         self.latent_size = latent_size
         output_dim = int(np.sqrt(latent_size))
@@ -17,7 +17,7 @@ class FramesConvolution(nn.Module):
         num_downsamples = int(np.log2(initial_dim / output_dim))
 
         layers = []
-        in_channels = 6
+        in_channels = video_length * 3
         out_channels = 16
         
         for _ in range(num_downsamples):
@@ -32,23 +32,23 @@ class FramesConvolution(nn.Module):
             layers.append(nn.ReLU())
 
         # Adjust final output to be (2, sqrt(latent_size), sqrt(latent_size))
-        layers.append(nn.Conv2d(in_channels, out_channels=2, kernel_size=3, padding=1))
+        layers.append(nn.Conv2d(in_channels, out_channels=video_length, kernel_size=3, padding=1))
         self.conv = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_size=16):
+    def __init__(self, latent_size=16, video_length=2):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_size
         layers = [
             nn.Flatten(),
-            nn.Linear(in_features=2*self.latent_size, out_features=512),
+            nn.Linear(in_features=video_length*self.latent_size, out_features=512),
             nn.ReLU()
         ]
         
-        # Add extra MLP layers to make it 8 layers in total
+        # 8 layers in total
         for _ in range(7):
             layers.append(nn.Linear(in_features=512, out_features=512))
             layers.append(nn.ReLU())
@@ -56,7 +56,7 @@ class ActionMLP(nn.Module):
         # Final layers
         layers.append(nn.Linear(in_features=512, out_features=32))
         layers.append(nn.ReLU())
-        layers.append(nn.Linear(in_features=32, out_features=7))
+        layers.append(nn.Linear(in_features=32, out_features=7*video_length))
         
         self.fc = nn.Sequential(*layers)
 
@@ -64,11 +64,12 @@ class ActionMLP(nn.Module):
         return self.fc(x)
 
 class ActionExtractionCNN(nn.Module):
-    def __init__(self, latent_size=16):
+    def __init__(self, latent_size=16, video_length=2, motion=False):
         super(ActionExtractionCNN, self).__init__()
+        self.video_length = video_length - 1 if motion else video_length
         self.latent_size = latent_size
-        self.frames_convolution_model = FramesConvolution(latent_size=latent_size)
-        self.action_mlp_model = ActionMLP(latent_size=latent_size)
+        self.frames_convolution_model = FramesConvolution(latent_size=latent_size, video_length=self.video_length)
+        self.action_mlp_model = ActionMLP(latent_size=latent_size, video_length=self.video_length)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)
@@ -77,7 +78,7 @@ class ActionExtractionCNN(nn.Module):
     
 if __name__ == '__main__':
     model = ActionExtractionCNN(latent_size=16)
-    input_tensor = torch.randn(1, 6, 128, 128)
+    input_tensor = torch.randn(1, 3, 128, 128)
     output = model(input_tensor)
     print(output.shape)  # torch.Size([1, 7])
 

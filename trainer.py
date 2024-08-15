@@ -9,7 +9,7 @@ import csv
 from tqdm import tqdm
 
 class Trainer:
-    def __init__(self, model, train_set, validation_set, results_path, model_name, batch_size=32, epochs=10, lr=0.001):
+    def __init__(self, model, train_set, validation_set, results_path, model_name, batch_size=32, epochs=100, lr=0.001):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name

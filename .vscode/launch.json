@@ -17,7 +17,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_unet", "-dp=/users/ysong135/scratch/datasets", "--latent_size = 4", "--epoch=10", "--batch_size=88"]
+            "args": ["-a=direct_unet", "-dp=/users/ysong135/scratch/datasets", "--latent_size=4", "--epoch=10", "--batch_size=16", "--motion", "--horizon=5"]
         },
     ]
 }
