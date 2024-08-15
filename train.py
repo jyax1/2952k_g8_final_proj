@@ -14,18 +14,16 @@ else:
     b = 16
 
 def train(args):
-    
-    args.latent_size = args.latent_size**2
 
     results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
-    model_name = f'{args.architecture}_lat_{args.latent_size}_m_{args.motion}_ipm_{args.image_plus_motion}'
+    model_name = f'{args.architecture}_lat_{args.latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
     # Instantiate model
     if args.architecture == 'direct_cnn_mlp':
-        model = ActionExtractionCNN(latent_size=args.latent_size, video_length=args.horizon, 
+        model = ActionExtractionCNN(latent_dim=args.latent_dim, video_length=args.horizon, 
                                     motion=args.motion, image_plus_motion=args.image_plus_motion)
     if args.architecture == 'direct_cnn_vit':
-        model = ActionExtractionViT(latent_size=args.latent_size, video_length=args.horizon, 
+        model = ActionExtractionViT(latent_dim=args.latent_dim, video_length=args.horizon, 
                                     motion=args.motion, image_plus_motion=args.image_plus_motion)
 
     # Instandiate datasets
@@ -47,7 +45,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', choices=['direct_cnn_mlp', 'direct_cnn_vit'], help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
-    parser.add_argument('--latent_size', '-ls', type=int, default=32, help='Latent size')
+    parser.add_argument('--latent_dim', '-ld', type=int, default=32, help='Latent dimension (sqrt of size)')
     parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
     parser.add_argument('--batch_size', '-b', type=int, default=b, help='Batch size')
     parser.add_argument('--motion', '-m', action='store_true', help='Train only with motion')
@@ -55,7 +53,7 @@ if __name__ == '__main__':
     parser.add_argument('--horizon', '-hr', type=int, default=2, help='Length of the video')
 
     args = parser.parse_args()
-    assert 128 % args.latent_size == 0, "latent_size must divide 128 evenly."
+    assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
     assert args.horizon > 1, "Video length must be greater or equal to 2"
 
     train(args)

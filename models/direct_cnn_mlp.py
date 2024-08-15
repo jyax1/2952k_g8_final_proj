@@ -7,10 +7,10 @@ import torch.nn as nn
 import numpy as np
 
 class FramesConvolution(nn.Module):
-    def __init__(self, latent_size=16, video_length=2, latent_length=2):
+    def __init__(self, latent_dim=16, video_length=2, latent_length=2):
         super(FramesConvolution, self).__init__()
-        self.latent_size = latent_size
-        output_dim = int(np.sqrt(latent_size))
+        self.latent_size = latent_dim**2
+        output_dim = latent_dim
         initial_dim = 128  # Assuming input is 128x128
 
         # Calculate number of downsampling layers needed to reach desired output size
@@ -39,9 +39,9 @@ class FramesConvolution(nn.Module):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_size=16, latent_length = 2, action_length=1):
+    def __init__(self, latent_dim=4, latent_length = 2, action_length=1):
         super(ActionMLP, self).__init__()
-        self.latent_size = latent_size
+        self.latent_size = latent_dim ** 2
         layers = [
             nn.Flatten(),
             nn.Linear(in_features=latent_length*self.latent_size, out_features=512),
@@ -64,7 +64,7 @@ class ActionMLP(nn.Module):
         return self.fc(x)
 
 class ActionExtractionCNN(nn.Module):
-    def __init__(self, latent_size=16, video_length=2, motion=False, image_plus_motion=False):
+    def __init__(self, latent_dim=4, video_length=2, motion=False, image_plus_motion=False):
         super(ActionExtractionCNN, self).__init__()
         assert not (motion and image_plus_motion), "Choose either only motion or only image_plus_motion"
         if motion:
@@ -78,9 +78,8 @@ class ActionExtractionCNN(nn.Module):
             self.latent_length = video_length
 
         self.action_length = video_length - 1
-        self.latent_size = latent_size
-        self.frames_convolution_model = FramesConvolution(latent_size=latent_size, video_length=self.video_length, latent_length = self.latent_length)
-        self.action_mlp_model = ActionMLP(latent_size=latent_size, action_length=self.action_length, latent_length = self.latent_length)
+        self.frames_convolution_model = FramesConvolution(latent_dim=latent_dim, video_length=self.video_length, latent_length = self.latent_length)
+        self.action_mlp_model = ActionMLP(latent_dim=latent_dim, action_length=self.action_length, latent_length = self.latent_length)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)
