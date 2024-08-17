@@ -8,7 +8,7 @@ export train_args="
 -ld=${latent_dim}
 -b=${batch_size}
 -e=${epochs}
--ipm
+-m
 "
 slurm_args=""
 
@@ -25,9 +25,9 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0815
-motion=False
-ipm=True
+date=0817
+motion=True
+ipm=False
 
 
 architecture=direct_cnn_vit

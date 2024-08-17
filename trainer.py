@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from models.direct_cnn_mlp import ActionExtractionCNN
+from models.direct_cnn_vit import ActionExtractionViT
 import csv
 from tqdm import tqdm
 
@@ -70,6 +71,7 @@ class Trainer:
 
             if epoch % 10 == 9:
                 self.save_model(epoch + 1)
+                self.val_losses = []
 
     def validate(self):
         self.model.eval()
@@ -91,7 +93,7 @@ class Trainer:
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        if isinstance(self.model, ActionExtractionCNN):
+        if isinstance(self.model, ActionExtractionViT):
             torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
             torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'a_vit_{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'd_cnn_vit_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
