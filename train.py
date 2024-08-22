@@ -1,7 +1,7 @@
 import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
-from datasets import DatasetVideo2DeltaAction
+from datasets import DatasetVideo2DeltaAction, DatasetVideo
 from trainer import Trainer
 from pathlib import Path
 
@@ -27,12 +27,20 @@ def train(args):
                                     motion=args.motion, image_plus_motion=args.image_plus_motion)
 
     # Instandiate datasets
-    train_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                         demo_percentage=0.9, cameras=['frontview_image'], 
-                                         motion=args.motion, image_plus_motion=args.image_plus_motion)
-    validation_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                              demo_percentage=0.9, cameras=['frontview_image'], validation=True, 
-                                              motion=args.motion, image_plus_motion=args.image_plus_motion)
+    if args.latent_action:
+        train_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
+                                            demo_percentage=0.9, cameras=['frontview_image'], 
+                                            motion=args.motion, image_plus_motion=args.image_plus_motion)
+        validation_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
+                                                    demo_percentage=0.9, cameras=['frontview_image'], validation=True, 
+                                                     motion=args.motion, image_plus_motion=args.image_plus_motion)
+    else:
+        train_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
+                                            demo_percentage=0.9, cameras=['frontview_image'], 
+                                            motion=args.motion, image_plus_motion=args.image_plus_motion)
+        validation_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
+                                                demo_percentage=0.9, cameras=['frontview_image'], validation=True, 
+                                                motion=args.motion, image_plus_motion=args.image_plus_motion)
 
     # Instantiate the trainer
     trainer = Trainer(model, train_set, validation_set, results_path=results_path, model_name=model_name, batch_size=args.batch_size, epochs=args.epoch)
@@ -51,6 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--motion', '-m', action='store_true', help='Train only with motion')
     parser.add_argument('--image_plus_motion', '-ipm', action='store_true', help='Add motion preprocess to training data')
     parser.add_argument('--horizon', '-hr', type=int, default=2, help='Length of the video')
+    parser.add_argument('--latent_action', '-la', action='set_true', help='Train latent action model')
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."

@@ -9,7 +9,7 @@ import numpy as np
 class FramesConvolution(nn.Module):
     def __init__(self, latent_dim=16, video_length=2, latent_length=2):
         super(FramesConvolution, self).__init__()
-        self.latent_size = latent_dim**2
+        self.latent_size = latent_dim ** 2
         output_dim = latent_dim
         initial_dim = 128  # Assuming input is 128x128
 
@@ -19,16 +19,18 @@ class FramesConvolution(nn.Module):
         layers = []
         in_channels = video_length * 3
         out_channels = 16
-        
+
         for _ in range(num_downsamples):
             layers.append(nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1))
+            layers.append(nn.BatchNorm2d(out_channels))  # Added BatchNorm2d
             layers.append(nn.ReLU())
             in_channels = out_channels
             out_channels *= 2
-        
+
         # Add extra convolutional layers to make it 10 layers in total
         for _ in range(10 - num_downsamples):
             layers.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1))
+            layers.append(nn.BatchNorm2d(in_channels))  # Added BatchNorm2d
             layers.append(nn.ReLU())
 
         # Adjust final output to be (2, sqrt(latent_size), sqrt(latent_size))
@@ -39,15 +41,15 @@ class FramesConvolution(nn.Module):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_dim=4, latent_length = 2, action_length=1):
+    def __init__(self, latent_dim=4, latent_length=2, action_length=1):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_dim ** 2
         layers = [
             nn.Flatten(),
-            nn.Linear(in_features=latent_length*self.latent_size, out_features=512),
+            nn.Linear(in_features=latent_length * self.latent_size, out_features=512),
             nn.ReLU()
         ]
-        
+
         # 8 layers in total
         for _ in range(7):
             layers.append(nn.Linear(in_features=512, out_features=512))
@@ -56,8 +58,8 @@ class ActionMLP(nn.Module):
         # Final layers
         layers.append(nn.Linear(in_features=512, out_features=32))
         layers.append(nn.ReLU())
-        layers.append(nn.Linear(in_features=32, out_features=7*action_length))
-        
+        layers.append(nn.Linear(in_features=32, out_features=7 * action_length))
+
         self.fc = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -78,8 +80,8 @@ class ActionExtractionCNN(nn.Module):
             self.latent_length = video_length
 
         self.action_length = video_length - 1
-        self.frames_convolution_model = FramesConvolution(latent_dim=latent_dim, video_length=self.video_length, latent_length = self.latent_length)
-        self.action_mlp_model = ActionMLP(latent_dim=latent_dim, action_length=self.action_length, latent_length = self.latent_length)
+        self.frames_convolution_model = FramesConvolution(latent_dim=latent_dim, video_length=self.video_length, latent_length=self.latent_length)
+        self.action_mlp_model = ActionMLP(latent_dim=latent_dim, action_length=self.action_length, latent_length=self.latent_length)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)

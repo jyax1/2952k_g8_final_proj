@@ -47,17 +47,26 @@ import zarr
 from utils.dataset_utils import hdf5_to_zarr
 
 class DatasetVideo(Dataset):
-    def __init__(self, path='../datasets/', sample_per_seq=2, condition_length=1, semantic_map=False, frame_skip=3, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
+    '''
+    Outputs video sequence with predefined pattern
+    exmaple:
+    x_pattern = [0, 1, 2, 3]
+    y_pattern = [1, 2, 3, 4]
+    Returns the zeroth, first, second, third image as input to the nn
+    and the first, second, third, fourth image as output.
+    '''
+    def __init__(self, path='../datasets/', x_pattern=[0], y_pattern=[1], semantic_map=False, frame_skip=3, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
         if semantic_map:
-            print("Preparing image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
+            print("Preparing labeless image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:
-            print("Preparing image data from zarr dataset ...")
+            print("Preparing labeless image data from zarr dataset ...")
         
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
-        self.sample_per_seq = sample_per_seq
-        self.condition_length = condition_length
+        self.x_pattern = x_pattern
+        self.y_pattern = y_pattern
         self.sequence_paths = []
+        self.video_length = max(x_pattern + y_pattern) + 1
 
         # Find all HDF5 files in the directory
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
@@ -89,7 +98,7 @@ class DatasetVideo(Dataset):
                 data = root['data'][demo]
                 for camera in cameras:
                     obs_frames = len(data['obs'][camera])
-                    for i in range(obs_frames - self.sample_per_seq * (self.frame_skip + 1)):
+                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
                         self.sequence_paths.append((root, demo, i, task, camera))
 
         self.transform = video_transforms.Compose([
@@ -99,7 +108,7 @@ class DatasetVideo(Dataset):
 
     def get_samples(self, root, demo, index, camera):
         obs_seq = []
-        for i in range(self.sample_per_seq):
+        for i in range(self.video_length):
             obs = root['data'][demo]['obs'][camera][index + i*(self.frame_skip + 1)] / 255.0
 
             if self.semantic_map:
@@ -118,18 +127,18 @@ class DatasetVideo(Dataset):
         obs_seq = self.get_samples(root, demo, index, camera)
         
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
-        x = torch.cat(obs_seq[self.condition_length:], dim=0)
-        x_cond = torch.cat(obs_seq[:self.condition_length], dim=0)
-        return x, task, x_cond
+        x = torch.cat([obs_seq[i] for i in self.x_pattern], dim=0)
+        y = torch.cat([obs_seq[i] for i in self.y_pattern], dim=0)
+        return x, y
     
 
 class DatasetVideo2DeltaAction(Dataset):
     def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, 
                  cameras=['frontview_image'], validation=False, random_crop=False, motion=False, image_plus_motion=False):
         if semantic_map:
-            print(f"Preparing image data from {path} with semantic channel (RGB/RGBD + semantic) ...")
+            print(f"Preparing action labeled images from {path} with semantic channel (RGB/RGBD + semantic) ...")
         else:
-            print(f"Preparing image data from {path} ...")
+            print(f"Preparing action labeled images from {path} ...")
         
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
@@ -224,7 +233,6 @@ class DatasetVideo2DeltaAction(Dataset):
             video = torch.cat(obs_seq, dim=0)
 
         return video, actions.float() # Will this cause performance issue?
-
     
 
 if __name__ == "__main__":
