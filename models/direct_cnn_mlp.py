@@ -26,7 +26,7 @@ class FramesConvolution(nn.Module):
             layers.append(nn.ReLU())
             in_channels = out_channels
             out_channels *= 2
-
+            
         # Add extra convolutional layers to make it 10 layers in total
         for _ in range(10 - num_downsamples):
             layers.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1))

@@ -55,7 +55,16 @@ class DatasetVideo(Dataset):
     Returns the zeroth, first, second, third image as input to the nn
     and the first, second, third, fourth image as output.
     '''
-    def __init__(self, path='../datasets/', x_pattern=[0], y_pattern=[1], semantic_map=False, frame_skip=3, demo_percentage=1.0, cameras=['frontview_image'], validation=False, random_crop=False):
+    def __init__(self, path='../datasets/', 
+                 x_pattern=[0], 
+                 y_pattern=[1], 
+                 semantic_map=False, 
+                 frame_skip=3, 
+                 demo_percentage=1.0, 
+                 cameras=['frontview_image'], 
+                 validation=False, 
+                 random_crop=False
+    ):
         if semantic_map:
             print("Preparing labeless image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:
@@ -133,8 +142,16 @@ class DatasetVideo(Dataset):
     
 
 class DatasetVideo2DeltaAction(Dataset):
-    def __init__(self, path='../datasets/', video_length=2, semantic_map=False, frame_skip=0, demo_percentage=1.0, 
-                 cameras=['frontview_image'], validation=False, random_crop=False, motion=False, image_plus_motion=False):
+    def __init__(self, path='../datasets/', 
+                 video_length=2, 
+                 semantic_map=False, 
+                 frame_skip=0, 
+                 demo_percentage=1.0, 
+                 cameras=['frontview_image'], 
+                 validation=False, 
+                 random_crop=False, 
+                 motion=False, 
+                 image_plus_motion=False):
         if semantic_map:
             print(f"Preparing action labeled images from {path} with semantic channel (RGB/RGBD + semantic) ...")
         else:
