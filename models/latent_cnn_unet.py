@@ -1,8 +1,6 @@
 '''
 Instead of predicting actions directly form consecutive frames,
 follow the paper "Learning to Act without Actions" to create latent action extractor
-write a ActionExtractionCNNUNet class that takes in two sequences of images of shape (video_length*3, 128, 128).
- The IDM class with signature def __init__(self, latent_dim=16, video_length=2, latent_length=2) will 
 '''
 
 import torch.nn as nn
