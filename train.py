@@ -59,7 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--motion', '-m', action='store_true', help='Train only with motion')
     parser.add_argument('--image_plus_motion', '-ipm', action='store_true', help='Add motion preprocess to training data')
     parser.add_argument('--horizon', '-hr', type=int, default=2, help='Length of the video')
-    parser.add_argument('--latent_action', '-la', action='set_true', help='Train latent action model')
+    parser.add_argument('--latent_action', '-la', action='store_true', help='Train latent action model')
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."

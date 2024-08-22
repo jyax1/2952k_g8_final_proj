@@ -1,6 +1,6 @@
 run()
 {
-jn=ae_${architecture}_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
+jn=ae_${architecture}_bn_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
 
 export train_args=" 
 -a=${architecture}
@@ -25,9 +25,9 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0817
-motion=True
-ipm=False
+date=0822
+motion=False
+ipm=True
 
 
 architecture=direct_cnn_vit
@@ -37,23 +37,23 @@ batch_size=64
 epochs=100
 train_only
 
-architecture=direct_cnn_vit
-datasets_path="/users/ysong135/scratch/datasets"
-latent_dim=8
-batch_size=64
-epochs=100
-train_only
+# architecture=direct_cnn_vit
+# datasets_path="/users/ysong135/scratch/datasets"
+# latent_dim=8
+# batch_size=64
+# epochs=100
+# train_only
 
-architecture=direct_cnn_vit
-datasets_path="/users/ysong135/scratch/datasets"
-latent_dim=16
-batch_size=64
-epochs=100
-train_only
+# architecture=direct_cnn_vit
+# datasets_path="/users/ysong135/scratch/datasets"
+# latent_dim=16
+# batch_size=64
+# epochs=100
+# train_only
 
-architecture=direct_cnn_vit
-datasets_path="/users/ysong135/scratch/datasets"
-latent_dim=32
-batch_size=64
-epochs=100
-train_only
+# architecture=direct_cnn_vit
+# datasets_path="/users/ysong135/scratch/datasets"
+# latent_dim=32
+# batch_size=64
+# epochs=100
+# train_only
