@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from latent_cnn_unet import IDM
+from models.latent_cnn_unet import IDM
 
 class LatentDecoderMLP(nn.Module):
     def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=2, mlp_layers=3):
