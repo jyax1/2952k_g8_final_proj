@@ -35,5 +35,13 @@
             "console": "integratedTerminal",
             "args": ["-a=latent_cnn_unet", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
         },
+        {
+            "name": "train latent_decoder_mlp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_decoder_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
+        },
     ]
 }
