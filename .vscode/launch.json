@@ -41,7 +41,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
+            "args": ["-a=latent_decoder_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
         },
     ]
 }

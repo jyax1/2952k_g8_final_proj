@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from latent_cnn_unet import IDM
+from models.latent_cnn_unet import IDM
 
 class LatentDecoderMLP(nn.Module):
     def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=2, mlp_layers=3):
@@ -23,7 +23,7 @@ class LatentDecoderMLP(nn.Module):
             mlp_layers_list.append(nn.ReLU())
 
         # Final output layer
-        mlp_layers_list.append(nn.Linear(512, 7 * video_length))
+        mlp_layers_list.append(nn.Linear(512, 7 * (video_length-1)))
 
         # Build the MLP sequential model
         self.mlp = nn.Sequential(*mlp_layers_list)

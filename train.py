@@ -2,7 +2,7 @@ import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoder_mlp import LatentDecoderMLP
+from models.latent_decoders import LatentDecoderMLP
 from datasets import DatasetVideo2DeltaAction, DatasetVideo
 from trainer import Trainer
 from pathlib import Path
@@ -32,8 +32,10 @@ def train(args):
         model = ActionExtractionCNNUNet(latent_dim=args.latent_dim, video_length=args.horizon) # doesn't support motion
     elif args.architecture == 'latent_decoder_mlp':
         idm_model_path = str(Path(results_path)) + f'/{args.idm_model_name}'
-        latent_dim = re.search(r'lat_(.*?)_', args.idm_model_name).group(1)
-        model = LatentDecoderMLP(idm_model_path, latent_dim=latent_dim, video_length=2, latent_length=1, mlp_layers=3)
+        latent_dim = int(re.search(r'lat_(.*?)_', args.idm_model_name).group(1))
+        model = LatentDecoderMLP(idm_model_path, latent_dim=latent_dim, video_length=2, latent_length=1, mlp_layers=10)
+
+        model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
     # Instandiate datasets
     if 'latent' in args.architecture and 'decoder' not in args.architecture:
