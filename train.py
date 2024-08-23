@@ -52,7 +52,8 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train action extraction model")
 
-    parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', choices=['direct_cnn_mlp', 'direct_cnn_vit', 'latent_cnn_unet'], help='Model architecture to train')
+    parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', 
+                        choices=['direct_cnn_mlp', 'direct_cnn_vit', 'latent_cnn_unet'], help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
     parser.add_argument('--latent_dim', '-ld', type=int, default=32, help='Latent dimension (sqrt of size)')
     parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
