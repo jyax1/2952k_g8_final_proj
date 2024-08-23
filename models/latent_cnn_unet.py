@@ -4,14 +4,16 @@ follow the paper "Learning to Act without Actions" to create latent action extra
 '''
 
 import torch.nn as nn
+import numpy as np
 
 from models.direct_cnn_mlp import FramesConvolution as IDM
 
 class FiLM(nn.Module):
-    def __init__(self, latent_length, latent_dim, unet_latent_length=256):
+    def __init__(self, latent_length, unet_latent_dim=32, unet_latent_length=256):
         super(FiLM, self).__init__()
         
         # 1x1 convolution to align the feature map channels with the target channels
+        self.unet_latent_dim = unet_latent_dim
         self.channel_mapper = nn.Conv2d(latent_length, unet_latent_length, kernel_size=1)
         
         # Additional layers to generate gamma and beta for conditioning
@@ -21,6 +23,11 @@ class FiLM(nn.Module):
     def forward(self, feature_map, x):
         # Align the feature map channels with the target channels
         aligned_feature_map = self.channel_mapper(feature_map)
+
+        if aligned_feature_map.size(2) != self.unet_latent_dim or aligned_feature_map.size(3) != self.unet_latent_dim:
+            aligned_feature_map = nn.functional.interpolate(
+                aligned_feature_map, size=(int(self.unet_latent_dim), int(self.unet_latent_dim)), mode='bilinear', align_corners=False
+            )
         
         # Generate FiLM parameters (gamma and beta) from the aligned feature map
         gamma = self.gamma_layer(aligned_feature_map)
@@ -54,11 +61,15 @@ class FDM(nn.Module):
         super(FDM, self).__init__()
         
         self.video_length = video_length
+        self.latent_dim = latent_dim
+        self.latent_length = latent_length
+        unet_latent_dim = 2**(np.log2(128) - 2)
+
         in_channels = video_length * 3
         out_channels = video_length * 3
         
         # FiLM conditioning
-        self.film = FiLM(latent_length, latent_dim, unet_latent_length=unet_latent_length)
+        self.film = FiLM(latent_length, unet_latent_dim=unet_latent_dim, unet_latent_length=unet_latent_length)
         
         # U-Net Encoder
         self.enc1 = nn.Sequential(
@@ -94,10 +105,10 @@ class FDM(nn.Module):
         self.final_conv = nn.Conv2d(64, out_channels, kernel_size=3, padding=1)
         
     def forward(self, feature_map, image_sequence):
-        # Encoder
-        x1 = self.enc1(image_sequence)
-        x2 = self.enc2(x1)
-        x3 = self.enc3(x2)
+
+        x1 = self.enc1(image_sequence)  # Output shape: (batch_size, 64, 128, 128)
+        x2 = self.enc2(x1)  # Output shape: (batch_size, 128, 64, 64)
+        x3 = self.enc3(x2)  # Output shape: (batch_size, unet_latent_length, 32, 32)
         
         # FiLM conditioning applied to the deepest layer
         x3 = self.film(feature_map, x3)
@@ -105,9 +116,11 @@ class FDM(nn.Module):
         # Residual block
         x3 = self.res_block(x3)
         
-        # Decoder
-        x = self.dec1(x3)
-        x = self.dec2(x)
+        # Decoder with skip connections
+        x = self.dec1(x3)  # Output shape: (batch_size, 128, 64, 64)
+        x = x + x2  # Skip connection from encoder
+        x = self.dec2(x)  # Output shape: (batch_size, 64, 128, 128)
+        x = x + x1  # Skip connection from encoder
         x = self.final_conv(x)
         
         # Output the transformed image sequence

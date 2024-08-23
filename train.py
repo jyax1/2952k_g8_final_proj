@@ -6,7 +6,7 @@ from datasets import DatasetVideo2DeltaAction, DatasetVideo
 from trainer import Trainer
 from pathlib import Path
 
-oscar = False
+oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88

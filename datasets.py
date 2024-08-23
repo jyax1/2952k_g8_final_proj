@@ -66,9 +66,9 @@ class DatasetVideo(Dataset):
                  random_crop=False
     ):
         if semantic_map:
-            print("Preparing labeless image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
+            print("Preparing labelless image data from zarr dataset with semantic channel (RGB/RGBD + semantic) ...")
         else:
-            print("Preparing labeless image data from zarr dataset ...")
+            print("Preparing labelless image data from zarr dataset ...")
         
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map

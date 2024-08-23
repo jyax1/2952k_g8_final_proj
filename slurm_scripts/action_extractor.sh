@@ -1,6 +1,6 @@
 run()
 {
-jn=ae_${architecture}_bn_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
+jn=ae_${architecture}_dp_${datasets_path}_ls${latent_dim}_bs${batch_size}_e${epochs}_m${motion}_ipm${ipm}_${date}
 
 export train_args=" 
 -a=${architecture}
@@ -8,7 +8,6 @@ export train_args="
 -ld=${latent_dim}
 -b=${batch_size}
 -e=${epochs}
--m
 "
 slurm_args=""
 
@@ -25,12 +24,12 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0822
+date=0823
 motion=False
-ipm=True
+ipm=False
 
 
-architecture=direct_cnn_vit
+architecture=latent_cnn_unet
 datasets_path="/users/ysong135/scratch/datasets"
 latent_dim=4
 batch_size=64
