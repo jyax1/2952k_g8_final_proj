@@ -37,7 +37,7 @@ ipm=False
 # epochs=100
 # train_only
 
-architecture=latent_decoder_mlp
+architecture=latent_decoder_vit
 datasets_path="/users/ysong135/scratch/datasets"
 latent_dim=8
 batch_size=64

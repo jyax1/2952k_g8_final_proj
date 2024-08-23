@@ -7,7 +7,7 @@ from accelerate import Accelerator
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer
 import csv
 from tqdm import tqdm
 
@@ -113,6 +113,13 @@ class Trainer:
 
         if isinstance(self.model, LatentDecoderMLP):
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
+            with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                for value in self.val_losses:
+                    writer.writerow([value])
+
+        if isinstance(self.model, LatentDecoderTransformer):
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
