@@ -23,7 +23,7 @@ class LatentDecoderMLP(nn.Module):
             mlp_layers_list.append(nn.ReLU())
 
         # Final output layer
-        mlp_layers_list.append(nn.Linear(512, 7 * video_length))
+        mlp_layers_list.append(nn.Linear(512, 7 * (video_length-1)))
 
         # Build the MLP sequential model
         self.mlp = nn.Sequential(*mlp_layers_list)

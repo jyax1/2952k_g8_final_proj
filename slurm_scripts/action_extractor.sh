@@ -8,6 +8,7 @@ export train_args="
 -ld=${latent_dim}
 -b=${batch_size}
 -e=${epochs}
+-idm=${idm}
 "
 slurm_args=""
 
@@ -29,19 +30,20 @@ motion=False
 ipm=False
 
 
-architecture=latent_cnn_unet
-datasets_path="/users/ysong135/scratch/datasets"
-latent_dim=4
-batch_size=64
-epochs=100
-train_only
-
-# architecture=direct_cnn_vit
+# architecture=latent_cnn_unet
 # datasets_path="/users/ysong135/scratch/datasets"
-# latent_dim=8
+# latent_dim=4
 # batch_size=64
 # epochs=100
 # train_only
+
+architecture=latent_decoder_mlp
+datasets_path="/users/ysong135/scratch/datasets"
+latent_dim=8
+batch_size=64
+epochs=100
+idm="idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"
+train_only
 
 # architecture=direct_cnn_vit
 # datasets_path="/users/ysong135/scratch/datasets"
