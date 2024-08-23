@@ -8,13 +8,19 @@ from trainer import Trainer
 from pathlib import Path
 import re
 
-oscar = True
+'''
+Temporary
+'''
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88
 else:
     dp = '/home/yilong/Documents/videopredictor/datasets'
     b = 16
+'''
+Temporary
+'''
 
 def train(args):
 
