@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH -n 2
-#SBATCH --time=150:00:00
+#SBATCH --time=200:00:00
 #SBATCH -p 3090-gcondo --gres=gpu:1 --gres-flags=enforce-binding
 #SBATCH --mem=8Gb
 
