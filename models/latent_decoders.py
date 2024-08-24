@@ -96,3 +96,4 @@ class LatentDecoderObsConditionedUNetMLP(nn.Module):
         output = self.mlp(unet_output)
 
         return output
+    
