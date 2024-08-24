@@ -51,5 +51,13 @@
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
         },
+        {
+            "name": "train latent_decoder_obs_conditioned_unet_mlp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
+        },
     ]
 }

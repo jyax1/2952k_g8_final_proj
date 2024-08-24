@@ -25,24 +25,25 @@ train_script=slurm_scripts/train.sbatch
 run
 }
 
-date=0823
+date=0824
 motion=False
 ipm=False
 
 
 # architecture=latent_cnn_unet
 # datasets_path="/users/ysong135/scratch/datasets"
-# latent_dim=4
+# latent_dim=8
 # batch_size=64
 # epochs=100
+# idm=""
 # train_only
 
-architecture=latent_decoder_vit
+architecture=latent_decoder_obs_conditioned_unet_mlp
 datasets_path="/users/ysong135/scratch/datasets"
-latent_dim=8
+latent_dim=32
 batch_size=64
 epochs=100
-idm="idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"
+idm="idm_latent_cnn_unet_lat_32_m_False_ipm_False-50.pth"
 train_only
 
 # architecture=direct_cnn_vit

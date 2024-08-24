@@ -2,7 +2,7 @@ import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP
 from datasets import DatasetVideo2DeltaAction, DatasetVideo
 from trainer import Trainer
 from pathlib import Path
@@ -43,6 +43,8 @@ def train(args):
             model = LatentDecoderMLP(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1, mlp_layers=10)
         elif args.architecture == 'latent_decoder_vit':
             model = LatentDecoderTransformer(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1)
+        elif args.architecture == 'latent_decoder_obs_conditioned_unet_mlp':
+            model = LatentDecoderObsConditionedUNetMLP(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1, mlp_layers=10)
 
         model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
@@ -70,7 +72,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train action extraction model")
 
     parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', 
-                        choices=['direct_cnn_mlp', 'direct_cnn_vit', 'latent_cnn_unet', 'latent_decoder_mlp', 'latent_decoder_vit'], 
+                        choices=['direct_cnn_mlp', 
+                                 'direct_cnn_vit', 
+                                 'latent_cnn_unet', 
+                                 'latent_decoder_mlp', 
+                                 'latent_decoder_vit', 
+                                 'latent_decoder_obs_conditioned_unet_mlp'],
                         help='Model architecture to train')
     parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
     parser.add_argument('--latent_dim', '-ld', type=int, default=32, help='Latent dimension (sqrt of size)')
