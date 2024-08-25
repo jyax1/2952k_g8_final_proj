@@ -29,22 +29,37 @@ def train(args):
 
     # Instantiate model
     if args.architecture == 'direct_cnn_mlp':
-        model = ActionExtractionCNN(latent_dim=args.latent_dim, video_length=args.horizon, 
-                                    motion=args.motion, image_plus_motion=args.image_plus_motion)
+        model = ActionExtractionCNN(latent_dim=args.latent_dim, 
+                                    video_length=args.horizon, 
+                                    motion=args.motion, 
+                                    image_plus_motion=args.image_plus_motion)
     elif args.architecture == 'direct_cnn_vit':
-        model = ActionExtractionViT(latent_dim=args.latent_dim, video_length=args.horizon, 
-                                    motion=args.motion, image_plus_motion=args.image_plus_motion)
+        model = ActionExtractionViT(latent_dim=args.latent_dim, 
+                                    video_length=args.horizon, 
+                                    motion=args.motion, 
+                                    image_plus_motion=args.image_plus_motion)
     elif args.architecture == 'latent_cnn_unet':
         model = ActionExtractionCNNUNet(latent_dim=args.latent_dim, video_length=args.horizon) # doesn't support motion
     elif 'latent_decoder' in args.architecture:
         idm_model_path = str(Path(results_path)) + f'/{args.idm_model_name}'
         latent_dim = int(re.search(r'lat_(.*?)_', args.idm_model_name).group(1))
         if args.architecture == 'latent_decoder_mlp':
-            model = LatentDecoderMLP(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1, mlp_layers=10)
+            model = LatentDecoderMLP(idm_model_path, 
+                                     latent_dim=latent_dim, 
+                                     video_length=args.horizon, 
+                                     latent_length=args.horizon-1, 
+                                     mlp_layers=10)
         elif args.architecture == 'latent_decoder_vit':
-            model = LatentDecoderTransformer(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1)
+            model = LatentDecoderTransformer(idm_model_path, 
+                                             latent_dim=latent_dim, 
+                                             video_length=args.horizon, 
+                                             latent_length=args.horizon-1)
         elif args.architecture == 'latent_decoder_obs_conditioned_unet_mlp':
-            model = LatentDecoderObsConditionedUNetMLP(idm_model_path, latent_dim=latent_dim, video_length=args.horizon, latent_length=args.horizon-1, mlp_layers=10)
+            model = LatentDecoderObsConditionedUNetMLP(idm_model_path, 
+                                                       latent_dim=latent_dim, 
+                                                       video_length=args.horizon, 
+                                                       latent_length=args.horizon-1, 
+                                                       mlp_layers=10)
 
         model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
@@ -71,22 +86,65 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train action extraction model")
 
-    parser.add_argument('--architecture', '-a', type=str, default='direct_cnn_mlp', 
-                        choices=['direct_cnn_mlp', 
-                                 'direct_cnn_vit', 
-                                 'latent_cnn_unet', 
-                                 'latent_decoder_mlp', 
-                                 'latent_decoder_vit', 
-                                 'latent_decoder_obs_conditioned_unet_mlp'],
-                        help='Model architecture to train')
-    parser.add_argument('--datasets_path', '-dp', type=str, default=dp, help='Path to the datasets')
-    parser.add_argument('--latent_dim', '-ld', type=int, default=32, help='Latent dimension (sqrt of size)')
-    parser.add_argument('--epoch', '-e', type=int, default=1, help='Number of epochs to train')
-    parser.add_argument('--batch_size', '-b', type=int, default=b, help='Batch size')
-    parser.add_argument('--motion', '-m', action='store_true', help='Train only with motion')
-    parser.add_argument('--image_plus_motion', '-ipm', action='store_true', help='Add motion preprocess to training data')
-    parser.add_argument('--horizon', '-hr', type=int, default=2, help='Length of the video')
-    parser.add_argument('--idm_model_name', '-idm', type=str, default='', help='Path to pretrained latent IDM model')
+    parser.add_argument(
+        '--architecture', '-a', 
+        type=str, 
+        default='direct_cnn_mlp', 
+        choices=['direct_cnn_mlp', 
+                    'direct_cnn_vit', 
+                    'latent_cnn_unet', 
+                    'latent_decoder_mlp', 
+                    'latent_decoder_vit', 
+                    'latent_decoder_obs_conditioned_unet_mlp'],
+        help='Model architecture to train'
+    )
+    parser.add_argument(
+        '--datasets_path', '-dp', 
+        type=str, 
+        default=dp, 
+        help='Path to the datasets'
+    )
+    parser.add_argument(
+        '--latent_dim', '-ld', 
+        type=int, 
+        default=32, 
+        help='Latent dimension (sqrt of size)'
+    )
+    parser.add_argument(
+        '--epoch', '-e', 
+        type=int, 
+        default=1, 
+        help='Number of epochs to train'
+    )
+    parser.add_argument(
+        '--batch_size', '-b', 
+        type=int, 
+        default=b, 
+        help='Batch size'
+    )
+    parser.add_argument(
+        '--motion', 
+        '-m', 
+        action='store_true', 
+        help='Train only with motion'
+    )
+    parser.add_argument(
+        '--image_plus_motion', '-ipm', 
+        action='store_true', 
+        help='Add motion preprocess to training data'
+    )
+    parser.add_argument(
+        '--horizon', '-hr', 
+        type=int, 
+        default=2, 
+        help='Length of the video'
+    )
+    parser.add_argument(
+        '--idm_model_name', '-idm', 
+        type=str, 
+        default='', 
+        help='Path to pretrained latent IDM model'
+    )
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."

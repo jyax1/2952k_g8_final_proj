@@ -55,7 +55,7 @@ class Trainer:
 
                 running_loss += loss.item()
 
-                if i % 5 == 4:  # Update every 10 batches
+                if i % 5 == 4:  # Update every 5 batches
                     avg_loss = running_loss / 10
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0

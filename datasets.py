@@ -44,7 +44,7 @@ from torchvision.models.optical_flow import raft_large
 import sys
 
 import zarr
-from utils.dataset_utils import hdf5_to_zarr
+from utils.dataset_utils import hdf5_to_zarr, save_consecutive_images
 
 class DatasetVideo(Dataset):
     '''
@@ -248,6 +248,8 @@ class DatasetVideo2DeltaAction(Dataset):
 
         else:
             video = torch.cat(obs_seq, dim=0)
+
+        save_consecutive_images(video)
 
         return video, actions.float() # Will this cause performance issue?
     
