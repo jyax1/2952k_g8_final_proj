@@ -2,8 +2,8 @@ import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP
-from datasets import DatasetVideo2DeltaAction, DatasetVideo
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliaryTransformer
+from datasets import DatasetVideo2DeltaAction, DatasetVideo, DatasetVideo2VideoAndAction
 from trainer import Trainer
 from pathlib import Path
 import re
@@ -11,7 +11,7 @@ import re
 '''
 Temporary
 '''
-oscar = False
+oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88
@@ -60,14 +60,27 @@ def train(args):
                                                        video_length=args.horizon, 
                                                        latent_length=args.horizon-1, 
                                                        mlp_layers=10)
+        elif args.architecture == 'latent_decoder_aux_vit':
+            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
+            model = LatentDecoderAuxiliaryTransformer(idm_model_path, 
+                                                        fdm_model_path, 
+                                                        latent_dim=latent_dim, 
+                                                        video_length=args.horizon, 
+                                                        freeze_idm=args.freeze_idm, 
+                                                        freeze_fdm=args.freeze_fdm)
 
         model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
     # Instandiate datasets
-    if 'latent' in args.architecture and 'decoder' not in args.architecture:
+    if 'latent' in args.architecture and 'decoder' not in args.architecture and 'aux' not in args.architecture:
         train_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
                                             demo_percentage=0.9, cameras=['frontview_image'])
         validation_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
+                                                    demo_percentage=0.9, cameras=['frontview_image'], validation=True)
+    elif 'latent' in args.architecture and 'aux' in args.architecture:
+        train_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
+                                            demo_percentage=0.9, cameras=['frontview_image'])
+        validation_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
                                                     demo_percentage=0.9, cameras=['frontview_image'], validation=True)
     else:
         train_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
@@ -95,7 +108,8 @@ if __name__ == '__main__':
                     'latent_cnn_unet', 
                     'latent_decoder_mlp', 
                     'latent_decoder_vit', 
-                    'latent_decoder_obs_conditioned_unet_mlp'],
+                    'latent_decoder_obs_conditioned_unet_mlp',
+                    'latent_decoder_aux_vit'],
         help='Model architecture to train'
     )
     parser.add_argument(
@@ -145,12 +159,34 @@ if __name__ == '__main__':
         default='', 
         help='Path to pretrained latent IDM model'
     )
+    parser.add_argument(
+        '--fdm_model_name', '-fdm',
+        type=str,
+        default='',
+        help='Path to pretrained latent FDM model'
+    )
+    parser.add_argument(
+        '--freeze_idm', '-fidm',
+        action='store_true',
+        help='Freeze IDM model for auxiliary training'
+    )
+    parser.add_argument(
+        '--freeze_fdm', '-ffdm',
+        action='store_true',
+        help='Freeze FDM model for auxiliary training'
+    )
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
     assert args.horizon > 1, "Video length must be greater or equal to 2"
 
+    if args.freeze_idm or args.freeze_fdm:
+        assert 'aux' in args.architecture and 'latent_decoder' in args.architecture
+
     if 'latent_decoder' in args.architecture:
         assert args.idm_model_name != ''
+
+        if 'aux' in args.architecture:
+            assert args.fdm_model_name != ''
 
     train(args)

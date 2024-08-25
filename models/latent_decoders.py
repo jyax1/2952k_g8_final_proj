@@ -97,3 +97,59 @@ class LatentDecoderObsConditionedUNetMLP(nn.Module):
 
         return output
     
+
+class LatentDecoderAuxiliaryTransformer(nn.Module):
+    def __init__(self, 
+                 idm_model_path, 
+                 fdm_model_path, 
+                 latent_dim=16, 
+                 video_length=2, 
+                 num_heads=8, 
+                 num_layers=6, 
+                 hidden_dim=512, 
+                 freeze_idm=False, 
+                 freeze_fdm=False):
+        super(LatentDecoderAuxiliaryTransformer, self).__init__()
+
+        # Load and optionally freeze the pretrained IDM model
+        self.idm = IDM(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
+        self.idm.load_state_dict(torch.load(idm_model_path))
+        self.freeze_idm = freeze_idm
+        if freeze_idm:
+            for param in self.idm.parameters():
+                param.requires_grad = False
+
+        # Load and optionally freeze the pretrained FDM model
+        self.fdm = FDM(latent_dim=latent_dim, video_length=video_length-1, latent_length=video_length-1)
+        self.fdm.load_state_dict(torch.load(fdm_model_path))
+        self.freeze_fdm = freeze_fdm
+        if freeze_fdm:
+            for param in self.fdm.parameters():
+                param.requires_grad = False
+
+        # Define the transformer for action extraction
+        self.transformer = ActionTransformer(latent_dim=latent_dim, 
+                                             latent_length=video_length-1,
+                                             num_heads=num_heads, 
+                                             num_layers=num_layers, 
+                                             hidden_dim=hidden_dim, 
+                                             action_length=video_length-1)
+
+    def forward(self, image_sequence):
+        # Pass the image sequence through the IDM to get the feature map
+        feature_map = self.idm(image_sequence)
+
+        # Exclude the last image from the sequence
+        past_observations = image_sequence[:, :-3, :, :]
+
+        # Pass the reduced sequence and feature map to the FDM for reconstruction
+        reconstructed_image = self.fdm(feature_map, past_observations)
+
+        # Use the transformer to predict the action vector
+        action_vector = self.transformer(feature_map)
+
+        action_vector = action_vector.view(action_vector.shape[0], action_vector.shape[1], 1, 1).expand(-1, -1, 128, 128)
+
+        output = torch.cat((reconstructed_image, action_vector), dim=1)
+
+        return output
