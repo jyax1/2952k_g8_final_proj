@@ -7,7 +7,7 @@ from accelerate import Accelerator
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliaryTransformer
 import csv
 from tqdm import tqdm
 
@@ -95,7 +95,7 @@ class Trainer:
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        if isinstance(self.model, ActionExtractionViT):
+        elif isinstance(self.model, ActionExtractionViT):
             torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
             torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'a_vit_{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'd_cnn_vit_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
@@ -103,7 +103,7 @@ class Trainer:
                 for value in self.val_losses:
                     writer.writerow([value])
         
-        if isinstance(self.model, ActionExtractionCNNUNet):
+        elif isinstance(self.model, ActionExtractionCNNUNet):
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'idm_{self.model_name}-{epoch}.pth'))
             torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'fdm_{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'lat_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
@@ -111,26 +111,36 @@ class Trainer:
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        if isinstance(self.model, LatentDecoderMLP):
+        elif isinstance(self.model, LatentDecoderMLP):
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        if isinstance(self.model, LatentDecoderTransformer):
+        elif isinstance(self.model, LatentDecoderTransformer):
             torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        if isinstance(self.model, LatentDecoderObsConditionedUNetMLP):
+        elif isinstance(self.model, LatentDecoderObsConditionedUNetMLP):
             torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_unet-{epoch}.pth'))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
+
+        elif isinstance(self.model, LatentDecoderAuxiliaryTransformer):
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}.pth'))
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}_transformer-{epoch}.pth'))
+            with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                for value in self.val_losses:
+                    writer.writerow([value])
+
         else:
             print('Model not supported')

@@ -66,7 +66,8 @@
             "program": "train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
-            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fidm=False"]
+            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth",
+        "--datasets_path=/users/ysong135/scratch/datasets"]
         },
     ]
 }

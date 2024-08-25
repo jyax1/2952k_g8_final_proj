@@ -62,6 +62,8 @@ def train(args):
                                                        mlp_layers=10)
         elif args.architecture == 'latent_decoder_aux_vit':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
+            model_name = model_name + '_fidm' if args.freeze_idm else model_name
+            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
             model = LatentDecoderAuxiliaryTransformer(idm_model_path, 
                                                         fdm_model_path, 
                                                         latent_dim=latent_dim, 
