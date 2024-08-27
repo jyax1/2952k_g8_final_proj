@@ -11,12 +11,12 @@ import re
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets'
     b = 88
 else:
-    dp = '/home/yilong/Documents/videopredictor/datasets'
+    dp = '/home/yilong/Documents/datasets'
     b = 16
 '''
 Temporary
