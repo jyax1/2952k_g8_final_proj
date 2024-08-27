@@ -55,10 +55,10 @@ def train(args):
                                              video_length=args.horizon, 
                                              latent_length=args.horizon-1)
         elif args.architecture == 'latent_decoder_obs_conditioned_unet_mlp':
-            model = LatentDecoderObsConditionedUNetMLP(idm_model_path, 
-                                                       latent_dim=latent_dim, 
-                                                       video_length=args.horizon, 
-                                                       latent_length=args.horizon-1, 
+            model = LatentDecoderObsConditionedUNetMLP(idm_model_path,
+                                                       latent_dim=latent_dim,
+                                                       video_length=args.horizon,
+                                                       latent_length=args.horizon-1,
                                                        mlp_layers=10)
         elif args.architecture == 'latent_decoder_aux_separate_unet_vit':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--epoch', '-e', 
         type=int, 
-        default=100, 
+        default=1, 
         help='Number of epochs to train'
     )
     parser.add_argument(
@@ -213,4 +213,5 @@ if __name__ == '__main__':
         if 'aux' in args.architecture:
             assert args.fdm_model_name != ''
 
+    print(args)
     train(args)
