@@ -94,20 +94,20 @@ def train(args):
     # Instandiate datasets
     if 'latent' in args.architecture and 'decoder' not in args.architecture and 'aux' not in args.architecture:
         train_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=0.9, cameras=['frontview_image'])
+                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'])
         validation_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=0.9, cameras=['frontview_image'], validation=True)
+                                                    demo_percentage=.9, cameras=['frontview_image'], validation=True)
     elif 'latent' in args.architecture and 'aux' in args.architecture:
         train_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=0.9, cameras=['frontview_image'])
+                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'])
         validation_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=0.9, cameras=['frontview_image'], validation=True)
+                                                    demo_percentage=.9, cameras=['frontview_image'], validation=True)
     else:
         train_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                            demo_percentage=0.9, cameras=['frontview_image'],
+                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'],
                                             motion=args.motion, image_plus_motion=args.image_plus_motion)
         validation_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                                demo_percentage=0.9, cameras=['frontview_image'], validation=True, 
+                                                demo_percentage=.9, cameras=['frontview_image'], validation=True, 
                                                 motion=args.motion, image_plus_motion=args.image_plus_motion)
 
     # Instantiate the trainer
@@ -199,6 +199,12 @@ if __name__ == '__main__':
         action='store_true',
         help='Freeze FDM model for auxiliary training'
     )
+    parser.add_argument(
+        '--demo_percentage', '-dpc',
+        type=float,
+        default=0.9,
+        help='Percentage of demos (spread evenly across each task) to use for training'
+    )
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
@@ -213,5 +219,5 @@ if __name__ == '__main__':
         if 'aux' in args.architecture:
             assert args.fdm_model_name != ''
 
-    print(args)
+    print('Arguments:', args) # Check argument correctness in jobs
     train(args)

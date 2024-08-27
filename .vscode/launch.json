@@ -33,7 +33,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=16", "-ipm", "--horizon=2"]
+            "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=16", "-ipm", "--horizon=2", "-dpc=0.005"]
         },
         {
             "name": "train latent_cnn_unet",

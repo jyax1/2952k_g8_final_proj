@@ -55,27 +55,30 @@ class Trainer:
 
                 running_loss += loss.item()
 
-                if i % 5 == 4:  # Update progress bar every 5 batches
+                if i % 5 == 4:  # Update progress bar every 5 iterations
                     avg_loss = running_loss / 10
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
 
-                if i % 500 == 499: # Validate
+                if i % 500 == 499: # Validate every 500 iterations
                     val_loss = self.validate()
-                    print(f'Epoch [{epoch + 1}/{self.epochs}] Iteration [{i + 1}/{enumerate(self.train_loader)[0]}], Validation Loss: {val_loss:.4f}')
+                    print(f'Epoch [{epoch + 1}/{self.epochs}] Iteration [{i + 1}/{len(self.train_loader)}], Validation Loss: {val_loss:.4f}')
                     self.val_losses.append(val_loss)
 
-                if i % 2000 == 1999: # Save model
-                    self.save_model(epoch+1, i+1)
+                if i % 2000 == 1999: # Save model every 2000 iterations
+                    self.save_model(epoch + 1, i + 1)
                     self.val_losses = []
 
-
-                print(f'Epoch [{epoch + 1}/{self.epochs}] ended')
                 # Update tqdm progress bar
                 epoch_progress.update(1)
 
 
-            # Close the progress bar after the epoch ends
+            # Validate, save model and close the progress bar after the epoch ends
+            val_loss = self.validate()
+            print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
+            self.val_losses.append(f'Epoch [{epoch+1}/self.epochs], Validation Loss: {val_loss:.4f}')
+            self.save_model(epoch+1, len(self.train_loader))
+            self.val_losses = []
             epoch_progress.close()
 
     def validate(self):
