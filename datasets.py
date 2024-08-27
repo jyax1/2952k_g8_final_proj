@@ -106,9 +106,12 @@ class DatasetVideo(Dataset):
             for demo in demos:
                 data = root['data'][demo]
                 for camera in cameras:
-                    obs_frames = len(data['obs'][camera])
-                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                        self.sequence_paths.append((root, demo, i, task, camera))
+                    if camera in data['obs'].keys():
+                        obs_frames = len(data['obs'][camera])
+                        for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                            self.sequence_paths.append((root, demo, i, task, camera))
+                    else:
+                        print(f'camera {camera} not found in demo {demo}, file {zarr_file}')
 
         self.transform = video_transforms.Compose([
                 volume_transforms.ClipToTensor()
@@ -195,10 +198,12 @@ class DatasetVideo2DeltaAction(Dataset):
             for demo in demos:
                 data = root['data'][demo]
                 for camera in cameras:
-                    obs_frames = len(data['obs'][camera])
-                    #for i in range(2):
-                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                        self.sequence_paths.append((root, demo, i, task, camera))
+                    if camera in data['obs'].keys():
+                        obs_frames = len(data['obs'][camera])
+                        for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                            self.sequence_paths.append((root, demo, i, task, camera))
+                    else:
+                        print(f'camera {camera} not found in demo {demo}, file {zarr_file}')
 
         self.transform = video_transforms.Compose([
                 volume_transforms.ClipToTensor()
@@ -311,9 +316,12 @@ class DatasetVideo2VideoAndAction(Dataset):
             for demo in demos:
                 data = root['data'][demo]
                 for camera in cameras:
-                    obs_frames = len(data['obs'][camera])
-                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                        self.sequence_paths.append((root, demo, i, task, camera))
+                    if camera in data['obs'].keys():
+                        obs_frames = len(data['obs'][camera])
+                        for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                            self.sequence_paths.append((root, demo, i, task, camera))
+                    else:
+                        print(f'camera {camera} not found in demo {demo}, file {zarr_file}')
 
         self.transform = video_transforms.Compose([
                 volume_transforms.ClipToTensor()

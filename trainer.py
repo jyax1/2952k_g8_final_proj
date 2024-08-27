@@ -7,7 +7,7 @@ from accelerate import Accelerator
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliaryTransformer
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer
 import csv
 from tqdm import tqdm
 

@@ -2,7 +2,7 @@ import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliaryTransformer
+from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer, LatentDecoderAuxiliaryCombinedViT
 from datasets import DatasetVideo2DeltaAction, DatasetVideo, DatasetVideo2VideoAndAction
 from trainer import Trainer
 from pathlib import Path
@@ -13,7 +13,7 @@ Temporary
 '''
 oscar = True
 if oscar:
-    dp = '/users/ysong135/scratch/datasets'
+    dp = '/users/ysong135/scratch/datasets_debug'
     b = 88
 else:
     dp = '/home/yilong/Documents/videopredictor/datasets'
@@ -60,16 +60,34 @@ def train(args):
                                                        video_length=args.horizon, 
                                                        latent_length=args.horizon-1, 
                                                        mlp_layers=10)
-        elif args.architecture == 'latent_decoder_aux_vit':
+        elif args.architecture == 'latent_decoder_aux_separate_unet_vit':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
             model_name = model_name + '_fidm' if args.freeze_idm else model_name
             model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
-            model = LatentDecoderAuxiliaryTransformer(idm_model_path, 
+            model = LatentDecoderAuxiliarySeparateUNetTransformer(idm_model_path, 
                                                         fdm_model_path, 
                                                         latent_dim=latent_dim, 
                                                         video_length=args.horizon, 
                                                         freeze_idm=args.freeze_idm, 
                                                         freeze_fdm=args.freeze_fdm)
+        elif args.architecture == 'latent_decoder_aux_separate_unet_mlp':
+            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
+            model_name = model_name + '_fidm' if args.freeze_idm else model_name
+            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
+            model = LatentDecoderAuxiliarySeparateUNetMLP(idm_model_path, 
+                                                        fdm_model_path, 
+                                                        latent_dim=latent_dim, 
+                                                        video_length=args.horizon, 
+                                                        freeze_idm=args.freeze_idm, 
+                                                        freeze_fdm=args.freeze_fdm)
+        elif args.architecture == 'latent_decoder_aux_combined_vit':
+            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
+            model_name = model_name + '_fidm' if args.freeze_idm else model_name
+            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
+            model = LatentDecoderAuxiliaryCombinedViT(idm_model_path, 
+                                                        latent_dim=latent_dim, 
+                                                        video_length=args.horizon, 
+                                                        freeze_idm=args.freeze_idm)
 
         model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
 
@@ -111,7 +129,11 @@ if __name__ == '__main__':
                     'latent_decoder_mlp', 
                     'latent_decoder_vit', 
                     'latent_decoder_obs_conditioned_unet_mlp',
-                    'latent_decoder_aux_vit'],
+                    'latent_decoder_aux_separate_unet_mlp',
+                    'latent_decoder_aux_separate_unet_vit',
+                    'latent_decoder_aux_combined_unet_mlp',
+                    'latent_decoder_aux_combined_vit',
+        ],
         help='Model architecture to train'
     )
     parser.add_argument(
@@ -129,7 +151,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--epoch', '-e', 
         type=int, 
-        default=1, 
+        default=100, 
         help='Number of epochs to train'
     )
     parser.add_argument(
