@@ -4,6 +4,12 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        
+
+
+
+
+
         {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
@@ -60,14 +66,31 @@
             "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
         },
         {
-            "name": "train latent_decoder_aux_vit",
+            "name": "train latent_decoder_aux_separate_unet_vit",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_aux_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
-            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth",
-        "--datasets_path=/users/ysong135/scratch/datasets"]
+            "args": ["-a=latent_decoder_aux_separate_unet_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
+            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
+        },
+        {
+            "name": "train latent_decoder_aux_separate_unet_mlp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_decoder_aux_separate_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
+            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
+        },
+        {
+            "name": "train latent_decoder_aux_combined_vit",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_decoder_aux_combined_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
+            "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-20.pth"]
         },
     ]
 }
