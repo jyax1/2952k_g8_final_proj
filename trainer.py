@@ -55,25 +55,31 @@ class Trainer:
 
                 running_loss += loss.item()
 
-                if i % 5 == 4:  # Update every 5 batches
+                if i % 5 == 4:  # Update progress bar every 5 iterations
                     avg_loss = running_loss / 10
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
 
+                if i % 500 == 499: # Validate every 500 iterations
+                    val_loss = self.validate()
+                    print(f'Epoch [{epoch + 1}/{self.epochs}] Iteration [{i + 1}/{len(self.train_loader)}], Validation Loss: {val_loss:.4f}')
+                    self.val_losses.append(val_loss)
+
+                if i % 2000 == 1999: # Save model every 2000 iterations
+                    self.save_model(epoch + 1, i + 1)
+                    self.val_losses = []
+
                 # Update tqdm progress bar
                 epoch_progress.update(1)
 
-            # Close the progress bar after the epoch ends
-            epoch_progress.close()
 
-            # Validate
+            # Validate, save model and close the progress bar after the epoch ends
             val_loss = self.validate()
-            print(f'Epoch [{epoch + 1}/{self.epochs}] ended, Validation Loss: {val_loss:.4f}')
-            self.val_losses.append(val_loss)
-
-            if epoch % 10 == 9:
-                self.save_model(epoch + 1)
-                self.val_losses = []
+            print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
+            self.val_losses.append(f'Epoch [{epoch+1}/self.epochs], Validation Loss: {val_loss:.4f}')
+            self.save_model(epoch+1, len(self.train_loader))
+            self.val_losses = []
+            epoch_progress.close()
 
     def validate(self):
         self.model.eval()
@@ -86,61 +92,71 @@ class Trainer:
                 total_val_loss += loss.item()
         return total_val_loss / len(self.validation_loader)
 
-    def save_model(self, epoch):
+    def save_model(self, epoch, iteration):
         if isinstance(self.model, ActionExtractionCNN):
-            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
-            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'a_mlp_{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}-{iteration}.pth'))
+            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'a_mlp_{self.model_name}-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'd_cnn_mlp_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
         elif isinstance(self.model, ActionExtractionViT):
-            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}.pth'))
-            torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'a_vit_{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'f_conv_{self.model_name}-{epoch}-{iteration}.pth'))
+            torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'a_vit_{self.model_name}-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'd_cnn_vit_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
         
         elif isinstance(self.model, ActionExtractionCNNUNet):
-            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'idm_{self.model_name}-{epoch}.pth'))
-            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'fdm_{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'idm_{self.model_name}-{epoch}-{iteration}.pth'))
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'fdm_{self.model_name}-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'lat_{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
         elif isinstance(self.model, LatentDecoderMLP):
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
         elif isinstance(self.model, LatentDecoderTransformer):
-            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
         elif isinstance(self.model, LatentDecoderObsConditionedUNetMLP):
-            torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_unet-{epoch}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
+            torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_unet-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
 
-        elif isinstance(self.model, LatentDecoderAuxiliaryTransformer):
-            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}.pth'))
-            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}.pth'))
-            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}_transformer-{epoch}.pth'))
+        elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetTransformer):
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}_transformer-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 for value in self.val_losses:
                     writer.writerow([value])
+
+        elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetMLP):
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                for value in self.val_losses:
+                    writer.writerow([value])
+
 
         else:
             print('Model not supported')
