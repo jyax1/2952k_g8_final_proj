@@ -26,6 +26,8 @@ def train(args):
 
     results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
     model_name = f'{args.architecture}_lat_{args.latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
+    if 'vit' in args.architecture:
+        model_name += f'_vps_{args.vit_patch_size}'
 
     # Instantiate model
     if args.architecture == 'direct_cnn_mlp':
@@ -37,7 +39,8 @@ def train(args):
         model = ActionExtractionViT(latent_dim=args.latent_dim, 
                                     video_length=args.horizon, 
                                     motion=args.motion, 
-                                    image_plus_motion=args.image_plus_motion)
+                                    image_plus_motion=args.image_plus_motion,
+                                    vit_patch_size=args.vit_patch_size)
     elif args.architecture == 'latent_cnn_unet':
         model = ActionExtractionCNNUNet(latent_dim=args.latent_dim, video_length=args.horizon) # doesn't support motion
     elif 'latent_decoder' in args.architecture:
@@ -53,7 +56,8 @@ def train(args):
             model = LatentDecoderTransformer(idm_model_path, 
                                              latent_dim=latent_dim, 
                                              video_length=args.horizon, 
-                                             latent_length=args.horizon-1)
+                                             latent_length=args.horizon-1,
+                                             vit_patch_size=args.vit_patch_size)
         elif args.architecture == 'latent_decoder_obs_conditioned_unet_mlp':
             model = LatentDecoderObsConditionedUNetMLP(idm_model_path,
                                                        latent_dim=latent_dim,
@@ -69,7 +73,8 @@ def train(args):
                                                         latent_dim=latent_dim, 
                                                         video_length=args.horizon, 
                                                         freeze_idm=args.freeze_idm, 
-                                                        freeze_fdm=args.freeze_fdm)
+                                                        freeze_fdm=args.freeze_fdm,
+                                                        vit_patch_size=args.vit_patch_size)
         elif args.architecture == 'latent_decoder_aux_separate_unet_mlp':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
             model_name = model_name + '_fidm' if args.freeze_idm else model_name
@@ -204,6 +209,12 @@ if __name__ == '__main__':
         type=float,
         default=0.9,
         help='Percentage of demos (spread evenly across each task) to use for training'
+    )
+    parser.add_argument(
+        '--vit_patch_size', '-vps',
+        type=int,
+        default=16,
+        help='Patch size to use for the ViT if architecture involves a ViT component'
     )
 
     args = parser.parse_args()

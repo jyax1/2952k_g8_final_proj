@@ -39,7 +39,7 @@ class LatentDecoderMLP(nn.Module):
     
 
 class LatentDecoderTransformer(nn.Module):
-    def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=1, num_heads=8, num_layers=6, hidden_dim=512):
+    def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=1, vit_patch_size=1, num_heads=8, num_layers=6, hidden_dim=512):
         super(LatentDecoderTransformer, self).__init__()
 
         # Load and freeze the pre-trained IDM model
@@ -54,7 +54,8 @@ class LatentDecoderTransformer(nn.Module):
                                              num_heads=num_heads, 
                                              num_layers=num_layers, 
                                              hidden_dim=hidden_dim, 
-                                             action_length=video_length-1)
+                                             action_length=video_length-1,
+                                             patch_size=vit_patch_size)
 
     def forward(self, x):
         idm_output = self.idm(x)
@@ -105,6 +106,7 @@ class LatentDecoderAuxiliarySeparateUNetTransformer(nn.Module):
                  fdm_model_path, 
                  latent_dim=16, 
                  video_length=2, 
+                 vit_patch_size=1,
                  num_heads=8, 
                  num_layers=6, 
                  hidden_dim=512, 
@@ -134,7 +136,8 @@ class LatentDecoderAuxiliarySeparateUNetTransformer(nn.Module):
                                              num_heads=num_heads, 
                                              num_layers=num_layers, 
                                              hidden_dim=hidden_dim, 
-                                             action_length=video_length-1)
+                                             action_length=video_length-1,
+                                             patch_size=vit_patch_size)
 
     def forward(self, image_sequence):
         # Pass the image sequence through the IDM to get the feature map
