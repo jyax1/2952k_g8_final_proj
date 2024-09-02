@@ -1,13 +1,8 @@
 import argparse
 from utils.utils import *
-from architectures.direct_cnn_mlp import ActionExtractionCNN
-from architectures.direct_cnn_vit import ActionExtractionViT
-from architectures.latent_cnn_unet import ActionExtractionCNNUNet
-from architectures.direct_resnet_mlp import ActionExtractionResNet
-from architectures.latent_decoders import *
 from trainer import Trainer
 from pathlib import Path
-import re
+from config import *
 
 '''
 Temporary
@@ -29,13 +24,44 @@ def train(args):
     model_name = f'{args.architecture}_lat{args.latent_dim}_m{args.motion}_ipm{args.image_plus_motion}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}'
 
     # Instantiate model
-    model = load_model(args.architecture)
+    model = load_model(
+        args.architecture,
+        horizon=args.horizon,
+        results_path=results_path,
+        latent_dim=args.latent_dim,
+        motion=args.motion,
+        image_plus_motion=args.image_plus_motion,
+        vit_patch_size=args.vit_patch_size,
+        resnet_layers_num=args.resnet_layers_num,
+        idm_model_name=args.idm_model_name,
+        fdm_model_name=args.fdm_model_name,
+        freeze_idm=args.freeze_idm,
+        freeze_fdm=args.freeze_fdm,
+        )
 
     # Instandiate datasets
-    train_set, validation_set = load_datasets(args.architecture, args.datasets_path, cameras=['frontview_image'])
+    train_set, validation_set = load_datasets(
+        args.architecture, 
+        args.datasets_path, 
+        train=True,
+        validation=True,
+        horizon=args.horizon,
+        demo_percentage=args.demo_percentage,
+        cameras=['frontview_image'],
+        motion=args.motion,
+        image_plus_motion=args.image_plus_motion
+        )
 
     # Instantiate the trainer
-    trainer = Trainer(model, train_set, validation_set, results_path=results_path, model_name=model_name, batch_size=args.batch_size, epochs=args.epoch)
+    trainer = Trainer(
+        model, 
+        train_set, 
+        validation_set, 
+        results_path=results_path, 
+        model_name=model_name, 
+        batch_size=args.batch_size, 
+        epochs=args.epoch
+        )
 
     # Train the model
     trainer.train()
@@ -47,18 +73,7 @@ if __name__ == '__main__':
         '--architecture', '-a', 
         type=str, 
         default='direct_cnn_mlp', 
-        choices=['direct_cnn_mlp', 
-                    'direct_cnn_vit',
-                    'direct_resnet_mlp', 
-                    'latent_cnn_unet', 
-                    'latent_decoder_mlp', 
-                    'latent_decoder_vit', 
-                    'latent_decoder_obs_conditioned_unet_mlp',
-                    'latent_decoder_aux_separate_unet_mlp',
-                    'latent_decoder_aux_separate_unet_vit',
-                    'latent_decoder_aux_combined_unet_mlp',
-                    'latent_decoder_aux_combined_vit',
-        ],
+        choices=ARCHITECTURES,
         help='Model architecture to train'
     )
     parser.add_argument(
@@ -70,7 +85,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--latent_dim', '-ld', 
         type=int, 
-        default=32, 
+        default=32,
+        choices=VALID_LATENT_DIMS,
         help='Latent dimension (sqrt of size)'
     )
     parser.add_argument(
