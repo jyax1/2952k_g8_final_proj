@@ -33,7 +33,15 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=16", "-ipm", "--horizon=2", "-dpc=0.005", "-vps=2"]
+            "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=50", "-ipm", "--horizon=2", "-vps=1"]
+        },
+        {
+            "name": "train direct_resnet_mlp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=18", "--horizon=2"]
         },
         {
             "name": "train latent_cnn_unet",

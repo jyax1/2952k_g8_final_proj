@@ -2,6 +2,7 @@ import argparse
 from models.direct_cnn_mlp import ActionExtractionCNN
 from models.direct_cnn_vit import ActionExtractionViT
 from models.latent_cnn_unet import ActionExtractionCNNUNet
+from models.direct_resnet_mlp import ActionExtractionResNet
 from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer, LatentDecoderAuxiliaryCombinedViT
 from datasets import DatasetVideo2DeltaAction, DatasetVideo, DatasetVideo2VideoAndAction
 from trainer import Trainer
@@ -11,7 +12,7 @@ import re
 '''
 Temporary
 '''
-oscar = False
+oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
     b = 88
@@ -25,7 +26,7 @@ Temporary
 def train(args):
 
     results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
-    model_name = f'{args.architecture}_lat_{args.latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
+    model_name = f'{args.architecture}_lat_{args.latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}_res_{args.resnet_layers_num}'
     if 'vit' in args.architecture:
         model_name += f'_vps_{args.vit_patch_size}'
 
@@ -41,6 +42,9 @@ def train(args):
                                     motion=args.motion, 
                                     image_plus_motion=args.image_plus_motion,
                                     vit_patch_size=args.vit_patch_size)
+    elif args.architecture == 'direct_resnet_mlp':
+        resnet_version = 'resnet' + str(args.resnet_layers_num)
+        model = ActionExtractionResNet(resnet_version, action_length=args.horizon-1, num_mlp_layers=3)
     elif args.architecture == 'latent_cnn_unet':
         model = ActionExtractionCNNUNet(latent_dim=args.latent_dim, video_length=args.horizon) # doesn't support motion
     elif 'latent_decoder' in args.architecture:
@@ -66,8 +70,6 @@ def train(args):
                                                        mlp_layers=10)
         elif args.architecture == 'latent_decoder_aux_separate_unet_vit':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model_name = model_name + '_fidm' if args.freeze_idm else model_name
-            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
             model = LatentDecoderAuxiliarySeparateUNetTransformer(idm_model_path, 
                                                         fdm_model_path, 
                                                         latent_dim=latent_dim, 
@@ -77,8 +79,6 @@ def train(args):
                                                         vit_patch_size=args.vit_patch_size)
         elif args.architecture == 'latent_decoder_aux_separate_unet_mlp':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model_name = model_name + '_fidm' if args.freeze_idm else model_name
-            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
             model = LatentDecoderAuxiliarySeparateUNetMLP(idm_model_path, 
                                                         fdm_model_path, 
                                                         latent_dim=latent_dim, 
@@ -87,14 +87,14 @@ def train(args):
                                                         freeze_fdm=args.freeze_fdm)
         elif args.architecture == 'latent_decoder_aux_combined_vit':
             fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model_name = model_name + '_fidm' if args.freeze_idm else model_name
-            model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
             model = LatentDecoderAuxiliaryCombinedViT(idm_model_path, 
                                                         latent_dim=latent_dim, 
                                                         video_length=args.horizon, 
                                                         freeze_idm=args.freeze_idm)
 
         model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
+        model_name = model_name + '_fidm' if args.freeze_idm else model_name
+        model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
 
     # Instandiate datasets
     if 'latent' in args.architecture and 'decoder' not in args.architecture and 'aux' not in args.architecture:
@@ -129,7 +129,8 @@ if __name__ == '__main__':
         type=str, 
         default='direct_cnn_mlp', 
         choices=['direct_cnn_mlp', 
-                    'direct_cnn_vit', 
+                    'direct_cnn_vit',
+                    'direct_resnet_mlp', 
                     'latent_cnn_unet', 
                     'latent_decoder_mlp', 
                     'latent_decoder_vit', 
@@ -166,8 +167,7 @@ if __name__ == '__main__':
         help='Batch size'
     )
     parser.add_argument(
-        '--motion', 
-        '-m', 
+        '--motion', '-m', 
         action='store_true', 
         help='Train only with motion'
     )
@@ -216,6 +216,13 @@ if __name__ == '__main__':
         default=16,
         help='Patch size to use for the ViT if architecture involves a ViT component'
     )
+    parser.add_argument(
+        '--resnet_layers_num', '-rln',
+        type=int,
+        default=0,
+        choices=[0, 18, 50],
+        help='Number of layers if direct_resnet_mlp architecture is chosen'
+    )
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
@@ -229,6 +236,9 @@ if __name__ == '__main__':
 
         if 'aux' in args.architecture:
             assert args.fdm_model_name != ''
+    
+    if 'resnet' in args.architecture:
+        assert args.resnet_layers_num == 18 or args.resnet_layers_num == 50, "Choose either ResNet-18 or ResNet-50"
 
     print('Arguments:', args) # Check argument correctness in jobs
     train(args)
