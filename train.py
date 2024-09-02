@@ -1,5 +1,5 @@
 import argparse
-from utils.utils import load_datasets
+from utils.utils import *
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_cnn_unet import ActionExtractionCNNUNet
@@ -26,78 +26,14 @@ Temporary
 def train(args):
 
     results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
-    model_name = f'{args.architecture}_lat_{args.latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}_res_{args.resnet_layers_num}'
-    if 'vit' in args.architecture:
-        model_name += f'_vps_{args.vit_patch_size}'
+    model_name = f'{args.architecture}_lat{args.latent_dim}_m{args.motion}_ipm{args.image_plus_motion}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}'
 
     # Instantiate model
-    if args.architecture == 'direct_cnn_mlp':
-        model = ActionExtractionCNN(latent_dim=args.latent_dim, 
-                                    video_length=args.horizon, 
-                                    motion=args.motion, 
-                                    image_plus_motion=args.image_plus_motion)
-    elif args.architecture == 'direct_cnn_vit':
-        model = ActionExtractionViT(latent_dim=args.latent_dim, 
-                                    video_length=args.horizon, 
-                                    motion=args.motion, 
-                                    image_plus_motion=args.image_plus_motion,
-                                    vit_patch_size=args.vit_patch_size)
-    elif args.architecture == 'direct_resnet_mlp':
-        resnet_version = 'resnet' + str(args.resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=args.horizon-1, num_mlp_layers=3)
-    elif args.architecture == 'latent_cnn_unet':
-        model = ActionExtractionCNNUNet(latent_dim=args.latent_dim, video_length=args.horizon) # doesn't support motion
-    elif 'latent_decoder' in args.architecture:
-        idm_model_path = str(Path(results_path)) + f'/{args.idm_model_name}'
-        latent_dim = int(re.search(r'lat_(.*?)_', args.idm_model_name).group(1))
-        if args.architecture == 'latent_decoder_mlp':
-            model = LatentDecoderMLP(idm_model_path, 
-                                     latent_dim=latent_dim, 
-                                     video_length=args.horizon, 
-                                     latent_length=args.horizon-1, 
-                                     mlp_layers=10)
-        elif args.architecture == 'latent_decoder_vit':
-            model = LatentDecoderTransformer(idm_model_path, 
-                                             latent_dim=latent_dim, 
-                                             video_length=args.horizon, 
-                                             latent_length=args.horizon-1,
-                                             vit_patch_size=args.vit_patch_size)
-        elif args.architecture == 'latent_decoder_obs_conditioned_unet_mlp':
-            model = LatentDecoderObsConditionedUNetMLP(idm_model_path,
-                                                       latent_dim=latent_dim,
-                                                       video_length=args.horizon,
-                                                       latent_length=args.horizon-1,
-                                                       mlp_layers=10)
-        elif args.architecture == 'latent_decoder_aux_separate_unet_vit':
-            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model = LatentDecoderAuxiliarySeparateUNetTransformer(idm_model_path, 
-                                                        fdm_model_path, 
-                                                        latent_dim=latent_dim, 
-                                                        video_length=args.horizon, 
-                                                        freeze_idm=args.freeze_idm, 
-                                                        freeze_fdm=args.freeze_fdm,
-                                                        vit_patch_size=args.vit_patch_size)
-        elif args.architecture == 'latent_decoder_aux_separate_unet_mlp':
-            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model = LatentDecoderAuxiliarySeparateUNetMLP(idm_model_path, 
-                                                        fdm_model_path, 
-                                                        latent_dim=latent_dim, 
-                                                        video_length=args.horizon, 
-                                                        freeze_idm=args.freeze_idm, 
-                                                        freeze_fdm=args.freeze_fdm)
-        elif args.architecture == 'latent_decoder_aux_combined_vit':
-            fdm_model_path = str(Path(results_path)) + f'/{args.fdm_model_name}'
-            model = LatentDecoderAuxiliaryCombinedViT(idm_model_path, 
-                                                        latent_dim=latent_dim, 
-                                                        video_length=args.horizon, 
-                                                        freeze_idm=args.freeze_idm)
-
-        model_name = f'{args.architecture}_lat_{latent_dim}_m_{args.motion}_ipm_{args.image_plus_motion}'
-        model_name = model_name + '_fidm' if args.freeze_idm else model_name
-        model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
+    model = load_model(args.architecture)
 
     # Instandiate datasets
     train_set, validation_set = load_datasets(args.architecture, args.datasets_path, cameras=['frontview_image'])
+
     # Instantiate the trainer
     trainer = Trainer(model, train_set, validation_set, results_path=results_path, model_name=model_name, batch_size=args.batch_size, epochs=args.epoch)
 
