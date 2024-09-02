@@ -1,10 +1,10 @@
 import argparse
+from utils.utils import load_datasets
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_cnn_unet import ActionExtractionCNNUNet
 from architectures.direct_resnet_mlp import ActionExtractionResNet
-from architectures.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer, LatentDecoderAuxiliaryCombinedViT
-from datasets import DatasetVideo2DeltaAction, DatasetVideo, DatasetVideo2VideoAndAction
+from architectures.latent_decoders import *
 from trainer import Trainer
 from pathlib import Path
 import re
@@ -97,24 +97,7 @@ def train(args):
         model_name = model_name + '_ffdm' if args.freeze_fdm else model_name
 
     # Instandiate datasets
-    if 'latent' in args.architecture and 'decoder' not in args.architecture and 'aux' not in args.architecture:
-        train_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'])
-        validation_set = DatasetVideo(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=['frontview_image'], validation=True)
-    elif 'latent' in args.architecture and 'aux' in args.architecture:
-        train_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'])
-        validation_set = DatasetVideo2VideoAndAction(path=args.datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=['frontview_image'], validation=True)
-    else:
-        train_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                            demo_percentage=args.demo_percentage, cameras=['frontview_image'],
-                                            motion=args.motion, image_plus_motion=args.image_plus_motion)
-        validation_set = DatasetVideo2DeltaAction(path=args.datasets_path, video_length=args.horizon, 
-                                                demo_percentage=.9, cameras=['frontview_image'], validation=True, 
-                                                motion=args.motion, image_plus_motion=args.image_plus_motion)
-
+    train_set, validation_set = load_datasets(args.architecture, args.datasets_path, cameras=['frontview_image'])
     # Instantiate the trainer
     trainer = Trainer(model, train_set, validation_set, results_path=results_path, model_name=model_name, batch_size=args.batch_size, epochs=args.epoch)
 
