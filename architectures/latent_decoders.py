@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from models.latent_cnn_unet import IDM, FDM
-from models.direct_cnn_vit import ActionTransformer, ActionTransformerMLP
+from architectures.latent_cnn_unet import IDM, FDM
+from architectures.direct_cnn_vit import ActionTransformer, ActionTransformerMLP
 
 class LatentDecoderMLP(nn.Module):
     def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=1, mlp_layers=3):

@@ -4,10 +4,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
-from models.direct_cnn_mlp import ActionExtractionCNN
-from models.direct_cnn_vit import ActionExtractionViT
-from models.latent_cnn_unet import ActionExtractionCNNUNet
-from models.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer
+from architectures.direct_cnn_mlp import ActionExtractionCNN
+from architectures.direct_cnn_vit import ActionExtractionViT
+from architectures.latent_cnn_unet import ActionExtractionCNNUNet
+from architectures.latent_decoders import LatentDecoderMLP, LatentDecoderTransformer, LatentDecoderObsConditionedUNetMLP, LatentDecoderAuxiliarySeparateUNetMLP, LatentDecoderAuxiliarySeparateUNetTransformer
 import csv
 from tqdm import tqdm
 

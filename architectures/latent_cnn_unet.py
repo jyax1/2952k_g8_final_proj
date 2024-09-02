@@ -6,7 +6,7 @@ follow the paper "Learning to Act without Actions" to create latent action extra
 import torch.nn as nn
 import numpy as np
 
-from models.direct_cnn_mlp import FramesConvolution as IDM
+from architectures.direct_cnn_mlp import FramesConvolution as IDM
 
 class FiLM(nn.Module):
     def __init__(self, latent_length, unet_latent_dim=32, unet_latent_length=256):

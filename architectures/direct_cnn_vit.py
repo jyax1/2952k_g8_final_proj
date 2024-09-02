@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from models.direct_cnn_mlp import FramesConvolution
+from architectures.direct_cnn_mlp import FramesConvolution
 
 class ActionTransformerMLP(nn.Module):
     def __init__(self, hidden_dim=512, action_length=1):
