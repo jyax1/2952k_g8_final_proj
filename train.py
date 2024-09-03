@@ -1,7 +1,6 @@
 import argparse
 from utils.utils import *
 from trainer import Trainer
-from pathlib import Path
 from config import *
 
 '''
@@ -11,23 +10,24 @@ oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
     b = 88
+    rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/datasets'
     b = 16
+    rp = '/home/yilong/Documents/action_extractor/results'
 '''
 Temporary
 '''
 
 def train(args):
 
-    results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
     model_name = f'{args.architecture}_lat{args.latent_dim}_m{args.motion}_ipm{args.image_plus_motion}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}'
 
     # Instantiate model
     model = load_model(
         args.architecture,
         horizon=args.horizon,
-        results_path=results_path,
+        results_path=args.results_path,
         latent_dim=args.latent_dim,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
@@ -57,7 +57,7 @@ def train(args):
         model, 
         train_set, 
         validation_set, 
-        results_path=results_path, 
+        results_path=args.results_path, 
         model_name=model_name, 
         batch_size=args.batch_size, 
         epochs=args.epoch
@@ -81,6 +81,12 @@ if __name__ == '__main__':
         type=str, 
         default=dp, 
         help='Path to the datasets'
+    )
+    parser.add_argument(
+        '--results_path', '-rp', 
+        type=str, 
+        default=rp, 
+        help='Path to where the results should be stored'
     )
     parser.add_argument(
         '--latent_dim', '-ld', 
