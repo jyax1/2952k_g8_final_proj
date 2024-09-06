@@ -33,6 +33,7 @@ run()
     export train_args="
     --architecture=${architecture}
     --datasets_path=${dataset_path}
+    --results_path=${results_path}
     --latent_dim=${latent_dim}
     --epoch=${epoch}
     --batch_size=${batch_size}
@@ -64,11 +65,13 @@ date=$(date +%m%d)
 # Parameters for the jobs
 demo_percentage=.9
 dataset_path="/users/ysong135/scratch/datasets/"
+results_path="/users/ysong135/Documents/action_extractor/results"
 epoch=20
 batch_size=256
 horizon=4
-motion="--motion"
+motion=""
 image_plus_motion=""
+latent_dim=32
 idm_model_name="latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_idm-1-6000.pth"
 fdm_model_name="latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_fdm-1-6000.pth"
 freeze_idm=""
@@ -78,22 +81,40 @@ resnet_layers_num=18
 
 # Job 1: latent_decoder_mlp
 architecture="latent_decoder_mlp"
-latent_dim=32
 train_only
 
 # Job 2: latent_decoder_vit
 architecture="latent_decoder_vit"
-latent_dim=16
-vit_patch_size=8
+vit_patch_size=2
 train_only
 
 # Job 3: latent_decoder_aux_separate_unet_mlp
 architecture="latent_decoder_aux_separate_unet_mlp"
-latent_dim=8
+train_only
+
+freeze_idm="-fidm"
+train_only
+
+freeze_fdm="-ffdm"
+train_only
+
+freeze_idm=""
+train_only
+
+architecture="latent_decoder_aux_separate_unet_vit"
+train_only
+
+freeze_idm="-fidm"
+train_only
+
+freeze_fdm="-ffdm"
+train_only
+
+freeze_idm=""
 train_only
 
 # Job 4: latent_decoder_aux_combined_vit
-architecture="latent_decoder_aux_combined_vit"
-latent_dim=16
-vit_patch_size=8
-train_only
+# architecture="latent_decoder_aux_combined_vit"
+# latent_dim=32
+# vit_patch_size=2
+# train_only

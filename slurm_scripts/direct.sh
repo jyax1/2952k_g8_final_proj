@@ -84,7 +84,6 @@ train_only
 # Job 2: direct_cnn_vit
 architecture="direct_cnn_vit"
 latent_dim=32
-vit_patch_size=8
 train_only
 
 # Job 3, 4: direct_resnet_mlp
