@@ -81,7 +81,7 @@ def load_model(architecture,
         model = ActionExtractionCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif 'latent_decoder' in architecture:
         idm_model_path = str(Path(results_path)) + f'/{idm_model_name}'
-        latent_dim = int(re.search(r'lat_(.*?)_', idm_model_name).group(1))
+        latent_dim = int(re.search(r'_lat(.*?)_', idm_model_name).group(1))
         if architecture == 'latent_decoder_mlp':
             model = LatentDecoderMLP(idm_model_path, 
                                      latent_dim=latent_dim, 

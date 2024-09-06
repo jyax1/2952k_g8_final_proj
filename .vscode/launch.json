@@ -65,7 +65,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-1-8000.pth"]
+            "args": ["-a=latent_decoder_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_idm-1-6000.pth"]
         },
         {
             "name": "train latent_decoder_vit",
