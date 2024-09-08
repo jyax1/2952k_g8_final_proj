@@ -44,6 +44,7 @@ run()
     $image_plus_motion
     --idm_model_name=${idm_model_name}
     --fdm_model_name=${fdm_model_name}
+    --cameras=${cameras}
     $freeze_idm
     $freeze_fdm
     "
@@ -75,6 +76,8 @@ freeze_idm=""
 freeze_fdm=""
 vit_patch_size=2
 resnet_layers_num=18
+
+cameras="sideview_image,frontview_image"
 
 # Job 1: direct_cnn_mlp
 architecture="direct_cnn_mlp"

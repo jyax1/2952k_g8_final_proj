@@ -68,7 +68,7 @@ dataset_path="/users/ysong135/scratch/datasets/"
 results_path="/users/ysong135/Documents/action_extractor/results"
 epoch=20
 batch_size=256
-horizon=4
+horizon=2
 motion=""
 image_plus_motion=""
 latent_dim=32
@@ -79,14 +79,14 @@ freeze_fdm=""
 vit_patch_size=16
 resnet_layers_num=18
 
-# Job 1: latent_decoder_mlp
-architecture="latent_decoder_mlp"
-train_only
+# # Job 1: latent_decoder_mlp
+# architecture="latent_decoder_mlp"
+# train_only
 
-# Job 2: latent_decoder_vit
-architecture="latent_decoder_vit"
-vit_patch_size=2
-train_only
+# # Job 2: latent_decoder_vit
+# architecture="latent_decoder_vit"
+# vit_patch_size=2
+# train_only
 
 # Job 3: latent_decoder_aux_separate_unet_mlp
 architecture="latent_decoder_aux_separate_unet_mlp"

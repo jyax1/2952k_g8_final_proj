@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2"]
+            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=frontview_image"]
         },
         {
             "name": "train direct_cnn_mlp",

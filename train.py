@@ -21,7 +21,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'{args.architecture}_lat{args.latent_dim}_m{args.motion}_ipm{args.image_plus_motion}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}'
+    model_name = f'''{args.architecture}_cam{args.cameras}_emb{args.embodiments}_lat{args.latent_dim}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}_{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -47,7 +47,7 @@ def train(args):
         validation=True,
         horizon=args.horizon,
         demo_percentage=args.demo_percentage,
-        cameras=['frontview_image'],
+        cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion
         )
@@ -164,6 +164,24 @@ if __name__ == '__main__':
         choices=[0, 18, 50],
         help='Number of layers if direct_resnet_mlp architecture is chosen'
     )
+    parser.add_argument(
+        '--note',
+        type=str,
+        default='',
+        help='Custom note added to the end of the model name'
+    )
+    parser.add_argument(
+        '--cameras', '-c',
+        type=str,
+        default='frontview_image',
+        help='Comma separated list of camera angles to be used for training'
+    )
+    parser.add_argument(
+        '--embodiments', '-emb',
+        type=str,
+        default='',
+        help='Comma separated list of embodiments to be used for training'
+    )
 
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
@@ -180,6 +198,9 @@ if __name__ == '__main__':
     
     if 'resnet' in args.architecture:
         assert args.resnet_layers_num == 18 or args.resnet_layers_num == 50, "Choose either ResNet-18 or ResNet-50"
+
+    args.cameras = args.cameras.split(',')
+    args.embodiments = args.embodiments.split(',')
 
     print('Arguments:', args) # Check argument correctness in jobs
     train(args)
