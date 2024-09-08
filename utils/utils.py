@@ -7,6 +7,24 @@ from architectures.latent_decoders import *
 import re
 from pathlib import Path
 
+def center_crop(tensor, output_size=112):
+    '''
+    Temporary function to match input size of DINOv2
+    '''
+    # Ensure the input tensor is of shape [n, 3, 128, 128]
+    assert tensor.ndim == 4 and tensor.shape[1] == 3 and tensor.shape[2] == 128 and tensor.shape[3] == 128, \
+    "Input tensor must be of shape [n, 3, 128, 128]"
+
+    # Calculate the starting points for the crop
+    crop_size = output_size
+    h_start = (tensor.shape[2] - crop_size) // 2
+    w_start = (tensor.shape[3] - crop_size) // 2
+
+    # Perform the crop
+    cropped_tensor = tensor[:, :, h_start:h_start + crop_size, w_start:w_start + crop_size]
+    
+    return cropped_tensor
+
 
 def load_datasets(
         architecture, 
@@ -61,7 +79,8 @@ def load_model(architecture,
                idm_model_name,
                fdm_model_name,
                freeze_idm,
-               freeze_fdm
+               freeze_fdm,
+               dinov2
 ):
     if architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_dim=latent_dim, 
@@ -76,7 +95,7 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=3)
+        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=3, dinov2=dinov2)
     elif architecture == 'latent_cnn_unet':
         model = ActionExtractionCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif 'latent_decoder' in architecture:

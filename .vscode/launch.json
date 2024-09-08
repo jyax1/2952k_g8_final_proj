@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=frontview_image"]
+            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=sideview_image"]
         },
         {
             "name": "train direct_cnn_mlp",
@@ -49,7 +49,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=2"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=2", "--dinov2=dinov2_vits14_reg"]
         },
         {
             "name": "train latent_cnn_unet",
