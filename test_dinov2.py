@@ -9,8 +9,8 @@ from PIL import Image
 
 
 def visualize_pca():
-    patch_h = 40
-    patch_w = 40
+    patch_h = 4
+    patch_w = 4
     # feat_dim = 384 # vits14
     # feat_dim = 768 # vitb14
     # feat_dim = 1024 # vitl14
@@ -35,7 +35,7 @@ def visualize_pca():
     features = torch.zeros(2, patch_h * patch_w, feat_dim)
     imgs_tensor = torch.zeros(2, 3, patch_h * 14, patch_w * 14)
     for i in range(2):
-        img_path = f'dino_test_imgs/{i+1}.png'
+        img_path = f'dino_test_imgs/{i}.png'
         img = Image.open(img_path).convert('RGB')
         imgs_tensor[i] = transform(img)[:3]
     with torch.no_grad():
@@ -45,7 +45,7 @@ def visualize_pca():
     # PCA for feature inferred
     from sklearn.decomposition import PCA
 
-    features = features.reshape(4 * patch_h * patch_w, feat_dim)
+    features = features.reshape(2 * patch_h * patch_w, feat_dim)
 
     pca = PCA(n_components=3)
     pca.fit(features)
@@ -64,8 +64,8 @@ def visualize_pca():
     # uncomment below to plot the first pca component
     pca_features[:, 0] = (pca_features[:, 0] - pca_features[:, 0].min()) / (pca_features[:, 0].max() - pca_features[:, 0].min())
     for i in range(2):
-        plt.subplot(2, 2, i+1)
-        plt.imshow(pca_features[i * patch_h * patch_w: (i+1) * patch_h * patch_w, 0].reshape(patch_h, patch_w))
+        plt.subplot(2, 2, i)
+        plt.imshow(pca_features[i * patch_h * patch_w: (i) * patch_h * patch_w, 0].reshape(patch_h, patch_w))
     plt.show()
     plt.close()
 
@@ -75,8 +75,8 @@ def visualize_pca():
 
     # plot the pca_features_bg
     for i in range(2):
-        plt.subplot(2, 2, i+1)
-        plt.imshow(pca_features_bg[i * patch_h * patch_w: (i+1) * patch_h * patch_w].reshape(patch_h, patch_w))
+        plt.subplot(2, 2, i)
+        plt.imshow(pca_features_bg[i * patch_h * patch_w: (i) * patch_h * patch_w].reshape(patch_h, patch_w))
     plt.show()
 
     # PCA for only foreground patches
@@ -93,8 +93,11 @@ def visualize_pca():
 
     pca_features_rgb = pca_features_rgb.reshape(2, patch_h, patch_w, 3)
     for i in range(2):
-        plt.subplot(2, 2, i+1)
+        plt.subplot(2, 2, i)
         plt.imshow(pca_features_rgb[i][..., ::-1])
     plt.savefig('features.png')
     plt.show()
     plt.close()
+
+if __name__ == '__main__':
+    visualize_pca()
