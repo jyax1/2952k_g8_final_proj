@@ -70,15 +70,8 @@ class Bottleneck(nn.Module):
 
 
 class ActionExtractionResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3, dinov2=''):
+    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3):
         super(ActionExtractionResNet, self).__init__()
-
-        # self.dinov2 = dinov2
-
-        # if dinov2 != '':
-        #     # DINOv2 with registers
-        #     self.dinov2_model = torch.hub.load('facebookresearch/dinov2', dinov2)
-
         # Define the ResNet version to use
         if resnet_version == 'resnet18':
             block = BasicBlock
@@ -105,10 +98,6 @@ class ActionExtractionResNet(nn.Module):
         self.action_mlp = nn.Sequential(*mlp_layers)
         
     def forward(self, x):
-        # if self.dinov2 != '':
-        #     x = center_crop(x)
-        #     x_1 = self.dinov2_model.forward(x[:, :3, :, :])
-        #     x_2 = self.dinov2_model.forward(x[:, 3:, :, :])
         # Pass through ResNet backbone
         x = self.resnet(x)
         # Flatten the output to fit into the MLP

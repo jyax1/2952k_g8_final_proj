@@ -88,30 +88,38 @@ resnet_layers_num=18
 # vit_patch_size=2
 # train_only
 
+architecture="latent_decoder_obs_conditioned_unet_mlp"
+train_only
+
+architecture="latent_decoder_obs_conditioned_unet_mlp"
+freeze_idm="-fidm"
+train_only
+
+
 # Job 3: latent_decoder_aux_separate_unet_mlp
-architecture="latent_decoder_aux_separate_unet_mlp"
-train_only
+# architecture="latent_decoder_aux_separate_unet_mlp"
+# train_only
 
-freeze_idm="-fidm"
-train_only
+# freeze_idm="-fidm"
+# train_only
 
-freeze_fdm="-ffdm"
-train_only
+# freeze_fdm="-ffdm"
+# train_only
 
-freeze_idm=""
-train_only
+# freeze_idm=""
+# train_only
 
-architecture="latent_decoder_aux_separate_unet_vit"
-train_only
+# architecture="latent_decoder_aux_separate_unet_vit"
+# train_only
 
-freeze_idm="-fidm"
-train_only
+# freeze_idm="-fidm"
+# train_only
 
-freeze_fdm="-ffdm"
-train_only
+# freeze_fdm="-ffdm"
+# train_only
 
-freeze_idm=""
-train_only
+# freeze_idm=""
+# train_only
 
 # Job 4: latent_decoder_aux_combined_vit
 # architecture="latent_decoder_aux_combined_vit"

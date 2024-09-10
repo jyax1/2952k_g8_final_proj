@@ -80,23 +80,23 @@ resnet_layers_num=18
 cameras="sideview_image,frontview_image"
 
 # Job 1: direct_cnn_mlp
-architecture="direct_cnn_mlp"
-latent_dim=32
-train_only
+# architecture="direct_cnn_mlp"
+# latent_dim=32
+# train_only
 
-# Job 2: direct_cnn_vit
-architecture="direct_cnn_vit"
-latent_dim=32
-train_only
+# # Job 2: direct_cnn_vit
+# architecture="direct_cnn_vit"
+# latent_dim=32
+# train_only
 
-# Job 3, 4: direct_resnet_mlp
-architecture="direct_resnet_mlp"
-train_only
+# # Job 3, 4: direct_resnet_mlp
+# architecture="direct_resnet_mlp"
+# train_only
 
-resnet_layers_num=50
-train_only
+# resnet_layers_num=50
+# train_only
 
 # Job 5: latent_cnn_unet
 architecture="latent_cnn_unet"
-latent_dim=32
+latent_dim=4
 train_only

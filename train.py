@@ -37,7 +37,6 @@ def train(args):
         fdm_model_name=args.fdm_model_name,
         freeze_idm=args.freeze_idm,
         freeze_fdm=args.freeze_fdm,
-        dinov2=args.dinov2
         )
 
     # Instandiate datasets
@@ -182,14 +181,6 @@ if __name__ == '__main__':
         type=str,
         default='',
         help='Comma separated list of embodiments to be used for training'
-    )
-    parser.add_argument(
-        '--dinov2',
-        type=str,
-        choices=['dinov2_vits14, dinov2_vitb14', 'dinov2_vitl14', 'dinov2_vitg14', 
-                 'dinov2_vits14_reg', 'dinov2_vitb14_reg', 'dinov2_vitl14_reg', 'dinov2_vitg14_reg'],
-        default='',
-        help='dinov2 model to use for preprocessing'
     )
 
     args = parser.parse_args()
