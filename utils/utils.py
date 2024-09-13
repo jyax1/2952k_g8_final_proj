@@ -2,7 +2,7 @@ from datasets import *
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
-from architectures.direct_resnet_mlp import ActionExtractionResNet
+from architectures.direct_resnet_mlp import *
 from architectures.latent_decoders import *
 import re
 from pathlib import Path
@@ -25,6 +25,19 @@ def center_crop(tensor, output_size=112):
     
     return cropped_tensor
 
+def resnet_builder(resnet_version, video_length):
+    if resnet_version == 'resnet18':
+            block = BasicBlock
+            layers = [2, 2, 2, 2]
+            resnet_out_dim = 512
+    elif resnet_version == 'resnet50':
+        block = Bottleneck
+        layers = [3, 4, 6, 3]
+        resnet_out_dim = 2048
+    else:
+        raise ValueError("Unsupported ResNet version. Choose 'resnet18' or 'resnet50'.")
+    
+    return ResNet(block, layers, video_length), resnet_out_dim
 
 def load_datasets(
         architecture, 

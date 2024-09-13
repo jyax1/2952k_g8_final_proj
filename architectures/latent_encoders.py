@@ -8,6 +8,7 @@ import numpy as np
 
 from architectures.direct_cnn_mlp import FramesConvolution
 from architectures.direct_resnet_mlp import *
+from utils import resnet_builder
 
 class FiLM(nn.Module):
     def __init__(self, latent_length, unet_latent_dim=32, unet_latent_length=256):
@@ -151,18 +152,8 @@ class LatentEncoderPretrainCNNUNet(nn.Module):
 class LatentEncoderPretrainResNetUNet(nn.Module):
     def __init__(self, resnet_version='resnet18', video_length=2):
         super(LatentEncoderPretrainResNetUNet, self).__init__()
-        if resnet_version == 'resnet18':
-            block = BasicBlock
-            layers = [2, 2, 2, 2]
-            resnet_out_dim = 512
-        elif resnet_version == 'resnet50':
-            block = Bottleneck
-            layers = [3, 4, 6, 3]
-            resnet_out_dim = 2048
-        else:
-            raise ValueError("Unsupported ResNet version. Choose 'resnet18' or 'resnet50'.")
         
-        self.idm = ResNet(block, layers, video_length)
+        self.idm, resnet_out_dim = resnet_builder(resnet_version, video_length)
         
         self.fdm = FDM(latent_dim=np.sqrt(resnet_out_dim), video_length=video_length-1, latent_length=resnet_out_dim)
         
