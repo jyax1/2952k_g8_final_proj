@@ -20,12 +20,20 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "train direct_cnn_mlp",
+            "name": "train direct_cnn_mlp ADAM",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=sideview_image"]
+        },
+        {
+            "name": "train direct_cnn_mlp SGD",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=sideview_image", "--optimizer=sgd", "--momentum=0.9", "--learning_rate=0.001"]
         },
         {
             "name": "train direct_cnn_mlp",
@@ -44,20 +52,28 @@
             "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=50", "-ipm", "--horizon=2", "-vps=1"]
         },
         {
-            "name": "train direct_resnet_mlp",
+            "name": "train direct_resnet_mlp50",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=2", "--dinov2=dinov2_vits14_reg"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=2"]
         },
         {
-            "name": "train latent_cnn_unet",
+            "name": "train latent_encoder_resnet_unet",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_cnn_unet", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
+            "args": ["-a=latent_encoder_resnet_unet", "--epoch=10", "--batch_size=50", "-rln=18", "--horizon=2"]
+        },
+        {
+            "name": "train latent_encoder_cnn_unet",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_encoder_cnn_unet", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
         },
         {
             "name": "train latent_decoder_mlp",

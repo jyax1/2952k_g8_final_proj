@@ -6,7 +6,8 @@ follow the paper "Learning to Act without Actions" to create latent action extra
 import torch.nn as nn
 import numpy as np
 
-from architectures.direct_cnn_mlp import FramesConvolution as IDM
+from architectures.direct_cnn_mlp import FramesConvolution
+from architectures.direct_resnet_mlp import *
 
 class FiLM(nn.Module):
     def __init__(self, latent_length, unet_latent_dim=32, unet_latent_length=256):
@@ -126,10 +127,10 @@ class FDM(nn.Module):
         # Output the transformed image sequence
         return x
     
-class ActionExtractionCNNUNet(nn.Module):
+class LatentEncoderPretrainCNNUNet(nn.Module):
     def __init__(self, latent_dim=16, video_length=2):
-        super(ActionExtractionCNNUNet, self).__init__()
-        self.idm = IDM(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
+        super(LatentEncoderPretrainCNNUNet, self).__init__()
+        self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
         
         self.fdm = FDM(latent_dim=latent_dim, video_length=video_length-1, latent_length=video_length-1)
         
@@ -146,3 +147,34 @@ class ActionExtractionCNNUNet(nn.Module):
 
         return prediction
         
+
+class LatentEncoderPretrainResNetUNet(nn.Module):
+    def __init__(self, resnet_version='resnet18', video_length=2):
+        super(LatentEncoderPretrainResNetUNet, self).__init__()
+        if resnet_version == 'resnet18':
+            block = BasicBlock
+            layers = [2, 2, 2, 2]
+            resnet_out_dim = 512
+        elif resnet_version == 'resnet50':
+            block = Bottleneck
+            layers = [3, 4, 6, 3]
+            resnet_out_dim = 2048
+        else:
+            raise ValueError("Unsupported ResNet version. Choose 'resnet18' or 'resnet50'.")
+        
+        self.idm = ResNet(block, layers, video_length)
+        
+        self.fdm = FDM(latent_dim=np.sqrt(resnet_out_dim), video_length=video_length-1, latent_length=resnet_out_dim)
+        
+    def forward(self, image_sequence):
+        
+        # Pass the image sequence through the IDM to get the feature map
+        feature_map = self.idm(image_sequence)
+        
+        # Exclude the last image from the sequence
+        past_observations = image_sequence[:, :-3, :, :]
+        
+        # Pass the reduced sequence and feature map to the FDM
+        prediction = self.fdm(feature_map, past_observations)
+
+        return prediction

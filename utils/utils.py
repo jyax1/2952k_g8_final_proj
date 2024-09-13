@@ -1,7 +1,7 @@
 from datasets import *
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
-from architectures.latent_cnn_unet import ActionExtractionCNNUNet
+from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.direct_resnet_mlp import ActionExtractionResNet
 from architectures.latent_decoders import *
 import re
@@ -80,7 +80,6 @@ def load_model(architecture,
                fdm_model_name,
                freeze_idm,
                freeze_fdm,
-               dinov2
 ):
     if architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_dim=latent_dim, 
@@ -95,9 +94,11 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=3, dinov2=dinov2)
-    elif architecture == 'latent_cnn_unet':
-        model = ActionExtractionCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
+        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=3)
+    elif architecture == 'latent_encoder_cnn_unet':
+        model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
+    elif architecture == 'latent_encoder_resnet_unet':
+        model = LatentEncoderPretrainResNetUNet(resnet_version='resnet' + str(resnet_layers_num), video_length=horizon)
     elif 'latent_decoder' in architecture:
         idm_model_path = str(Path(results_path)) + f'/{idm_model_name}'
         latent_dim = int(re.search(r'_lat(.*?)_', idm_model_name).group(1))

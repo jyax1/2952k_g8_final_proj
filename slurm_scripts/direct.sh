@@ -2,7 +2,7 @@
 
 run()
 {
-    jn=TRAIN_${architecture}_latent_dim${latent_dim}_batch_size${batch_size}_horizon${horizon}_epoch${epoch}_demo${demo_percentage}_vps${vit_patch_size}_rln${resnet_layers_num}
+    jn=TRAIN_${architecture}_latent_dim${latent_dim}_batch_size${batch_size}_horizon${horizon}_epoch${epoch}_demo${demo_percentage}_vps${vit_patch_size}_rln${resnet_layers_num}_opt${optimizer}_lr${learning_rate}
 
     if [ -n "$motion" ]; then
         jn="${jn}_motion"
@@ -47,6 +47,9 @@ run()
     --cameras=${cameras}
     $freeze_idm
     $freeze_fdm
+    --optimizer=${optimizer}
+    --learning_rate=${learning_rate}
+    --momentum=${momentum}
     "
     slurm_args=""
 
@@ -76,13 +79,29 @@ freeze_idm=""
 freeze_fdm=""
 vit_patch_size=2
 resnet_layers_num=18
+optimizer="adam"
+learning_rate=0.001
+momentum=0.9
 
-cameras="sideview_image,frontview_image"
+cameras="frontview_image"
 
 # Job 1: direct_cnn_mlp
-# architecture="direct_cnn_mlp"
-# latent_dim=32
-# train_only
+architecture="direct_cnn_mlp"
+latent_dim=32
+learning_rate=0.005
+train_only
+
+architecture="direct_cnn_mlp"
+latent_dim=32
+optimizer="sgd"
+learning_rate=0.001
+train_only
+
+architecture="direct_cnn_mlp"
+latent_dim=32
+optimizer="sgd"
+learning_rate=0.005
+train_only
 
 # # Job 2: direct_cnn_vit
 # architecture="direct_cnn_vit"
@@ -97,6 +116,12 @@ cameras="sideview_image,frontview_image"
 # train_only
 
 # Job 5: latent_cnn_unet
-architecture="latent_cnn_unet"
-latent_dim=4
+# architecture="latent_cnn_unet"
+# latent_dim=4
+# train_only
+
+architecture="latent_encoder_resnet_unet"
+train_only
+
+resnet_layers_num=50
 train_only

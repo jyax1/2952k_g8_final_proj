@@ -21,7 +21,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_cam{args.cameras}_emb{args.embodiments}_lat{args.latent_dim}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}_{args.note}'''
+    model_name = f'''{args.architecture}_cam{args.cameras}_emb{args.embodiments}_lat{args.latent_dim}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}_opt{args.optimizer}_lr{args.learning_rate}_mmt{args.momentum}_{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -59,8 +59,10 @@ def train(args):
         validation_set, 
         results_path=args.results_path, 
         model_name=model_name, 
+        optimizer_name=args.optimizer,
         batch_size=args.batch_size, 
-        epochs=args.epoch
+        epochs=args.epoch,
+        lr=args.learning_rate
         )
 
     # Train the model
@@ -181,6 +183,25 @@ if __name__ == '__main__':
         type=str,
         default='',
         help='Comma separated list of embodiments to be used for training'
+    )
+    parser.add_argument(
+        '--optimizer', '-optim',
+        type=str,
+        default='adam',
+        choices=['adam', 'sgd', 'rmsprop', 'adagrad', 'adamw'],
+        help='Optimizer to use for training'
+    )
+    parser.add_argument(
+        '--learning_rate', '-lr',
+        type=float,
+        default=0.001,
+        help='Learning rate to use for training'
+    )
+    parser.add_argument(
+        '--momentum',
+        type=float,
+        default=0.9,
+        help='Momentum for the SGD optimizer'
     )
 
     args = parser.parse_args()

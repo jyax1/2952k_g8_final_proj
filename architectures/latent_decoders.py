@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from architectures.latent_cnn_unet import IDM, FDM
+from architectures.latent_encoders import FramesConvolution, FDM
 from architectures.direct_cnn_vit import ActionTransformer, ActionTransformerMLP
 
 class LatentDecoderMLP(nn.Module):
@@ -10,7 +10,7 @@ class LatentDecoderMLP(nn.Module):
         super(LatentDecoderMLP, self).__init__()
 
         # Load the pre-trained IDM model and freeze its parameters
-        self.idm = IDM(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+        self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
         self.idm.load_state_dict(torch.load(idm_model_path))
         for param in self.idm.parameters():
             param.requires_grad = False

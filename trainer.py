@@ -6,14 +6,24 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
-from architectures.latent_cnn_unet import ActionExtractionCNNUNet
+from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.latent_decoders import *
 from architectures.direct_resnet_mlp import ActionExtractionResNet
 import csv
 from tqdm import tqdm
 
 class Trainer:
-    def __init__(self, model, train_set, validation_set, results_path, model_name, batch_size=32, epochs=100, lr=0.001):
+    def __init__(self, 
+                 model, 
+                 train_set, 
+                 validation_set, 
+                 results_path, 
+                 model_name, 
+                 optimizer_name='adam', 
+                 batch_size=32, 
+                 epochs=100, 
+                 lr=0.001, 
+                 momentum=0.9):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name
@@ -23,13 +33,16 @@ class Trainer:
         self.batch_size = batch_size
         self.epochs = epochs
         self.lr = lr
+        self.momentum = momentum  # Momentum parameter
         self.val_losses = []
 
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
         self.criterion = nn.MSELoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        
+        # Choose optimizer based on the optimizer_name argument
+        self.optimizer = self.get_optimizer(optimizer_name)
 
         # Prepare the model, optimizer, and dataloaders for distributed training
         self.model, self.optimizer, self.train_loader, self.validation_loader = self.accelerator.prepare(
@@ -38,6 +51,22 @@ class Trainer:
 
         if not os.path.exists(results_path):
             os.makedirs(results_path)
+    
+    def get_optimizer(self, optimizer_name):
+        """Return the optimizer based on the provided optimizer_name."""
+        if optimizer_name.lower() == 'adam':
+            return optim.Adam(self.model.parameters(), lr=self.lr)
+        elif optimizer_name.lower() == 'sgd':
+            # If SGD is selected, enable momentum by passing the momentum argument
+            return optim.SGD(self.model.parameters(), lr=self.lr, momentum=self.momentum)
+        elif optimizer_name.lower() == 'rmsprop':
+            return optim.RMSprop(self.model.parameters(), lr=self.lr)
+        elif optimizer_name.lower() == 'adagrad':
+            return optim.Adagrad(self.model.parameters(), lr=self.lr)
+        elif optimizer_name.lower() == 'adamw':
+            return optim.AdamW(self.model.parameters(), lr=self.lr)
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
     def train(self):
         for epoch in range(self.epochs):
@@ -118,7 +147,7 @@ class Trainer:
                 for value in self.val_losses:
                     writer.writerow([value])
         
-        elif isinstance(self.model, ActionExtractionCNNUNet):
+        elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
             torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
             with open(os.path.join(self.results_path, f'lat_{self.model_name}_val.csv'), 'a', newline='') as csvfile:
