@@ -120,6 +120,7 @@ train_only
 # latent_dim=4
 # train_only
 
+learning_rate=0.001
 architecture="latent_encoder_resnet_unet"
 train_only
 

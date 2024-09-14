@@ -75,7 +75,7 @@ latent_dim=32
 idm_model_name="latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_idm-1-6000.pth"
 fdm_model_name="latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_fdm-1-6000.pth"
 freeze_idm=""
-freeze_fdm=""
+freeze_fdm="-ffdm"
 vit_patch_size=16
 resnet_layers_num=18
 
