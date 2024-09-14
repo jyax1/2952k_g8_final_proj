@@ -4,7 +4,7 @@ import numpy as np
 
 from architectures.latent_encoders import FramesConvolution, FDM
 from architectures.direct_cnn_vit import ActionTransformer, ActionTransformerMLP
-from utils import resnet_builder
+from architectures.utils import resnet_builder
 
 class LatentDecoderMLP(nn.Module):
     def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=1, mlp_layers=3):
@@ -13,16 +13,18 @@ class LatentDecoderMLP(nn.Module):
         # Load the pre-trained IDM model and freeze its parameters
         if 'cnn' in idm_model_path:
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+            self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
+            self.latent_size = 1
+            
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         for param in self.idm.parameters():
             param.requires_grad = False
 
         # Define the MLP layers
-        self.latent_size = latent_dim ** 2
         mlp_layers_list = [nn.Flatten(), nn.Linear(latent_length * self.latent_size, 512), nn.ReLU()]
 
         # Add adjustable number of layers
@@ -81,9 +83,11 @@ class LatentDecoderObsConditionedUNetMLP(nn.Module):
 
         if 'cnn' in idm_model_path:
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+            self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
+            self.latent_size = 1
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         for param in self.idm.parameters():
@@ -92,7 +96,6 @@ class LatentDecoderObsConditionedUNetMLP(nn.Module):
         self.unet = FDM(latent_length=latent_length, latent_dim=latent_dim, video_length=video_length, unet_latent_length=unet_latent_length)
         
         # Define the MLP layers
-        self.latent_size = latent_dim ** 2
         mlp_layers_list = [nn.Flatten(), nn.Linear(video_length * 3 * 128**2, 512), nn.ReLU()]
 
         # Add adjustable number of layers
@@ -132,10 +135,12 @@ class LatentDecoderAuxiliarySeparateUNetTransformer(nn.Module):
 
         # Load and optionally freeze the pretrained IDM model
         if 'cnn' in idm_model_path:
-            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
+            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+            self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
+            self.latent_size = 1
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         self.freeze_idm = freeze_idm
@@ -328,7 +333,7 @@ class LatentDecoderAuxiliaryCombinedViT(nn.Module):
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
             self.idm = resnet_builder(resnet_version, video_length)
-            
+
         self.idm.load_state_dict(torch.load(idm_model_path))
         self.freeze_idm = freeze_idm
         if freeze_idm:

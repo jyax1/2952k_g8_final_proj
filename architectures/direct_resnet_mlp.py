@@ -72,19 +72,9 @@ class Bottleneck(nn.Module):
 class ActionExtractionResNet(nn.Module):
     def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3):
         super(ActionExtractionResNet, self).__init__()
-        # Define the ResNet version to use
-        if resnet_version == 'resnet18':
-            block = BasicBlock
-            layers = [2, 2, 2, 2]
-            resnet_out_dim = 512
-        elif resnet_version == 'resnet50':
-            block = Bottleneck
-            layers = [3, 4, 6, 3]
-            resnet_out_dim = 2048
-        else:
-            raise ValueError("Unsupported ResNet version. Choose 'resnet18' or 'resnet50'.")
         
-        self.resnet = ResNet(block, layers, video_length=video_length)
+        # Define the ResNet version to use
+        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
         
         mlp_layers = [nn.Linear(resnet_out_dim, 512), nn.ReLU()]
 

@@ -8,7 +8,7 @@ import numpy as np
 
 from architectures.direct_cnn_mlp import FramesConvolution
 from architectures.direct_resnet_mlp import *
-from utils import resnet_builder
+from architectures.utils import resnet_builder
 
 class FiLM(nn.Module):
     def __init__(self, latent_length, unet_latent_dim=32, unet_latent_length=256):
