@@ -191,6 +191,7 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
                  fdm_model_path, 
                  latent_dim=16, 
                  video_length=2, 
+                 latent_length=1,
                  num_layers=8, 
                  freeze_idm=False, 
                  freeze_fdm=False):
@@ -198,10 +199,12 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
 
         # Load and optionally freeze the pretrained IDM model
         if 'cnn' in idm_model_path:
-            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
+            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+            self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
+            self.latent_size = 1
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         if freeze_idm:
@@ -209,7 +212,7 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
                 param.requires_grad = False
 
         # Load and optionally freeze the pretrained FDM model
-        self.fdm = FDM(latent_dim=latent_dim, video_length=video_length-1, latent_length=video_length-1)
+        self.fdm = FDM(latent_dim=latent_dim, video_length=video_length-1, latent_length=latent_length)
         self.fdm.load_state_dict(torch.load(fdm_model_path))
         if freeze_fdm:
             for param in self.fdm.parameters():
@@ -329,10 +332,12 @@ class LatentDecoderAuxiliaryCombinedViT(nn.Module):
 
         # Load and optionally freeze the pretrained IDM model
         if 'cnn' in idm_model_path:
-            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=video_length-1)
+            self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
+            self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
             resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
+            self.latent_size = 1
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         self.freeze_idm = freeze_idm

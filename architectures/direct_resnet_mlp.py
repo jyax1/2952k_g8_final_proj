@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from architectures.utils import *
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -68,34 +67,6 @@ class Bottleneck(nn.Module):
 
         return out
 
-
-class ActionExtractionResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3):
-        super(ActionExtractionResNet, self).__init__()
-        
-        # Define the ResNet version to use
-        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
-        
-        mlp_layers = [nn.Linear(resnet_out_dim, 512), nn.ReLU()]
-
-        for _ in range(num_mlp_layers - 2):  # We already added the first linear + ReLU
-            mlp_layers.append(nn.Linear(512, 512))
-            mlp_layers.append(nn.ReLU())
-        
-        # Final output layer, with the output size being 7 * action_length
-        mlp_layers.append(nn.Linear(512, 7 * action_length))
-        
-        self.action_mlp = nn.Sequential(*mlp_layers)
-        
-    def forward(self, x):
-        # Pass through ResNet backbone
-        x = self.resnet(x)
-        # Flatten the output to fit into the MLP
-        x = torch.flatten(x, 1)
-        # Pass through MLP head
-        x = self.action_mlp(x)
-        return x
-
 class ResNet(nn.Module):
     def __init__(self, block, layers, video_length=2):
         super(ResNet, self).__init__()
@@ -140,4 +111,33 @@ class ResNet(nn.Module):
         x = self.layer4(x) # [b, 512, 4, 4], [b, 2048, 4, 4]
 
         x = self.avgpool(x) # [b, 512, 1, 1], [b, 2048, 1, 1]
+        return x
+
+from architectures.utils import resnet_builder
+
+class ActionExtractionResNet(nn.Module):
+    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3):
+        super(ActionExtractionResNet, self).__init__()
+
+        # Define the ResNet version to use
+        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
+        
+        mlp_layers = [nn.Linear(resnet_out_dim, 512), nn.ReLU()]
+
+        for _ in range(num_mlp_layers - 2):  # We already added the first linear + ReLU
+            mlp_layers.append(nn.Linear(512, 512))
+            mlp_layers.append(nn.ReLU())
+        
+        # Final output layer, with the output size being 7 * action_length
+        mlp_layers.append(nn.Linear(512, 7 * action_length))
+        
+        self.action_mlp = nn.Sequential(*mlp_layers)
+        
+    def forward(self, x):
+        # Pass through ResNet backbone
+        x = self.resnet(x)
+        # Flatten the output to fit into the MLP
+        x = torch.flatten(x, 1)
+        # Pass through MLP head
+        x = self.action_mlp(x)
         return x
