@@ -15,7 +15,7 @@ class LatentDecoderMLP(nn.Module):
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
             self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
             self.idm, latent_length = resnet_builder(resnet_version, video_length)
             self.latent_size = 1
             
@@ -54,8 +54,8 @@ class LatentDecoderTransformer(nn.Module):
         if 'cnn' in idm_model_path:
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
-            self.idm = resnet_builder(resnet_version, video_length)
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
+            self.idm, latent_length = resnet_builder(resnet_version, video_length)
 
         self.idm.load_state_dict(torch.load(idm_model_path))
         for param in self.idm.parameters():
@@ -85,7 +85,7 @@ class LatentDecoderObsConditionedUNetMLP(nn.Module):
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
             self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
             self.idm, latent_length = resnet_builder(resnet_version, video_length)
             self.latent_size = 1
 
@@ -138,7 +138,7 @@ class LatentDecoderAuxiliarySeparateUNetTransformer(nn.Module):
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
             self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
             self.idm, latent_length = resnet_builder(resnet_version, video_length)
             self.latent_size = 1
 
@@ -202,7 +202,7 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
             self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
             self.idm, latent_length = resnet_builder(resnet_version, video_length)
             self.latent_size = 1
 
@@ -219,7 +219,11 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
                 param.requires_grad = False
 
         # Define the MLP for action extraction
-        input_dim = (video_length - 1) * latent_dim ** 2
+        if 'cnn' in idm_model_path:
+            input_dim = (video_length - 1) * latent_dim ** 2
+        elif 'resnet' in idm_model_path:
+            input_dim = latent_length
+
         mlp_layers = [nn.Flatten(), nn.Linear(input_dim, 512), nn.ReLU()]
         hidden_dim = 512
 
@@ -335,7 +339,7 @@ class LatentDecoderAuxiliaryCombinedViT(nn.Module):
             self.idm = FramesConvolution(latent_dim=latent_dim, video_length=video_length, latent_length=latent_length)
             self.latent_size = latent_dim ** 2
         elif 'resnet' in idm_model_path:
-            resnet_version = 18 if '18' in idm_model_path else 50
+            resnet_version = 'resnet18' if '18' in idm_model_path else 'resnet50'
             self.idm, latent_length = resnet_builder(resnet_version, video_length)
             self.latent_size = 1
 

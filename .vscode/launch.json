@@ -76,12 +76,20 @@
             "args": ["-a=latent_encoder_cnn_unet", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
         },
         {
-            "name": "train latent_decoder_mlp",
+            "name": "train latent_decoder_mlp cnn",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=direct_resnet_mlp_lat32_mFalse_ipmFalse_res18_vps8_fidmFalse_ffdmFalse_resnet-2-9156.pth"]
+            "args": ["-a=latent_decoder_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_idm-3-4000.pth"]
+        },
+        {
+            "name": "train latent_decoder_mlp resnet",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=latent_decoder_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_vit",
@@ -89,7 +97,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=direct_resnet_mlp_lat32_mFalse_ipmFalse_res18_vps8_fidmFalse_ffdmFalse_resnet-2-9156.pth"]
+            "args": ["-a=latent_decoder_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_obs_conditioned_unet_mlp",
@@ -97,7 +105,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=direct_resnet_mlp_lat32_mFalse_ipmFalse_res18_vps8_fidmFalse_ffdmFalse_resnet-2-9156.pth"]
+            "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_aux_separate_unet_vit",
@@ -106,7 +114,7 @@
             "program": "train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_separate_unet_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
-            "-idm=direct_resnet_mlp_lat32_mFalse_ipmFalse_res18_vps8_fidmFalse_ffdmFalse_resnet-2-9156.pth", "-fdm=latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_fdm-1-6000.pth"]
+            "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_aux_separate_unet_mlp",
@@ -115,7 +123,7 @@
             "program": "train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_separate_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
-            "-idm=direct_resnet_mlp_lat32_mFalse_ipmFalse_res18_vps8_fidmFalse_ffdmFalse_resnet-2-9156.pth", "-fdm=latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_fdm-1-6000.pth"]
+            "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_aux_combined_vit",
