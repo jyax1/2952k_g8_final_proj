@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 class FramesConvolution(nn.Module):
-    def __init__(self, latent_dim=16, video_length=2, latent_length=2):
+    def __init__(self, latent_dim=16, video_length=2, latent_length=2, num_layers=3):
         super(FramesConvolution, self).__init__()
         self.latent_size = latent_dim ** 2
         output_dim = latent_dim
@@ -28,7 +28,7 @@ class FramesConvolution(nn.Module):
             out_channels *= 2
             
         # Add extra convolutional layers to make it 10 layers in total
-        for _ in range(10 - num_downsamples):
+        for _ in range(num_layers - num_downsamples):
             layers.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1))
             layers.append(nn.BatchNorm2d(in_channels))  # Added BatchNorm2d
             layers.append(nn.ReLU())
@@ -41,7 +41,7 @@ class FramesConvolution(nn.Module):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_dim=4, latent_length=2, action_length=1):
+    def __init__(self, latent_dim=4, latent_length=2, action_length=1, num_layers=3):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_dim ** 2
         layers = [
@@ -51,7 +51,7 @@ class ActionMLP(nn.Module):
         ]
 
         # 8 layers in total
-        for _ in range(7):
+        for _ in range(num_layers):
             layers.append(nn.Linear(in_features=512, out_features=512))
             layers.append(nn.ReLU())
 

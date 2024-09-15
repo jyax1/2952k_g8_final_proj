@@ -50,6 +50,7 @@ run()
     --optimizer=${optimizer}
     --learning_rate=${learning_rate}
     --momentum=${momentum}
+    --note=${note}
     "
     slurm_args=""
 
@@ -69,7 +70,7 @@ date=$(date +%m%d)
 demo_percentage=.9
 dataset_path="/users/ysong135/scratch/datasets/"
 epoch=100
-batch_size=256
+batch_size=1024
 horizon=2
 motion=""
 image_plus_motion=""
@@ -88,20 +89,21 @@ cameras="frontview_image"
 # Job 1: direct_cnn_mlp
 architecture="direct_cnn_mlp"
 latent_dim=32
-learning_rate=0.005
-train_only
-
-architecture="direct_cnn_mlp"
-latent_dim=32
-optimizer="sgd"
 learning_rate=0.001
+note="3cnnmlp"
 train_only
 
-architecture="direct_cnn_mlp"
-latent_dim=32
-optimizer="sgd"
-learning_rate=0.005
-train_only
+# architecture="direct_cnn_mlp"
+# latent_dim=32
+# optimizer="sgd"
+# learning_rate=0.001
+# train_only
+
+# architecture="direct_cnn_mlp"
+# latent_dim=32
+# optimizer="sgd"
+# learning_rate=0.005
+# train_only
 
 # # Job 2: direct_cnn_vit
 # architecture="direct_cnn_vit"
@@ -120,9 +122,9 @@ train_only
 # latent_dim=4
 # train_only
 
-learning_rate=0.001
-architecture="latent_encoder_resnet_unet"
-train_only
+# learning_rate=0.001
+# architecture="latent_encoder_resnet_unet"
+# train_only
 
-resnet_layers_num=50
-train_only
+# resnet_layers_num=50
+# train_only

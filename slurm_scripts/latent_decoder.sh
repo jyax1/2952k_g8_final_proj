@@ -75,15 +75,15 @@ latent_dim=32
 idm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"
 fdm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-4000.pth"
 freeze_idm=""
-freeze_fdm="-ffdm"
+freeze_fdm=""
 vit_patch_size=16
 resnet_layers_num=18
 
-# # Job 1: latent_decoder_mlp
-# architecture="latent_decoder_mlp"
-# train_only
+# Job 1: latent_decoder_mlp
+architecture="latent_decoder_mlp"
+train_only
 
-# # Job 2: latent_decoder_vit
+# Job 2: latent_decoder_vit
 # architecture="latent_decoder_vit"
 # vit_patch_size=2
 # train_only
@@ -97,11 +97,11 @@ train_only
 
 
 # Job 3: latent_decoder_aux_separate_unet_mlp
-# architecture="latent_decoder_aux_separate_unet_mlp"
-# train_only
+architecture="latent_decoder_aux_separate_unet_mlp"
+train_only
 
-# freeze_idm="-fidm"
-# train_only
+freeze_idm=""
+train_only
 
 # freeze_fdm="-ffdm"
 # train_only
