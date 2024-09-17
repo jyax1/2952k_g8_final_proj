@@ -6,15 +6,16 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
-    b = 88
+    b = 9000
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/datasets'
-    b = 16
+    dp = '/home/yilong/Documents/ae_data/datasets'
+    b = 4500
     rp = '/home/yilong/Documents/action_extractor/results'
+
 '''
 Temporary
 '''
