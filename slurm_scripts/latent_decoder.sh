@@ -83,17 +83,17 @@ resnet_layers_num=18
 # architecture="latent_decoder_mlp"
 # train_only
 
-architecture="latent_decoder_mlp"
-freeze_idm="-fidm"
-train_only
+# architecture="latent_decoder_mlp"
+# freeze_idm="-fidm"
+# train_only
 
 # Job 2: latent_decoder_vit
 # architecture="latent_decoder_vit"
 # vit_patch_size=2
 # train_only
 
-# architecture="latent_decoder_obs_conditioned_unet_mlp"
-# train_only
+architecture="latent_decoder_obs_conditioned_unet_mlp"
+train_only
 
 # architecture="latent_decoder_obs_conditioned_unet_mlp"
 # freeze_idm="-fidm"
