@@ -41,7 +41,7 @@ class FramesConvolution(nn.Module):
         return self.conv(x)
 
 class ActionMLP(nn.Module):
-    def __init__(self, latent_dim=4, latent_length=2, action_length=1, num_layers=3):
+    def __init__(self, latent_dim=4, latent_length=2, action_length=1, num_layers=9):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_dim ** 2
         layers = [
@@ -66,7 +66,7 @@ class ActionMLP(nn.Module):
         return self.fc(x)
 
 class ActionExtractionCNN(nn.Module):
-    def __init__(self, latent_dim=4, video_length=2, motion=False, image_plus_motion=False):
+    def __init__(self, latent_dim=4, video_length=2, motion=False, image_plus_motion=False, num_mlp_layers=6):
         super(ActionExtractionCNN, self).__init__()
         assert not (motion and image_plus_motion), "Choose either only motion or only image_plus_motion"
         if motion:
@@ -81,7 +81,7 @@ class ActionExtractionCNN(nn.Module):
 
         self.action_length = video_length - 1
         self.frames_convolution_model = FramesConvolution(latent_dim=latent_dim, video_length=self.video_length, latent_length=self.latent_length)
-        self.action_mlp_model = ActionMLP(latent_dim=latent_dim, action_length=self.action_length, latent_length=self.latent_length)
+        self.action_mlp_model = ActionMLP(latent_dim=latent_dim, action_length=self.action_length, latent_length=self.latent_length, num_layers=num_mlp_layers)
 
     def forward(self, x):
         x = self.frames_convolution_model(x)

@@ -34,6 +34,8 @@ class Trainer:
         self.epochs = epochs
         self.lr = lr
         self.momentum = momentum  # Momentum parameter
+        
+        self.aux = True if 'aux' in model_name else False
 
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
@@ -73,7 +75,7 @@ class Trainer:
             running_loss = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
 
-            validate_every = len(self.train_loader) // 8
+            validate_every = 1 #len(self.train_loader) // 8
             
             save_model_every = len(self.train_loader) // 4
 
@@ -119,6 +121,10 @@ class Trainer:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
+                
+                # if self.aux:
+                    
+                    
                 total_val_loss += loss.item()
         return total_val_loss / len(self.validation_loader)
     
@@ -126,11 +132,11 @@ class Trainer:
         if end_of_epoch:
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(f"Epoch: {epoch} ended after {iteration} iterations, val_loss (MSE): {val_loss}")
+                writer.writerow([f"Epoch: {epoch} ended after {iteration} iterations, val_loss (MSE): {val_loss}"])
         else:    
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(f"val_loss (MSE): {val_loss}; Epoch: {epoch}; Iteration: {iteration}")
+                writer.writerow([f"val_loss (MSE): {val_loss}; Epoch: {epoch}; Iteration: {iteration}"])
 
     def save_model(self, epoch, iteration):
         if isinstance(self.model, ActionExtractionCNN):

@@ -192,7 +192,7 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
                  latent_dim=16, 
                  video_length=2, 
                  latent_length=1,
-                 num_layers=8, 
+                 num_mlp_layers=8, 
                  freeze_idm=False, 
                  freeze_fdm=False):
         super(LatentDecoderAuxiliarySeparateUNetMLP, self).__init__()
@@ -227,7 +227,7 @@ class LatentDecoderAuxiliarySeparateUNetMLP(nn.Module):
         mlp_layers = [nn.Flatten(), nn.Linear(input_dim, 512), nn.ReLU()]
         hidden_dim = 512
 
-        for _ in range(num_layers - 1):  # Create hidden layers
+        for _ in range(num_mlp_layers - 1):  # Create hidden layers
             mlp_layers.append(nn.Linear(hidden_dim, hidden_dim))
             mlp_layers.append(nn.ReLU())
 

@@ -72,7 +72,8 @@ def load_model(architecture,
                results_path, 
                latent_dim, 
                motion, 
-               image_plus_motion, 
+               image_plus_motion,
+               num_mlp_layers, 
                vit_patch_size, 
                resnet_layers_num,
                idm_model_name,
@@ -84,7 +85,8 @@ def load_model(architecture,
         model = ActionExtractionCNN(latent_dim=latent_dim, 
                                     video_length=horizon, 
                                     motion=motion, 
-                                    image_plus_motion=image_plus_motion)
+                                    image_plus_motion=image_plus_motion,
+                                    num_mlp_layers=num_mlp_layers)
     elif architecture == 'direct_cnn_vit':
         model = ActionExtractionViT(latent_dim=latent_dim, 
                                     video_length=horizon, 
@@ -93,7 +95,7 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=3)
+        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':
@@ -106,7 +108,7 @@ def load_model(architecture,
                                      latent_dim=latent_dim, 
                                      video_length=horizon, 
                                      latent_length=horizon-1, 
-                                     mlp_layers=10)
+                                     mlp_layers=num_mlp_layers)
         elif architecture == 'latent_decoder_vit':
             model = LatentDecoderTransformer(idm_model_path, 
                                              latent_dim=latent_dim, 
@@ -118,7 +120,7 @@ def load_model(architecture,
                                                        latent_dim=latent_dim,
                                                        video_length=horizon,
                                                        latent_length=horizon-1,
-                                                       mlp_layers=10)
+                                                       mlp_layers=num_mlp_layers)
         elif architecture == 'latent_decoder_aux_separate_unet_vit':
             fdm_model_path = str(Path(results_path)) + f'/{fdm_model_name}'
             model = LatentDecoderAuxiliarySeparateUNetTransformer(idm_model_path, 
@@ -135,7 +137,8 @@ def load_model(architecture,
                                                         latent_dim=latent_dim, 
                                                         video_length=horizon, 
                                                         freeze_idm=freeze_idm, 
-                                                        freeze_fdm=freeze_fdm)
+                                                        freeze_fdm=freeze_fdm,
+                                                        num_mlp_layers=num_mlp_layers)
         elif architecture == 'latent_decoder_aux_combined_vit':
             fdm_model_path = str(Path(results_path)) + f'/{fdm_model_name}'
             model = LatentDecoderAuxiliaryCombinedViT(idm_model_path, 

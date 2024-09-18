@@ -14,7 +14,7 @@ if oscar:
 else:
     dp = '/home/yilong/Documents/ae_data/datasets'
     b = 4500
-    rp = '/home/yilong/Documents/action_extractor/results'
+    rp = '/home/yilong/Documents/ae_results_oscar'
 
 '''
 Temporary
@@ -32,6 +32,7 @@ def train(args):
         latent_dim=args.latent_dim,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
+        num_mlp_layers=args.num_mlp_layers,
         vit_patch_size=args.vit_patch_size,
         resnet_layers_num=args.resnet_layers_num,
         idm_model_name=args.idm_model_name,
@@ -203,6 +204,12 @@ if __name__ == '__main__':
         type=float,
         default=0.9,
         help='Momentum for the SGD optimizer'
+    )
+    parser.add_argument(
+        '--num_mlp_layers', '-nmlp',
+        type=int,
+        default=6,
+        help='Number of MLP layers to use if selected architecture contains MLP portion.'
     )
 
     args = parser.parse_args()
