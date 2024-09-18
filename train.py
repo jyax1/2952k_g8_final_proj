@@ -6,15 +6,15 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/datasets'
+    dp = '/home/yilong/Documents/ae_data/datasets_debug'
     b = 16
-    rp = '/home/yilong/Documents/ae_results_oscar'
+    rp = '/home/yilong/Documents/action_extractor/results'
 
 '''
 Temporary

@@ -75,7 +75,7 @@ class Trainer:
             running_loss = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
 
-            validate_every = 1 #len(self.train_loader) // 8
+            validate_every = len(self.train_loader) // 8
             
             save_model_every = len(self.train_loader) // 4
 

@@ -105,7 +105,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
+            "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=1", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
         {
             "name": "train latent_decoder_aux_separate_unet_vit",
@@ -123,7 +123,7 @@
             "program": "train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_separate_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
-            "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-2-2000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-2-2000.pth"]
+            "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-6000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-6000.pth"]
         },
         {
             "name": "train latent_decoder_aux_combined_vit",
