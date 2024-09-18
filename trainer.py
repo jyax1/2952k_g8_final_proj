@@ -113,6 +113,32 @@ class Trainer:
             self.save_model(epoch+1, len(self.train_loader)+1)
             epoch_progress.close()
 
+    def recover_action_vector(self, output, action_vector_channels=7):
+        """
+        Recovers the action vector from the concatenated output.
+        
+        Parameters:
+            output (torch.Tensor): The concatenated tensor (reconstructed image + action vector)
+            action_vector_channels (int): The number of channels in the action vector (7 in this case).
+            
+        Returns:
+            torch.Tensor: The recovered action vector with the original shape [batch_size, 7].
+        """
+        
+        # Step 1: Extract the action vector part from the concatenated output
+        # We assume the last 'action_vector_channels' correspond to the action vector
+        recovered_action_vector = output[:, -action_vector_channels:, :, :]
+        
+        # Step 2: Reduce the dimensions by taking the mean over height and width
+        # This reduces (batch_size, 7, 128, 128) to (batch_size, 7, 1, 1)
+        recovered_action_vector = recovered_action_vector.mean(dim=[2, 3], keepdim=True)
+        
+        # Step 3: Reshape to the original shape (batch_size, 7)
+        batch_size = output.size(0)
+        recovered_action_vector = recovered_action_vector.view(batch_size, action_vector_channels)
+        
+        return recovered_action_vector
+
     def validate(self):
         self.model.eval()
         total_val_loss = 0.0
@@ -120,11 +146,13 @@ class Trainer:
             for inputs, labels in self.validation_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
+                
+                if self.aux:
+                    outputs = self.recover_action_vector(outputs)
+                    labels = self.recover_action_vector(labels)
+                    
                 loss = self.criterion(outputs, labels)
                 
-                # if self.aux:
-                    
-                    
                 total_val_loss += loss.item()
         return total_val_loss / len(self.validation_loader)
     

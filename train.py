@@ -6,14 +6,14 @@ from config import *
 '''
 Temporary
 '''
-oscar = False
+oscar = True
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
-    b = 9000
+    b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/datasets'
-    b = 4500
+    b = 16
     rp = '/home/yilong/Documents/ae_results_oscar'
 
 '''
@@ -208,7 +208,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--num_mlp_layers', '-nmlp',
         type=int,
-        default=6,
+        default=10,
         help='Number of MLP layers to use if selected architecture contains MLP portion.'
     )
 
