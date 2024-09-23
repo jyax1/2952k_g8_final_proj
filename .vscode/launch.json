@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=sideview_image"]
+            "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=frontview_image"]
         },
         {
             "name": "train direct_cnn_mlp SGD",
@@ -141,6 +141,25 @@
             "program": "validation_visualization.py",
             "console": "integratedTerminal",
             "args": [ "-mn=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-1-8000.pth"]
+        },
+
+        {
+            "name": "validate latent decoder actions",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "validation_visualization.py",
+            "console": "integratedTerminal",
+            "args": [ "-emn=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-6000.pth", "-dmn=latent_decoder_mlp_cam['frontview_image']_emb['']_lat32_res0_vps16_fidmFalse_ffdmFalse_optadam_lr0.001_mmt0.9_-1-470.pth"]
+        },
+
+
+        {
+            "name": "validate direct resnet actions",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "validation_visualization.py",
+            "console": "integratedTerminal",
+            "args": [ "--direct_model_name=direct_resnet_mlp_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_mlp-2-9156.pth"]
         },
     ]
 }

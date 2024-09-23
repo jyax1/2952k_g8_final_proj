@@ -34,31 +34,34 @@ def load_datasets(
         demo_percentage=0.9, 
         cameras=['frontview_image'],
         motion=False,
-        image_plus_motion=False
+        image_plus_motion=False,
+        random_data=False
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
             train_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=demo_percentage, cameras=cameras)
+                                            demo_percentage=demo_percentage, cameras=cameras, random_data=random_data)
         if validation:
             validation_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=cameras, validation=True)
+                                                    demo_percentage=.9, cameras=cameras, validation=True, random_data=random_data)
     elif 'latent' in architecture and 'aux' in architecture:
         if train:
             train_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=demo_percentage, cameras=cameras)
+                                            demo_percentage=demo_percentage, cameras=cameras, random_data=random_data)
         if validation:
             validation_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=cameras, validation=True)
+                                                    demo_percentage=.9, cameras=cameras, validation=True, random_data=random_data)
     else:
         if train:
             train_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
-                                            motion=motion, image_plus_motion=image_plus_motion)
+                                            motion=motion, image_plus_motion=image_plus_motion,
+                                            random_data=random_data)
         if validation:
             validation_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
                                                 demo_percentage=demo_percentage, cameras=cameras, validation=True, 
-                                                motion=motion, image_plus_motion=image_plus_motion)
+                                                motion=motion, image_plus_motion=image_plus_motion,
+                                                random_data=random_data)
 
     if train and validation:
         return train_set, validation_set

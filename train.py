@@ -12,7 +12,7 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/datasets_debug'
+    dp = '/home/yilong/Documents/ae_data/datasets'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -51,7 +51,8 @@ def train(args):
         demo_percentage=args.demo_percentage,
         cameras=args.cameras,
         motion=args.motion,
-        image_plus_motion=args.image_plus_motion
+        image_plus_motion=args.image_plus_motion,
+        random_data=args.include_random_data
         )
 
     # Instantiate the trainer
@@ -210,6 +211,11 @@ if __name__ == '__main__':
         type=int,
         default=10,
         help='Number of MLP layers to use if selected architecture contains MLP portion.'
+    )
+    parser.add_argument(
+        '--include_random_data', '-ird',
+        action='store_true',
+        help='Use random data in training'
     )
 
     args = parser.parse_args()
