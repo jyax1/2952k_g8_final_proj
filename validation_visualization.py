@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from torchvision.utils import save_image
 from PIL import Image
 import torchvision.transforms as T
+import random
 
 random.seed(0)
 
