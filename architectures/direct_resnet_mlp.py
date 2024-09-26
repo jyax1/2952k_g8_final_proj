@@ -1,6 +1,39 @@
 import torch
 import torch.nn as nn
 
+
+class ResNetMLP(nn.Module):
+    def __init__(self, input_size, hidden_size=512, final_size=32, output_size=7, num_layers=9, dropout_prob=0.5):
+        super(ResNetMLP, self).__init__()
+        
+        layers = [
+            nn.Linear(in_features=input_size, out_features=hidden_size),
+            nn.BatchNorm1d(hidden_size),  # Add batch normalization
+            nn.ReLU(),
+            nn.Dropout(p=dropout_prob)    # Add dropout
+        ]
+        
+        # Add hidden layers
+        for _ in range(num_layers):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.BatchNorm1d(hidden_size))  # Add batch normalization
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(p=dropout_prob))  # Add dropout
+
+        # Add final layer that condenses from hidden_size (512) to final_size (32)
+        layers.append(nn.Linear(hidden_size, final_size))
+        layers.append(nn.BatchNorm1d(final_size))  # Add batch normalization
+        layers.append(nn.ReLU())
+
+        # Final output layer
+        layers.append(nn.Linear(final_size, output_size))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -121,17 +154,15 @@ class ActionExtractionResNet(nn.Module):
 
         # Define the ResNet version to use
         self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
-        
-        mlp_layers = [nn.Linear(resnet_out_dim, 512), nn.ReLU()]
 
-        for _ in range(num_mlp_layers - 2):  # We already added the first linear + ReLU
-            mlp_layers.append(nn.Linear(512, 512))
-            mlp_layers.append(nn.ReLU())
-        
-        # Final output layer, with the output size being 7 * action_length
-        mlp_layers.append(nn.Linear(512, 7 * action_length))
-        
-        self.action_mlp = nn.Sequential(*mlp_layers)
+        # Use ResNetMLP for the MLP head
+        self.action_mlp = ResNetMLP(
+            input_size=resnet_out_dim,
+            hidden_size=512,
+            final_size=32,
+            output_size=7 * action_length,
+            num_layers=num_mlp_layers
+        )
         
     def forward(self, x):
         # Pass through ResNet backbone
@@ -140,4 +171,30 @@ class ActionExtractionResNet(nn.Module):
         x = torch.flatten(x, 1)
         # Pass through MLP head
         x = self.action_mlp(x)
+        return x
+
+# PoseExtractionResNet using ResNetMLP
+class PoseExtractionResNet(nn.Module):
+    def __init__(self, resnet_version='resnet18', video_length=1, action_length=1, num_mlp_layers=3):
+        super(PoseExtractionResNet, self).__init__()
+
+        # Define the ResNet version to use
+        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
+
+        # Use ResNetMLP for the MLP head
+        self.pose_mlp = ResNetMLP(
+            input_size=resnet_out_dim,
+            hidden_size=512,
+            final_size=32,
+            output_size=7 * action_length,
+            num_layers=num_mlp_layers
+        )
+        
+    def forward(self, x):
+        # Pass through ResNet backbone
+        x = self.resnet(x)
+        # Flatten the output to fit into the MLP
+        x = torch.flatten(x, 1)
+        # Pass through MLP head
+        x = self.pose_mlp(x)
         return x

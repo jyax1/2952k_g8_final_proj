@@ -39,6 +39,7 @@ def train(args):
         fdm_model_name=args.fdm_model_name,
         freeze_idm=args.freeze_idm,
         freeze_fdm=args.freeze_fdm,
+        action_type=args.action_type
         )
 
     # Instandiate datasets
@@ -52,7 +53,6 @@ def train(args):
         cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
-        random_data=args.include_random_data
         )
 
     # Instantiate the trainer
@@ -213,11 +213,13 @@ if __name__ == '__main__':
         help='Number of MLP layers to use if selected architecture contains MLP portion.'
     )
     parser.add_argument(
-        '--include_random_data', '-ird',
-        action='store_true',
-        help='Use random data in training'
+        '--action_type',
+        type=str,
+        default='absolute_pose',
+        choices=['delta_pose', 'absolute_pose'],
+        help='Type of action representation to use'
     )
-
+    
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
     assert args.horizon > 1, "Video length must be greater or equal to 2"

@@ -57,7 +57,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=2"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "--batch_size=50", "-rln=50", "--horizon=1"]
         },
         {
             "name": "train latent_encoder_resnet_unet",

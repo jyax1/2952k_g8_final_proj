@@ -39,7 +39,6 @@ class BaseDataset(Dataset):
                  cameras=['frontview_image'], 
                  validation=False, 
                  random_crop=False, 
-                 random_data=False,
                  load_actions=False):
         self.path = path
         self.frame_skip = frame_skip
@@ -50,12 +49,12 @@ class BaseDataset(Dataset):
         self.sequence_paths = []
 
         # Load dataset
-        self._load_datasets(path, demo_percentage, validation, random_data, cameras)
+        self._load_datasets(path, demo_percentage, validation, cameras)
 
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
 
-    def _load_datasets(self, path, demo_percentage, validation, random_data, cameras):
+    def _load_datasets(self, path, demo_percentage, validation, cameras):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
@@ -70,8 +69,6 @@ class BaseDataset(Dataset):
 
         # Collect all observation data paths
         for zarr_file, root in zip(self.zarr_files, self.roots):
-            if not random_data and 'random' in zarr_file:
-                continue
             print(f"Loading {zarr_file}")
             task = zarr_file.split("/")[-2].replace('_', ' ')
             demos = list(root['data'].keys())
@@ -129,7 +126,7 @@ class DatasetVideo(BaseDataset):
         return x, y
 
 
-class DatasetVideo2DeltaAction(BaseDataset):
+class DatasetVideo2Action(BaseDataset):
     def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, **kwargs):
         self.motion = motion
         self.image_plus_motion = image_plus_motion
@@ -178,7 +175,7 @@ class DatasetVideo2VideoAndAction(BaseDataset):
 
 
 if __name__ == "__main__":
-    train_set = DatasetVideo2DeltaAction(
+    train_set = DatasetVideo2Action(
         path="/users/ysong135/scratch/datasets",
         video_length=2,
         semantic_map=False,

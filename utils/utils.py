@@ -35,33 +35,30 @@ def load_datasets(
         cameras=['frontview_image'],
         motion=False,
         image_plus_motion=False,
-        random_data=False
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
             train_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=demo_percentage, cameras=cameras, random_data=random_data)
+                                            demo_percentage=demo_percentage, cameras=cameras)
         if validation:
             validation_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=cameras, validation=True, random_data=random_data)
+                                                    demo_percentage=.9, cameras=cameras, validation=True)
     elif 'latent' in architecture and 'aux' in architecture:
         if train:
             train_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                            demo_percentage=demo_percentage, cameras=cameras, random_data=random_data)
+                                            demo_percentage=demo_percentage, cameras=cameras)
         if validation:
             validation_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
-                                                    demo_percentage=.9, cameras=cameras, validation=True, random_data=random_data)
+                                                    demo_percentage=.9, cameras=cameras, validation=True)
     else:
         if train:
-            train_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
+            train_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
-                                            motion=motion, image_plus_motion=image_plus_motion,
-                                            random_data=random_data)
+                                            motion=motion, image_plus_motion=image_plus_motion,)
         if validation:
-            validation_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
+            validation_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                                 demo_percentage=demo_percentage, cameras=cameras, validation=True, 
-                                                motion=motion, image_plus_motion=image_plus_motion,
-                                                random_data=random_data)
+                                                motion=motion, image_plus_motion=image_plus_motion,)
 
     if train and validation:
         return train_set, validation_set
@@ -83,6 +80,7 @@ def load_model(architecture,
                fdm_model_name,
                freeze_idm,
                freeze_fdm,
+               action_type
 ):
     if architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_dim=latent_dim, 
@@ -98,7 +96,10 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
+        if action_type == 'delta_pose':
+            model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
+        elif action_type == 'absolute_pose':
+            model = PoseExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':
