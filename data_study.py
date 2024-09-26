@@ -4,8 +4,7 @@ import numpy as np
 import seaborn as sns
 import os
 
-
-from datasets import DatasetVideo2DeltaAction
+from datasets import DatasetVideo2Action
 
 os.makedirs("debug", exist_ok=True)
 
@@ -53,32 +52,56 @@ def load_demo_data(dataset):
     return delta_positions, delta_orientations, delta_gripper, hdf5_colors
 
 def visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=False):
+    # Check if task_name contains "abs" to distinguish between delta and absolute poses
+    is_absolute_pose = "abs" in task_name.lower()
+
     fig = plt.figure(figsize=(16, 6))
 
-    # 3D scatter plot for delta positions (x, y, z)
+    # Titles for absolute or delta pose modes
+    position_title = "Absolute Positions" if is_absolute_pose else "Delta Positions (x, y, z)"
+    orientation_title = "Absolute Orientations" if is_absolute_pose else "Delta Orientations (axis-angle)"
+    gripper_title = "Absolute Gripper Motion" if is_absolute_pose else "Delta Gripper Motion"
+
+    # Dynamically calculate the scale limit based on the actual data range
+    position_range = np.max(delta_positions, axis=0) - np.min(delta_positions, axis=0)
+    orientation_range = np.max(delta_orientations, axis=0) - np.min(delta_orientations, axis=0)
+    
+    position_limit = np.max(np.abs(delta_positions)) * 1.1  # Add 10% buffer to the max range
+    orientation_limit = np.max(np.abs(delta_orientations)) * 1.1  # Add 10% buffer to the max range
+
+    # 3D scatter plot for positions (x, y, z)
     ax1 = fig.add_subplot(131, projection='3d')
     ax1.scatter(delta_positions[:, 0], delta_positions[:, 1], delta_positions[:, 2], c=hdf5_colors, s=20)
-    ax1.set_title("Delta Positions (x, y, z)")
-    ax1.set_xlabel("Delta X")
-    ax1.set_ylabel("Delta Y")
-    ax1.set_zlabel("Delta Z")
+    ax1.set_title(position_title)
+    ax1.set_xlabel("X")
+    ax1.set_ylabel("Y")
+    ax1.set_zlabel("Z")
+    ax1.set_xlim([-position_limit, position_limit])
+    ax1.set_ylim([-position_limit, position_limit])
+    ax1.set_zlim([-position_limit, position_limit])
 
-    # 3D scatter plot for delta orientations (axis-angle representation)
+    # 3D scatter plot for orientations (axis-angle or absolute)
     ax2 = fig.add_subplot(132, projection='3d')
     ax2.scatter(delta_orientations[:, 0], delta_orientations[:, 1], delta_orientations[:, 2], c=hdf5_colors, s=20)
-    ax2.set_title("Delta Orientations (axis-angle)")
+    ax2.set_title(orientation_title)
     ax2.set_xlabel("Orientation X")
     ax2.set_ylabel("Orientation Y")
     ax2.set_zlabel("Orientation Z")
+    ax2.set_xlim([-orientation_limit, orientation_limit])
+    ax2.set_ylim([-orientation_limit, orientation_limit])
+    ax2.set_zlim([-orientation_limit, orientation_limit])
 
-    # 1D histogram for delta gripper motion (open/close)
+    # 1D histogram for gripper motion (open/close)
     ax3 = fig.add_subplot(133)
     ax3.hist(delta_gripper, bins=20, color='b', alpha=0.7)
-    ax3.set_title("Delta Gripper Motion")
+    ax3.set_title(gripper_title)
     ax3.set_xlabel("Gripper Motion (Open/Close)")
     ax3.set_ylabel("Frequency")
 
     plt.tight_layout()
+
+    # Display the interactive plot for positions and orientations
+    # plt.show()
 
     # Optionally save the plot to the debug directory
     if save_image:
@@ -86,9 +109,8 @@ def visualize_action_distributions(delta_positions, delta_orientations, delta_gr
         plt.savefig(file_path)
         print(f"Saved action distribution plot for task: {task_name} to {file_path}")
 
-
 def process_subdirectory(subdir_path):
-    dataset = DatasetVideo2DeltaAction(path=subdir_path)
+    dataset = DatasetVideo2Action(path=subdir_path)
     delta_positions, delta_orientations, delta_gripper, hdf5_colors = load_demo_data(dataset)
     
     # Extract the last part of the subdirectory path to use as a task name
@@ -97,13 +119,6 @@ def process_subdirectory(subdir_path):
     visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=True)
 
 if __name__ == '__main__':
-    base_path = '/home/yilong/Documents/ae_data/datasets/mimicgen_core'
+    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
     
-    # Iterate over every subdirectory in the base_path
-    for subdir in os.listdir(base_path):
-        subdir_path = os.path.join(base_path, subdir)
-        
-        # Check if the path is a directory
-        if os.path.isdir(subdir_path):
-            print(f"Processing subdirectory: {subdir_path}")
-            process_subdirectory(subdir_path)
+    process_subdirectory(base_path)
