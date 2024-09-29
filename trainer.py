@@ -8,7 +8,7 @@ from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.latent_decoders import *
-from architectures.direct_resnet_mlp import ActionExtractionResNet
+from architectures.direct_resnet_mlp import ActionExtractionResNet, PoseExtractionResNet
 import csv
 from tqdm import tqdm
 
@@ -96,8 +96,8 @@ class Trainer:
                     running_loss = 0.0
 
                 if i % validate_every == validate_every - 1:
-                    val_loss = self.validate()
-                    self.save_validation(val_loss, epoch + 1, i + 1)
+                    val_loss, outputs = self.validate()
+                    self.save_validation(val_loss, outputs, epoch + 1, i + 1)
 
                 if i % save_model_every == save_model_every - 1:
                     self.save_model(epoch + 1, i + 1)
@@ -154,9 +154,9 @@ class Trainer:
                 loss = self.criterion(outputs, labels)
                 
                 total_val_loss += loss.item()
-        return total_val_loss / len(self.validation_loader)
+        return total_val_loss / len(self.validation_loader), outputs
     
-    def save_validation(self, val_loss, epoch, iteration, end_of_epoch=False):
+    def save_validation(self, val_loss, outputs, epoch, iteration, end_of_epoch=False):
         if end_of_epoch:
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
@@ -165,6 +165,10 @@ class Trainer:
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow([f"val_loss (MSE): {val_loss}; Epoch: {epoch}; Iteration: {iteration}"])
+                num_rows = outputs.shape[0]
+                indices = torch.randperm(num_rows)[:10]
+                sample_outputs = outputs[indices, :]
+                writer.writerow([f"sample outputs:", f"{sample_outputs}"])
 
     def save_model(self, epoch, iteration):
         if isinstance(self.model, ActionExtractionCNN):
@@ -178,6 +182,10 @@ class Trainer:
         elif isinstance(self.model, ActionExtractionResNet):
             torch.save(self.model.resnet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
             torch.save(self.model.action_mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            
+        elif isinstance(self.model, PoseExtractionResNet):
+            torch.save(self.model.resnet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
+            torch.save(self.model.pose_mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             
         elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))

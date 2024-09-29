@@ -3,14 +3,14 @@ import torch.nn as nn
 
 
 class ResNetMLP(nn.Module):
-    def __init__(self, input_size, hidden_size=512, final_size=32, output_size=7, num_layers=9, dropout_prob=0.5):
+    def __init__(self, input_size, hidden_size=512, final_size=32, output_size=7, num_layers=30, dropout_prob=0.5):
         super(ResNetMLP, self).__init__()
         
         layers = [
             nn.Linear(in_features=input_size, out_features=hidden_size),
             nn.BatchNorm1d(hidden_size),  # Add batch normalization
             nn.ReLU(),
-            nn.Dropout(p=dropout_prob)    # Add dropout
+            # nn.Dropout(p=dropout_prob)    # Add dropout
         ]
         
         # Add hidden layers
@@ -18,7 +18,7 @@ class ResNetMLP(nn.Module):
             layers.append(nn.Linear(hidden_size, hidden_size))
             layers.append(nn.BatchNorm1d(hidden_size))  # Add batch normalization
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(p=dropout_prob))  # Add dropout
+            # layers.append(nn.Dropout(p=dropout_prob))  # Add dropout
 
         # Add final layer that condenses from hidden_size (512) to final_size (32)
         layers.append(nn.Linear(hidden_size, final_size))
