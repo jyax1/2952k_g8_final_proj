@@ -53,6 +53,7 @@ def train(args):
         cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
+        action_type=args.action_type
         )
 
     # Instantiate the trainer
@@ -222,7 +223,6 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
-    assert args.horizon > 1, "Video length must be greater or equal to 2"
 
     if args.freeze_idm or args.freeze_fdm:
         assert 'aux' in args.architecture and 'latent_decoder' in args.architecture

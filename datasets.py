@@ -127,16 +127,29 @@ class DatasetVideo(BaseDataset):
 
 
 class DatasetVideo2Action(BaseDataset):
-    def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, **kwargs):
+    def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_pose', **kwargs):
         self.motion = motion
         self.image_plus_motion = image_plus_motion
+        self.action_type = action_type  # New argument to specify action type
         assert not (self.motion and self.image_plus_motion), "Choose either only motion or only image_plus_motion"
         super().__init__(path=path, load_actions=True, **kwargs)
 
     def __getitem__(self, idx):
         root, demo, index, task, camera = self.sequence_paths[idx]
         obs_seq, actions_seq = self.get_samples(root, demo, index, camera)
-        actions = torch.from_numpy(np.concatenate(actions_seq))
+
+        # Handle action_type logic
+        if self.action_type == 'delta_pose':
+            actions = torch.from_numpy(np.concatenate(actions_seq))  # Current logic for delta_pose
+        elif self.action_type == 'absolute_pose':
+            # One-to-one mapping of actions to each frame (no need to skip the last frame)
+            actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions = torch.from_numpy(np.array(actions_seq))
+
+         # If video_length == 1, return a flat action vector
+        if self.video_length == 1:
+            actions = actions.squeeze(0)  # Remove the first dimension to make it (7)
+                
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
 
         if self.motion or self.image_plus_motion:
