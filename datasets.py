@@ -39,7 +39,8 @@ class BaseDataset(Dataset):
                  cameras=['frontview_image'], 
                  validation=False, 
                  random_crop=False, 
-                 load_actions=False):
+                 load_actions=False, 
+                 compute_stats=True):
         self.path = path
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
@@ -47,9 +48,17 @@ class BaseDataset(Dataset):
         self.load_actions = load_actions
         self.random_crop = random_crop
         self.sequence_paths = []
+        self.compute_stats = compute_stats  # Flag to compute stats during dataset loading
+        self.action_mean = None
+        self.action_std = None
+        self.sum_actions = None
+        self.sum_square_actions = None
+        self.n_samples = 0
 
-        # Load dataset
+        # Load dataset and compute stats if needed
         self._load_datasets(path, demo_percentage, validation, cameras)
+        if self.compute_stats:
+            self._compute_action_statistics()
 
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
@@ -84,8 +93,24 @@ class BaseDataset(Dataset):
                         obs_frames = len(data['obs'][camera])
                         for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
                             self.sequence_paths.append((root, demo, i, task, camera))
+                            if self.compute_stats and self.load_actions:
+                                # Accumulate statistics for each action during loading
+                                actions_seq = data['actions'][i]
+                                if self.sum_actions is None:
+                                    self.sum_actions = np.zeros(actions_seq.shape[-1])
+                                    self.sum_square_actions = np.zeros(actions_seq.shape[-1])
+
+                                self.sum_actions += actions_seq
+                                self.sum_square_actions += actions_seq ** 2
+                                self.n_samples += 1
                     else:
                         print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
+
+    def _compute_action_statistics(self):
+        # Compute mean and std from the accumulated sums
+        self.action_mean = self.sum_actions / self.n_samples
+        variance = (self.sum_square_actions / self.n_samples) - (self.action_mean ** 2)
+        self.action_std = np.sqrt(variance)
 
     def get_samples(self, root, demo, index, camera):
         obs_seq = []
@@ -109,23 +134,6 @@ class BaseDataset(Dataset):
     def __len__(self):
         return len(self.sequence_paths)
 
-
-class DatasetVideo(BaseDataset):
-    def __init__(self, path='../datasets/', x_pattern=[0], y_pattern=[1], **kwargs):
-        self.x_pattern = x_pattern
-        self.y_pattern = y_pattern
-        super().__init__(path=path, video_length=max(x_pattern + y_pattern) + 1, **kwargs)
-
-    def __getitem__(self, idx):
-        root, demo, index, task, camera = self.sequence_paths[idx]
-        obs_seq = self.get_samples(root, demo, index, camera)
-        obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
-
-        x = torch.cat([obs_seq[i] for i in self.x_pattern], dim=0)
-        y = torch.cat([obs_seq[i] for i in self.y_pattern], dim=0)
-        return x, y
-
-
 class DatasetVideo2Action(BaseDataset):
     def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_pose', **kwargs):
         self.motion = motion
@@ -140,16 +148,20 @@ class DatasetVideo2Action(BaseDataset):
 
         # Handle action_type logic
         if self.action_type == 'delta_pose':
-            actions = torch.from_numpy(np.concatenate(actions_seq))  # Current logic for delta_pose
+            actions = np.concatenate(actions_seq)  # Current logic for delta_pose
         elif self.action_type == 'absolute_pose':
             # One-to-one mapping of actions to each frame (no need to skip the last frame)
             actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
-            actions = torch.from_numpy(np.array(actions_seq))
+            actions = np.array(actions_seq)
 
-         # If video_length == 1, return a flat action vector
+        # If video_length == 1, return a flat action vector
         if self.video_length == 1:
             actions = actions.squeeze(0)  # Remove the first dimension to make it (7)
-                
+
+        # Standardize actions if mean and std are computed
+        if self.action_mean is not None and self.action_std is not None:
+            actions = (actions - self.action_mean) / self.action_std
+
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
 
         if self.motion or self.image_plus_motion:
@@ -163,7 +175,7 @@ class DatasetVideo2Action(BaseDataset):
         else:
             video = torch.cat(obs_seq, dim=0)
 
-        return video, actions.float()
+        return video, torch.from_numpy(actions).float()
 
 
 class DatasetVideo2VideoAndAction(BaseDataset):

@@ -9,21 +9,21 @@ class ResNetMLP(nn.Module):
         layers = [
             nn.Linear(in_features=input_size, out_features=hidden_size),
             nn.BatchNorm1d(hidden_size),  # Add batch normalization
-            nn.ReLU(),
+            nn.LeakyReLU(),
             # nn.Dropout(p=dropout_prob)    # Add dropout
         ]
         
         # Add hidden layers
         for _ in range(num_layers):
             layers.append(nn.Linear(hidden_size, hidden_size))
-            layers.append(nn.BatchNorm1d(hidden_size))  # Add batch normalization
-            layers.append(nn.ReLU())
+            # layers.append(nn.BatchNorm1d(hidden_size))  # Add batch normalization
+            layers.append(nn.LeakyReLU())
             # layers.append(nn.Dropout(p=dropout_prob))  # Add dropout
 
         # Add final layer that condenses from hidden_size (512) to final_size (32)
         layers.append(nn.Linear(hidden_size, final_size))
-        layers.append(nn.BatchNorm1d(final_size))  # Add batch normalization
-        layers.append(nn.ReLU())
+        # layers.append(nn.BatchNorm1d(final_size))  # Add batch normalization
+        layers.append(nn.LeakyReLU())
 
         # Final output layer
         layers.append(nn.Linear(final_size, output_size))

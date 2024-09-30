@@ -107,7 +107,7 @@ class Trainer:
 
 
             # Validate, save model and close the progress bar after the epoch ends
-            val_loss = self.validate()
+            val_loss, _ = self.validate()
             print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
             self.save_validation(val_loss, epoch+1, len(self.train_loader)+1, end_of_epoch=True)
             self.save_model(epoch+1, len(self.train_loader)+1)
