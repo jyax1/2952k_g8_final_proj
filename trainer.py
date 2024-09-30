@@ -96,8 +96,8 @@ class Trainer:
                     running_loss = 0.0
 
                 if i % validate_every == validate_every - 1:
-                    val_loss, outputs = self.validate()
-                    self.save_validation(val_loss, outputs, epoch + 1, i + 1)
+                    val_loss, outputs, labels = self.validate()
+                    self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
                 if i % save_model_every == save_model_every - 1:
                     self.save_model(epoch + 1, i + 1)
@@ -107,9 +107,9 @@ class Trainer:
 
 
             # Validate, save model and close the progress bar after the epoch ends
-            val_loss, _ = self.validate()
+            val_loss, outputs, labels = self.validate()
             print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
-            self.save_validation(val_loss, epoch+1, len(self.train_loader)+1, end_of_epoch=True)
+            self.save_validation(val_loss, outputs, labels, epoch+1, len(self.train_loader)+1, end_of_epoch=True)
             self.save_model(epoch+1, len(self.train_loader)+1)
             epoch_progress.close()
 
@@ -154,9 +154,9 @@ class Trainer:
                 loss = self.criterion(outputs, labels)
                 
                 total_val_loss += loss.item()
-        return total_val_loss / len(self.validation_loader), outputs
+        return total_val_loss / len(self.validation_loader), outputs, labels
     
-    def save_validation(self, val_loss, outputs, epoch, iteration, end_of_epoch=False):
+    def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         if end_of_epoch:
             with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
@@ -168,7 +168,9 @@ class Trainer:
                 num_rows = outputs.shape[0]
                 indices = torch.randperm(num_rows)[:10]
                 sample_outputs = outputs[indices, :]
+                sample_labels = labels[indices, :]
                 writer.writerow([f"sample outputs:", f"{sample_outputs}"])
+                writer.writerow([f"corresponding labels:", f"{sample_labels}"])
 
     def save_model(self, epoch, iteration):
         if isinstance(self.model, ActionExtractionCNN):
