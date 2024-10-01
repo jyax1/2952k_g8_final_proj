@@ -29,6 +29,7 @@ def center_crop(tensor, output_size=112):
 def load_datasets(
         architecture, 
         datasets_path, 
+        valsets_path,
         train=True, 
         validation=True, 
         horizon=2, 
@@ -43,14 +44,14 @@ def load_datasets(
             train_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
                                             demo_percentage=demo_percentage, cameras=cameras)
         if validation:
-            validation_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
+            validation_set = DatasetVideo(path=valsets_path, x_pattern=[0,1], y_pattern=[1],
                                                     demo_percentage=.9, cameras=cameras, validation=True)
     elif 'latent' in architecture and 'aux' in architecture:
         if train:
             train_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
                                             demo_percentage=demo_percentage, cameras=cameras)
         if validation:
-            validation_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
+            validation_set = DatasetVideo2VideoAndAction(path=valsets_path, x_pattern=[0,1], y_pattern=[1],
                                                     demo_percentage=.9, cameras=cameras, validation=True)
     else:
         if train:
@@ -58,7 +59,7 @@ def load_datasets(
                                             demo_percentage=demo_percentage, cameras=cameras,
                                             motion=motion, image_plus_motion=image_plus_motion, action_type=action_type)
         if validation:
-            validation_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
+            validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
                                                 demo_percentage=demo_percentage, cameras=cameras, validation=True, 
                                                 motion=motion, image_plus_motion=image_plus_motion, action_type=action_type)
 
@@ -154,3 +155,23 @@ def load_model(architecture,
                                                         freeze_idm=freeze_idm)
 
     return model
+
+import matplotlib.pyplot as plt
+
+def check_dataset(inputs, labels):
+    # To be called in trainer on inputs and labels for checking dataset correctness
+    
+    fig, axes = plt.subplots(4, 4, figsize=(12, 12))
+
+    for i, ax in enumerate(axes.flat):
+        img = inputs[i].cpu().permute(1, 2, 0).numpy()
+        img = (img - img.min()) / (img.max() - img.min())
+
+        ax.imshow(img)
+        ax.axis('off')
+
+        ax.set_title(f"{labels[i].cpu().numpy()}", fontsize=8)
+
+    # Adjust layout and display the plot
+    plt.tight_layout()
+    plt.show()

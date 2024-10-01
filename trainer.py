@@ -11,6 +11,7 @@ from architectures.latent_decoders import *
 from architectures.direct_resnet_mlp import ActionExtractionResNet, PoseExtractionResNet
 import csv
 from tqdm import tqdm
+from utils import checkdataset
 
 class Trainer:
     def __init__(self, 
@@ -91,7 +92,7 @@ class Trainer:
                 running_loss += loss.item()
 
                 if i % 5 == 4:  # Update progress bar every 5 iterations
-                    avg_loss = running_loss / 10
+                    avg_loss = running_loss / 5
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
 

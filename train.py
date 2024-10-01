@@ -46,6 +46,7 @@ def train(args):
     train_set, validation_set = load_datasets(
         args.architecture, 
         args.datasets_path, 
+        args.valsets_path,
         train=True,
         validation=True,
         horizon=args.horizon,
@@ -87,6 +88,12 @@ if __name__ == '__main__':
         type=str, 
         default=dp, 
         help='Path to the datasets'
+    )
+    parser.add_argument(
+        '--valsets_path', '-vp',
+        type=str,
+        default='',
+        help='Path to the validation sets'
     )
     parser.add_argument(
         '--results_path', '-rp', 
@@ -238,6 +245,9 @@ if __name__ == '__main__':
 
     args.cameras = args.cameras.split(',')
     args.embodiments = args.embodiments.split(',')
+    
+    if args.valsets_path == '':
+        args.valsets_path = args.datasets_path
 
     print('Arguments:', args) # Check argument correctness in jobs
     train(args)
