@@ -4,6 +4,7 @@ from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.direct_resnet_mlp import *
 from architectures.latent_decoders import *
+from architectures.resnet import *
 import re
 from pathlib import Path
 
@@ -100,7 +101,8 @@ def load_model(architecture,
         if action_type == 'delta_pose':
             model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
         elif action_type == 'absolute_pose':
-            model = PoseExtractionResNet(resnet_version, action_length=horizon, num_mlp_layers=num_mlp_layers)
+            # model = PoseExtractionResNet(resnet_version, action_length=horizon, num_mlp_layers=num_mlp_layers)
+            model = ResNet18()
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':

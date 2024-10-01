@@ -133,6 +133,20 @@ class BaseDataset(Dataset):
 
     def __len__(self):
         return len(self.sequence_paths)
+    
+class DatasetVideo(BaseDataset):
+    def __init__(self, path='../datasets/', x_pattern=[0], y_pattern=[1], **kwargs):
+        self.x_pattern = x_pattern
+        self.y_pattern = y_pattern
+        super().__init__(path=path, video_length=max(x_pattern + y_pattern) + 1, **kwargs)
+    
+    def __getitem__(self, idx):
+        root, demo, index, task, camera = self.sequence_paths[idx]
+        obs_seq = self.get_samples(root, demo, index, camera)
+        obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
+        x = torch.cat([obs_seq[i] for i in self.x_pattern], dim=0)
+        y = torch.cat([obs_seq[i] for i in self.y_pattern], dim=0)
+        return x, y
 
 class DatasetVideo2Action(BaseDataset):
     def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_pose', **kwargs):
