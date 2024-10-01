@@ -11,7 +11,7 @@ from architectures.latent_decoders import *
 from architectures.direct_resnet_mlp import ActionExtractionResNet, PoseExtractionResNet
 import csv
 from tqdm import tqdm
-from utils import checkdataset
+from utils.utils import check_dataset
 
 class Trainer:
     def __init__(self, 

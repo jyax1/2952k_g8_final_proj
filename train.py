@@ -13,6 +13,7 @@ if oscar:
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -92,7 +93,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--valsets_path', '-vp',
         type=str,
-        default='',
+        default=vp,
         help='Path to the validation sets'
     )
     parser.add_argument(
