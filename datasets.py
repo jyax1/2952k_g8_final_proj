@@ -78,7 +78,10 @@ class BaseDataset(Dataset):
 
         # Collect all observation data paths
         for zarr_file, root in zip(self.zarr_files, self.roots):
-            print(f"Loading {zarr_file}")
+            if validation:
+                print(f"Loading {zarr_file} for validation")
+            else:
+                print(f"Loading {zarr_file} for training")
             task = zarr_file.split("/")[-2].replace('_', ' ')
             demos = list(root['data'].keys())
             if validation:

@@ -13,7 +13,7 @@ if oscar:
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
-    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core'
+    vp = '/home/yilong/Documents/ae_data/abs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
