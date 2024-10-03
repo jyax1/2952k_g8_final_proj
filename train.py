@@ -97,6 +97,11 @@ if __name__ == '__main__':
         help='Path to the validation sets'
     )
     parser.add_argument(
+        '--dataset_modality', '-dm',
+        type=str,
+        choices=['rgb', 'rgbd', 'voxel']
+    )
+    parser.add_argument(
         '--results_path', '-rp', 
         type=str, 
         default=rp, 
