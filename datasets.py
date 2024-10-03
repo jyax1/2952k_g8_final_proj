@@ -26,7 +26,7 @@ import torch
 from einops import rearrange
 import zarr
 from torchvideotransforms import video_transforms, volume_transforms
-from utils.dataset_utils import hdf5_to_zarr
+from utils.dataset_utils import *
 import numpy as np
 
 
@@ -37,6 +37,7 @@ class BaseDataset(Dataset):
                  frame_skip=0, 
                  demo_percentage=1.0, 
                  cameras=['frontview_image'], 
+                 data_modality='rgb',
                  validation=False, 
                  random_crop=False, 
                  load_actions=False, 
@@ -54,6 +55,7 @@ class BaseDataset(Dataset):
         self.sum_actions = None
         self.sum_square_actions = None
         self.n_samples = 0
+        self.data_modality = data_modality
 
         # Load dataset and compute stats if needed
         self._load_datasets(path, demo_percentage, validation, cameras)
@@ -91,23 +93,39 @@ class BaseDataset(Dataset):
 
             for demo in demos:
                 data = root['data'][demo]
-                for camera in cameras:
-                    if camera in data['obs'].keys():
-                        obs_frames = len(data['obs'][camera])
-                        for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                            self.sequence_paths.append((root, demo, i, task, camera))
-                            if self.compute_stats and self.load_actions:
-                                # Accumulate statistics for each action during loading
-                                actions_seq = data['actions'][i]
-                                if self.sum_actions is None:
-                                    self.sum_actions = np.zeros(actions_seq.shape[-1])
-                                    self.sum_square_actions = np.zeros(actions_seq.shape[-1])
+                if self.data_modality == 'voxel':
+                    camera = 'voxel'
+                    obs_frames = len(data['obs']['voxels'])
+                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                        self.sequence_paths.append((root, demo, i, task, camera))
+                        if self.compute_stats and self.load_actions:
+                            # Accumulate statistics for each action during loading
+                            actions_seq = data['actions'][i]
+                            if self.sum_actions is None:
+                                self.sum_actions = np.zeros(actions_seq.shape[-1])
+                                self.sum_square_actions = np.zeros(actions_seq.shape[-1])
 
-                                self.sum_actions += actions_seq
-                                self.sum_square_actions += actions_seq ** 2
-                                self.n_samples += 1
-                    else:
-                        print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
+                            self.sum_actions += actions_seq
+                            self.sum_square_actions += actions_seq ** 2
+                            self.n_samples += 1
+                else:
+                    for camera in cameras:
+                        if camera in data['obs'].keys():
+                            obs_frames = len(data['obs'][camera])
+                            for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                                self.sequence_paths.append((root, demo, i, task, camera))
+                                if self.compute_stats and self.load_actions:
+                                    # Accumulate statistics for each action during loading
+                                    actions_seq = data['actions'][i]
+                                    if self.sum_actions is None:
+                                        self.sum_actions = np.zeros(actions_seq.shape[-1])
+                                        self.sum_square_actions = np.zeros(actions_seq.shape[-1])
+
+                                    self.sum_actions += actions_seq
+                                    self.sum_square_actions += actions_seq ** 2
+                                    self.n_samples += 1
+                        else:
+                            print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
 
     def _compute_action_statistics(self):
         # Compute mean and std from the accumulated sums
@@ -119,10 +137,15 @@ class BaseDataset(Dataset):
         obs_seq = []
         actions_seq = []
         for i in range(self.video_length):
-            obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-            if self.semantic_map:
-                obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
-                obs = np.concatenate((obs, obs_semantic), axis=2)
+            if self.data_modality == 'voxel':
+                obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
+                 
+            else:
+                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                if self.semantic_map:
+                    obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
+                    obs = np.concatenate((obs, obs_semantic), axis=2)
+            
             obs_seq.append(obs)
 
             if self.load_actions:
@@ -132,6 +155,7 @@ class BaseDataset(Dataset):
 
         if self.load_actions:
             return obs_seq, actions_seq
+        
         return obs_seq
 
     def __len__(self):
@@ -155,7 +179,7 @@ class DatasetVideo2Action(BaseDataset):
     def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_pose', **kwargs):
         self.motion = motion
         self.image_plus_motion = image_plus_motion
-        self.action_type = action_type  # New argument to specify action type
+        self.action_type = action_type
         assert not (self.motion and self.image_plus_motion), "Choose either only motion or only image_plus_motion"
         super().__init__(path=path, load_actions=True, **kwargs)
 
@@ -179,7 +203,10 @@ class DatasetVideo2Action(BaseDataset):
         if self.action_mean is not None and self.action_std is not None:
             actions = (actions - self.action_mean) / self.action_std
 
-        obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
+        if self.data_modality != 'voxel':
+            obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
+        else:
+            obs_seq = [torch.from_numpy(obs).float() for obs in obs_seq]
 
         if self.motion or self.image_plus_motion:
             motion_seq = [(obs_seq[t] - obs_seq[t + 1]) for t in range(len(obs_seq) - 1)]

@@ -37,7 +37,8 @@ def load_datasets(
         cameras=['frontview_image'],
         motion=False,
         image_plus_motion=False,
-        action_type=''
+        action_type='',
+        data_modality='rgb',
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
@@ -57,11 +58,13 @@ def load_datasets(
         if train:
             train_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
-                                            motion=motion, image_plus_motion=image_plus_motion, action_type=action_type)
+                                            motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
+                                            data_modality=data_modality)
         if validation:
             validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
                                                 demo_percentage=demo_percentage, cameras=cameras, validation=True, 
-                                                motion=motion, image_plus_motion=image_plus_motion, action_type=action_type)
+                                                motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
+                                                data_modality=data_modality)
 
     if train and validation:
         return train_set, validation_set
@@ -83,7 +86,8 @@ def load_model(architecture,
                fdm_model_name,
                freeze_idm,
                freeze_fdm,
-               action_type
+               action_type,
+               data_modality
 ):
     if architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_dim=latent_dim, 
@@ -103,7 +107,12 @@ def load_model(architecture,
             model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
         elif action_type == 'absolute_pose':
             # model = PoseExtractionResNet(resnet_version, action_length=horizon, num_mlp_layers=num_mlp_layers)
-            model = ResNet18()
+            if data_modality == 'rgb':
+                model = ResNet18()
+            elif data_modality == 'rgbd':
+                pass
+            elif data_modality == 'voxel':
+                model = resnet18_3d(input_channels=4)
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':

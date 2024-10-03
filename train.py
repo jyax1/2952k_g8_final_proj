@@ -14,6 +14,7 @@ if oscar:
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
     vp = '/home/yilong/Documents/ae_data/abs'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -40,7 +41,8 @@ def train(args):
         fdm_model_name=args.fdm_model_name,
         freeze_idm=args.freeze_idm,
         freeze_fdm=args.freeze_fdm,
-        action_type=args.action_type
+        action_type=args.action_type,
+        data_modality=args.data_modality
         )
 
     # Instandiate datasets
@@ -55,7 +57,8 @@ def train(args):
         cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
-        action_type=args.action_type
+        action_type=args.action_type,
+        data_modality=args.data_modality
         )
 
     # Instantiate the trainer
@@ -99,7 +102,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--data_modality', '-dm',
         type=str,
-        choices=['rgb', 'rgbd', 'voxel']
+        default='rgb',
+        choices=['rgb', 'rgbd', 'voxel'],
+        help='Type of data to use for training'
     )
     parser.add_argument(
         '--results_path', '-rp', 
