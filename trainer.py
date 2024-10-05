@@ -170,8 +170,8 @@ class Trainer:
                 indices = torch.randperm(num_rows)[:10]
                 sample_outputs = outputs[indices, :]
                 sample_labels = labels[indices, :]
-                writer.writerow([f"sample outputs:", f"{sample_outputs}"])
-                writer.writerow([f"corresponding labels:", f"{sample_labels}"])
+                writer.writerow([f"sample outputs:\n {sample_outputs}"])
+                writer.writerow([f"corresponding labels:\n {sample_labels}"])
 
     def save_model(self, epoch, iteration):
         if isinstance(self.model, ActionExtractionCNN):
