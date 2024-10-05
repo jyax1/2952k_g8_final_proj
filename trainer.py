@@ -144,7 +144,8 @@ class Trainer:
         self.model.eval()
         total_val_loss = 0.0
         with torch.no_grad():
-            for inputs, labels in self.validation_loader:
+            
+            for inputs, labels in tqdm(self.validation_loader, desc="Validating", leave=False):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
                 
@@ -153,8 +154,8 @@ class Trainer:
                     labels = self.recover_action_vector(labels)
                     
                 loss = self.criterion(outputs, labels)
-                
                 total_val_loss += loss.item()
+
         return total_val_loss / len(self.validation_loader), outputs, labels
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
