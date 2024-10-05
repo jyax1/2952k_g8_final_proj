@@ -98,6 +98,7 @@ class Trainer:
 
                 if i % validate_every == validate_every - 1:
                     val_loss, outputs, labels = self.validate()
+                    self.model.train() #### Added
                     self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
                 if i % save_model_every == save_model_every - 1:
