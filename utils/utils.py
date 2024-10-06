@@ -4,6 +4,7 @@ from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.direct_resnet_mlp import *
 from architectures.latent_decoders import *
+from architectures.resnet import *
 import re
 from pathlib import Path
 
@@ -28,37 +29,42 @@ def center_crop(tensor, output_size=112):
 def load_datasets(
         architecture, 
         datasets_path, 
+        valsets_path,
         train=True, 
         validation=True, 
         horizon=2, 
         demo_percentage=0.9, 
         cameras=['frontview_image'],
         motion=False,
-        image_plus_motion=False
+        image_plus_motion=False,
+        action_type='',
+        data_modality='rgb',
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
             train_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
                                             demo_percentage=demo_percentage, cameras=cameras)
         if validation:
-            validation_set = DatasetVideo(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
+            validation_set = DatasetVideo(path=valsets_path, x_pattern=[0,1], y_pattern=[1],
                                                     demo_percentage=.9, cameras=cameras, validation=True)
     elif 'latent' in architecture and 'aux' in architecture:
         if train:
             train_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
                                             demo_percentage=demo_percentage, cameras=cameras)
         if validation:
-            validation_set = DatasetVideo2VideoAndAction(path=datasets_path, x_pattern=[0,1], y_pattern=[1],
+            validation_set = DatasetVideo2VideoAndAction(path=valsets_path, x_pattern=[0,1], y_pattern=[1],
                                                     demo_percentage=.9, cameras=cameras, validation=True)
     else:
         if train:
-            train_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
+            train_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
-                                            motion=motion, image_plus_motion=image_plus_motion)
+                                            motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
+                                            data_modality=data_modality)
         if validation:
-            validation_set = DatasetVideo2DeltaAction(path=datasets_path, video_length=horizon, 
-                                                demo_percentage=demo_percentage, cameras=cameras, validation=True, 
-                                                motion=motion, image_plus_motion=image_plus_motion)
+            validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
+                                                demo_percentage=.99, cameras=cameras, validation=True, 
+                                                motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
+                                                data_modality=data_modality)
 
     if train and validation:
         return train_set, validation_set
@@ -80,6 +86,8 @@ def load_model(architecture,
                fdm_model_name,
                freeze_idm,
                freeze_fdm,
+               action_type,
+               data_modality
 ):
     if architecture == 'direct_cnn_mlp':
         model = ActionExtractionCNN(latent_dim=latent_dim, 
@@ -95,7 +103,26 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
+        if action_type == 'delta_pose':
+            model = ActionExtractionResNet(resnet_version, action_length=horizon-1, num_mlp_layers=num_mlp_layers)
+        elif action_type == 'absolute_pose':
+            # model = PoseExtractionResNet(resnet_version, action_length=horizon, num_mlp_layers=num_mlp_layers)
+            if data_modality == 'rgb':
+                model = ResNet18()
+            elif data_modality == 'rgbd':
+                pass
+            elif data_modality == 'voxel':
+                if resnet_layers_num == 18:
+                    model = resnet18_3d()
+                elif resnet_layers_num == 50:
+                    model = resnet50_3d()
+                elif resnet_layers_num == 101:
+                    model = resnet101_3d
+                elif resnet_layers_num == 152:
+                    model = resnet152_3d
+                elif resnet_layers_num == 200:
+                    model = resnet200_3d
+                
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':
@@ -147,3 +174,23 @@ def load_model(architecture,
                                                         freeze_idm=freeze_idm)
 
     return model
+
+import matplotlib.pyplot as plt
+
+def check_dataset(inputs, labels):
+    # To be called in trainer on inputs and labels for checking dataset correctness
+    
+    fig, axes = plt.subplots(4, 4, figsize=(12, 12))
+
+    for i, ax in enumerate(axes.flat):
+        img = inputs[i].cpu().permute(1, 2, 0).numpy()
+        img = (img - img.min()) / (img.max() - img.min())
+
+        ax.imshow(img)
+        ax.axis('off')
+
+        ax.set_title(f"{labels[i].cpu().numpy()}", fontsize=8)
+
+    # Adjust layout and display the plot
+    plt.tight_layout()
+    plt.show()

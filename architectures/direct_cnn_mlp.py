@@ -40,25 +40,67 @@ class FramesConvolution(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
+import torch.nn as nn
+
 class ActionMLP(nn.Module):
     def __init__(self, latent_dim=4, latent_length=2, action_length=1, num_layers=9):
         super(ActionMLP, self).__init__()
         self.latent_size = latent_dim ** 2
+        
         layers = [
             nn.Flatten(),
             nn.Linear(in_features=latent_length * self.latent_size, out_features=512),
-            nn.ReLU()
+            nn.BatchNorm1d(512),  # Add batch normalization
+            nn.ReLU(),
+            nn.Dropout(p=0.5)  # Add dropout to prevent overfitting
         ]
-
+        
         # 8 layers in total
         for _ in range(num_layers):
             layers.append(nn.Linear(in_features=512, out_features=512))
+            layers.append(nn.BatchNorm1d(512))  # Add batch normalization
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(p=0.5))  # Add dropout with 50% probability
 
         # Final layers
         layers.append(nn.Linear(in_features=512, out_features=32))
+        layers.append(nn.BatchNorm1d(32))  # Add batch normalization
         layers.append(nn.ReLU())
+        
         layers.append(nn.Linear(in_features=32, out_features=7 * action_length))
+        layers.append(nn.Tanh())  # Ensure output is in the [-1, 1] range
+
+        self.fc = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.fc(x)
+    
+class PoseMLP(nn.Module):
+    def __init__(self, latent_dim=4, latent_length=2, pose_length=1, num_layers=9):
+        super(PoseMLP, self).__init__()
+        self.latent_size = latent_dim ** 2
+        
+        layers = [
+            nn.Flatten(),
+            nn.Linear(in_features=latent_length * self.latent_size, out_features=512),
+            nn.BatchNorm1d(512),  # Add batch normalization
+            nn.ReLU(),
+            nn.Dropout(p=0.5)  # Add dropout to prevent overfitting
+        ]
+        
+        # 8 layers in total
+        for _ in range(num_layers):
+            layers.append(nn.Linear(in_features=512, out_features=512))
+            layers.append(nn.BatchNorm1d(512))  # Add batch normalization
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(p=0.5))  # Add dropout with 50% probability
+
+        # Final layers
+        layers.append(nn.Linear(in_features=512, out_features=32))
+        layers.append(nn.BatchNorm1d(32))  # Add batch normalization
+        layers.append(nn.ReLU())
+        
+        layers.append(nn.Linear(in_features=32, out_features=7 * pose_length))
 
         self.fc = nn.Sequential(*layers)
 

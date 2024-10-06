@@ -6,17 +6,20 @@ import matplotlib.pyplot as plt
 from torchvision.utils import save_image
 from PIL import Image
 import torchvision.transforms as T
+import random
 
 random.seed(0)
 
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = '/users/ysong135/scratch/datasets_debug'
+    rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/datasets'
+    dp = '/home/yilong/Documents/ae_data/datasets'
+    rp = '/home/yilong/Documents/action_extractor/results'
 '''
 Temporary
 '''
@@ -113,11 +116,41 @@ def visualize(model, validation_set, device='cuda'):
 
     visualize_and_save_images(normalized_feature_map, scaled_first_images, scaled_prediction, scaled_labels)
 
-def validate(architecture, model_paths=[]):
-    validation_datasets = load_datasets(architecture)
-    return None
+def validate(model, validation_set, device='cuda'):
+    model.eval()
+    model.to(device)
+    
+    # 20 random samples from validation set
+    indices = random.sample(range(len(validation_set)), 20)
+    images = [validation_set[i][0] for i in indices]
+    labels = [validation_set[i][1] for i in indices] if isinstance(validation_set[0], tuple) else None
+    
+    # stack
+    images_batch, labels_batch = torch.stack(images), torch.stack(labels)
+    
+    images_batch = images_batch.to(device)
+    
+    with torch.no_grad():
+        # obtain and normalize feature map
+        actions = model.forward(images_batch)
+        
+        criterion = nn.MSELoss()
+        loss = criterion(actions, labels_batch.to(device))
+        
+        for i, (label, action) in enumerate(zip(labels_batch, actions)):
+            print(f"Row {i + 1}:")
+            print(f"Label: {label.tolist()}")
+            print(f"Action: {action.tolist()}")
+            print()  # Print a blank line for readability
 
+        
+        print(f'Validation loss: {loss}')
+        
+    
 def load_params_from_model_name(model_name):
+    
+    if model_name == '':
+        return None
 
     params = {}
 
@@ -140,12 +173,16 @@ def load_params_from_model_name(model_name):
     if match:
         motion = match.group(1) == "True"
         params['motion'] = motion
+    else:
+        params['motion'] = False
             
     # set params['image_plus_motion']
     match = re.search(r'_ipm\D*(True|False)', model_name)
     if match:
         image_plus_motion = match.group(1) == "True"
         params['image_plus_motion'] = image_plus_motion
+    else:
+        params['image_plus_motion'] = False
 
     # set params['vit_patch_size']
     match = re.search(r'_vps(\d+)', model_name)
@@ -162,6 +199,8 @@ def load_params_from_model_name(model_name):
         params['resnet_layers_num'] = resnet_layers_num
     else:
         params['resnet_layers_num'] = 0
+        
+    params['resnet_layers_num'] = 50
 
     return params
 
@@ -171,9 +210,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Validation or visualization of trained models")
 
     parser.add_argument(
-        '--model_name', '-mn', 
+        '--encoder_model_name', '-emn', 
         type=str,
-        help='Pretrained model to validate'
+        default='',
+        help='Pretrained encoder model to validate or visualize'
+    )
+    
+    parser.add_argument(
+        '--decoder_model_name', '-dmn', 
+        type=str,
+        default='',
+        help='Pretrained decoder model to validate or visualize'
+    )
+    
+    parser.add_argument(
+        '--direct_model_name', '-dirmn',
+        type=str,
+        default='',
+        help='Pretrained direct model to validate or visualize'
     )
 
     parser.add_argument(
@@ -185,52 +239,124 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    results_path= str(Path(args.datasets_path).parent) + '/ae_results/'
+    results_path= rp
 
-    params = load_params_from_model_name(args.model_name)
+    encoder_params = load_params_from_model_name(args.encoder_model_name)
+    decoder_params = load_params_from_model_name(args.decoder_model_name)
+    direct_params  = load_params_from_model_name(args.direct_model_name)
 
     idm_model_name = ''
     fdm_model_name = ''
-    if 'latent' in params['architecture']:
-        if 'idm' in args.model_name:
-            idm_model_name = args.model_name
-            fdm_model_name = args.model_name.replace('idm', 'fdm')
-        elif 'fdm' in args.model_name:
-            fdm_model_name = args.model_name
-            idm_model_name = args.model_name.replace('fdm', 'idm')
-        idm_model_name = str(Path(results_path)) + f'/{idm_model_name}'
-        fdm_model_name = str(Path(results_path)) + f'/{fdm_model_name}'
+    if encoder_params != None and 'latent' in encoder_params['architecture']:
+        if 'idm' in args.encoder_model_name:
+            idm_model_name = args.encoder_model_name
+            fdm_model_name = args.encoder_model_name.replace('idm', 'fdm')
+        elif 'fdm' in args.encoder_model_name:
+            fdm_model_name = args.encoder_model_name
+            idm_model_name = args.encoder_model_name.replace('fdm', 'idm')
+        idm_model_path = str(Path(results_path)) + f'/{idm_model_name}'
+        fdm_model_path = str(Path(results_path)) + f'/{fdm_model_name}'
+
+        
+    if direct_params != None:
+        if 'resnet' in direct_params['architecture']:
+            match = re.search(r'_(mlp|resnet)-\d+-\d+\.pth$', args.direct_model_name)
+            if match:
+                if match.group(1) == 'mlp':
+                    mlp_model_name = args.direct_model_name
+                    resnet_model_name = args.direct_model_name.replace('_mlp-', '_resnet-')
+                elif match.group(1) == 'resnet':
+                    mlp_model_name = args.direct_model_name.replace('_resnet-', '_lmlp-')
+                    resnet_model_name = args.direct_model_name
+                  
+            resnet_model_path = str(Path(results_path)) + f'/{resnet_model_name}'
+            mlp_model_path = str(Path(results_path)) + f'/{mlp_model_name}'
+        
+            
+                    
+    
+    decoder_model_name = args.decoder_model_name
+    
+    direct_model_name = args.direct_model_name
+    
+    if decoder_params == None and encoder_params != None:
+        architecture = encoder_params['architecture']
+    if decoder_params != None:
+        architecture = decoder_params['architecture']
+    if direct_params != None:
+        architecture = direct_params['architecture']
 
     validation_set = load_datasets(
-        params['architecture'],
+        architecture,
         args.datasets_path,
         train=False,
         validation=True,
         horizon=2,
         demo_percentage=.9,
         cameras=['frontview_image'],
-        motion=params['motion'],
-        image_plus_motion=params['image_plus_motion']
+        motion=False,
+        image_plus_motion=False
         )
 
-    model = load_model(
-        params['architecture'],
-        horizon=2,
-        results_path=results_path,
-        latent_dim=params['latent_dim'],
-        motion=params['motion'],
-        image_plus_motion=params['image_plus_motion'],
-        vit_patch_size=params['vit_patch_size'],
-        resnet_layers_num=params['resnet_layers_num'],
-        idm_model_name=idm_model_name,
-        fdm_model_name=fdm_model_name,
-        freeze_idm=True,
-        freeze_fdm=True ## these two parameters don't matter here
-        )
+    if decoder_params == None and encoder_params != None:
+        encoder_model = load_model(
+            encoder_params['architecture'],
+            horizon=2,
+            results_path=results_path,
+            latent_dim=encoder_params['latent_dim'],
+            motion=encoder_params['motion'],
+            image_plus_motion=encoder_params['image_plus_motion'],
+            num_mlp_layers=10,
+            vit_patch_size=encoder_params['vit_patch_size'],
+            resnet_layers_num=encoder_params['resnet_layers_num'],
+            idm_model_name=idm_model_name,
+            fdm_model_name=fdm_model_name,
+            freeze_idm=True,
+            freeze_fdm=True ## these two parameters don't matter here
+            )
+    
+    if decoder_params != None:
+        decoder_model = load_model(
+            decoder_params['architecture'],
+            horizon=2,
+            results_path=results_path,
+            latent_dim=decoder_params['latent_dim'],
+            motion=decoder_params['motion'],
+            image_plus_motion=decoder_params['image_plus_motion'],
+            num_mlp_layers=10, #10 for decoder
+            vit_patch_size=decoder_params['vit_patch_size'],
+            resnet_layers_num=decoder_params['resnet_layers_num'],
+            idm_model_name=idm_model_name,
+            fdm_model_name=fdm_model_name,
+            freeze_idm=True,
+            freeze_fdm=True ## these two parameters don't matter here
+            )
+        
+    if direct_params != None:
+        direct_model = load_model(
+            direct_params['architecture'],
+            horizon=2,
+            results_path=results_path,
+            latent_dim=direct_params['latent_dim'],
+            motion=direct_params['motion'],
+            image_plus_motion=direct_params['image_plus_motion'],
+            num_mlp_layers=3,
+            vit_patch_size=direct_params['vit_patch_size'],
+            resnet_layers_num=direct_params['resnet_layers_num'],
+            idm_model_name=idm_model_name,
+            fdm_model_name=fdm_model_name,
+            freeze_idm=True,
+            freeze_fdm=True ## these two parameters don't matter here
+            )
+        
 
-    if 'latent' in params['architecture'] and 'decoder' not in params['architecture']:
-        model.idm.load_state_dict(torch.load(idm_model_name))
-        model.fdm.load_state_dict(torch.load(fdm_model_name))
-        visualize(model, validation_set)
-    else:
-        validate(args.dataset_path, args.architecture)
+    if encoder_params != None and 'latent' in encoder_params['architecture'] and decoder_params == None:
+        encoder_model.idm.load_state_dict(torch.load(idm_model_path))
+        encoder_model.fdm.load_state_dict(torch.load(fdm_model_path))
+        visualize(encoder_model, validation_set)
+    elif encoder_params != None and 'latent' in encoder_params['architecture'] and decoder_params != None:
+        validate(decoder_model, validation_set)
+    elif direct_params != None and 'resnet' in direct_params['architecture']:
+        direct_model.resnet.load_state_dict(torch.load(resnet_model_path))
+        direct_model.action_mlp.load_state_dict(torch.load(mlp_model_path))
+        validate(direct_model, validation_set)

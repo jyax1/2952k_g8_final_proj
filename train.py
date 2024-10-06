@@ -12,7 +12,9 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/datasets_debug'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    vp = '/home/yilong/Documents/ae_data/abs'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -39,19 +41,24 @@ def train(args):
         fdm_model_name=args.fdm_model_name,
         freeze_idm=args.freeze_idm,
         freeze_fdm=args.freeze_fdm,
+        action_type=args.action_type,
+        data_modality=args.data_modality
         )
 
     # Instandiate datasets
     train_set, validation_set = load_datasets(
         args.architecture, 
         args.datasets_path, 
+        args.valsets_path,
         train=True,
         validation=True,
         horizon=args.horizon,
         demo_percentage=args.demo_percentage,
         cameras=args.cameras,
         motion=args.motion,
-        image_plus_motion=args.image_plus_motion
+        image_plus_motion=args.image_plus_motion,
+        action_type=args.action_type,
+        data_modality=args.data_modality
         )
 
     # Instantiate the trainer
@@ -85,6 +92,19 @@ if __name__ == '__main__':
         type=str, 
         default=dp, 
         help='Path to the datasets'
+    )
+    parser.add_argument(
+        '--valsets_path', '-vp',
+        type=str,
+        default=vp,
+        help='Path to the validation sets'
+    )
+    parser.add_argument(
+        '--data_modality', '-dm',
+        type=str,
+        default='rgb',
+        choices=['rgb', 'rgbd', 'voxel'],
+        help='Type of data to use for training'
     )
     parser.add_argument(
         '--results_path', '-rp', 
@@ -165,7 +185,7 @@ if __name__ == '__main__':
         '--resnet_layers_num', '-rln',
         type=int,
         default=0,
-        choices=[0, 18, 50],
+        choices=[0, 18, 50, 101, 152, 200],
         help='Number of layers if direct_resnet_mlp architecture is chosen'
     )
     parser.add_argument(
@@ -196,7 +216,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--learning_rate', '-lr',
         type=float,
-        default=0.001,
+        default=1e-4,
         help='Learning rate to use for training'
     )
     parser.add_argument(
@@ -211,10 +231,16 @@ if __name__ == '__main__':
         default=10,
         help='Number of MLP layers to use if selected architecture contains MLP portion.'
     )
-
+    parser.add_argument(
+        '--action_type',
+        type=str,
+        default='absolute_pose',
+        choices=['delta_pose', 'absolute_pose'],
+        help='Type of action representation to use'
+    )
+    
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
-    assert args.horizon > 1, "Video length must be greater or equal to 2"
 
     if args.freeze_idm or args.freeze_fdm:
         assert 'aux' in args.architecture and 'latent_decoder' in args.architecture
@@ -226,10 +252,13 @@ if __name__ == '__main__':
             assert args.fdm_model_name != ''
     
     if 'resnet' in args.architecture:
-        assert args.resnet_layers_num == 18 or args.resnet_layers_num == 50, "Choose either ResNet-18 or ResNet-50"
+        assert args.resnet_layers_num != 0, "Choose either ResNet-18, 50, 101, 152, or 200"
 
     args.cameras = args.cameras.split(',')
     args.embodiments = args.embodiments.split(',')
+    
+    if args.valsets_path == '':
+        args.valsets_path = args.datasets_path
 
     print('Arguments:', args) # Check argument correctness in jobs
     train(args)
