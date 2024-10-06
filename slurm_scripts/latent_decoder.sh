@@ -67,19 +67,19 @@ demo_percentage=.9
 dataset_path="/users/ysong135/scratch/datasets/"
 results_path="/users/ysong135/Documents/action_extractor/results"
 epoch=20
-batch_size=1024
+batch_size=124
 horizon=2
 motion=""
 image_plus_motion=""
 latent_dim=32
-idm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-6000.pth"
-fdm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-6000.pth"
+idm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-6000.pth"
+fdm_model_name="latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-6000.pth"
 freeze_idm=""
 freeze_fdm=""
 vit_patch_size=16
-resnet_layers_num=18
+resnet_layers_num=50
 
-# Job 1: latent_decoder_mlp
+#Job 1: latent_decoder_mlp
 # architecture="latent_decoder_mlp"
 # train_only
 
@@ -100,10 +100,14 @@ train_only
 # train_only
 
 
-# # Job 3: latent_decoder_aux_separate_unet_mlp
+# # # Job 3: latent_decoder_aux_separate_unet_mlp
 # architecture="latent_decoder_aux_separate_unet_mlp"
 # train_only
 
+# freeze_idm=""
+# train_only
+
+# batch_size=250
 # freeze_idm=""
 # train_only
 
