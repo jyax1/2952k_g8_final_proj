@@ -117,11 +117,11 @@ def load_model(architecture,
                 elif resnet_layers_num == 50:
                     model = resnet50_3d()
                 elif resnet_layers_num == 101:
-                    model = resnet101_3d
+                    model = resnet101_3d()
                 elif resnet_layers_num == 152:
-                    model = resnet152_3d
+                    model = resnet152_3d()
                 elif resnet_layers_num == 200:
-                    model = resnet200_3d
+                    model = resnet200_3d()
                 
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion

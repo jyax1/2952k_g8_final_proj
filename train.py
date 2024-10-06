@@ -6,7 +6,7 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = "/users/ysong135/scratch/datasets/random"
     vp = "/users/ysong135/scratch/datasets/random"
@@ -25,7 +25,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_cam{args.cameras}_emb{args.embodiments}_lat{args.latent_dim}_res{args.resnet_layers_num}_vps{args.vit_patch_size}_fidm{args.freeze_idm}_ffdm{args.freeze_fdm}_opt{args.optimizer}_lr{args.learning_rate}_mmt{args.momentum}_{args.note}'''
+    model_name = f'''{args.architecture}_res{args.resnet_layers_num}_opt{args.optimizer}_lr{args.learning_rate}_mmt{args.momentum}_{args.note}'''
 
     # Instantiate model
     model = load_model(
