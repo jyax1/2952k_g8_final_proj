@@ -74,26 +74,26 @@ action_type="absolute_pose"
 
 architecture="direct_resnet_mlp"
 
-# batch_size=256
+batch_size=256
 
-# resnet_layers_num=18
-# note="18"
+resnet_layers_num=18
+note="18"
+train_only
+
+resnet_layers_num=50
+note="50"
+train_only
+
+# batch_size=128
+
+# resnet_layers_num=101
+# note="101"
 # train_only
 
-# resnet_layers_num=50
-# note="50"
+# resnet_layers_num=152
+# note="152"
 # train_only
 
-batch_size=128
-
-resnet_layers_num=101
-note="101"
-train_only
-
-resnet_layers_num=152
-note="152"
-train_only
-
-resnet_layers_num=200
-note="200"
-train_only
+# resnet_layers_num=200
+# note="200"
+# train_only
