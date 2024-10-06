@@ -81,6 +81,7 @@ class Trainer:
             save_model_every = len(self.train_loader) // 4
 
             for i, (inputs, labels) in enumerate(self.train_loader):
+                self.model.train()
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
 
                 self.optimizer.zero_grad()
