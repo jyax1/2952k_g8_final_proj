@@ -44,12 +44,14 @@ run()
     $image_plus_motion
     --idm_model_name=${idm_model_name}
     --fdm_model_name=${fdm_model_name}
+    --action_type=${action_type}
     --cameras=${cameras}
     $freeze_idm
     $freeze_fdm
     --optimizer=${optimizer}
     --learning_rate=${learning_rate}
     --momentum=${momentum}
+    --data_modality=${data_modality}
     --note=${note}
     "
     slurm_args=""
@@ -68,63 +70,36 @@ date=$(date +%m%d)
 
 # Parameters for the jobs
 demo_percentage=.9
-dataset_path="/users/ysong135/scratch/datasets/"
-epoch=100
-batch_size=1024
-horizon=2
+dataset_path="/users/ysong135/scratch/datasets/random"
+epoch=10
+batch_size=256
+horizon=1
 motion=""
 image_plus_motion=""
 idm_model_name="idm_model.pth"
 fdm_model_name="fdm_model.pth"
 freeze_idm=""
 freeze_fdm=""
-vit_patch_size=2
+architecture=""
+data_modality="voxel"
+action_type="absolute_pose"
+
 resnet_layers_num=18
-optimizer="adam"
-learning_rate=0.001
-momentum=0.9
-
-cameras="frontview_image"
-
-# Job 1: direct_cnn_mlp
-architecture="direct_cnn_mlp"
-latent_dim=32
-learning_rate=0.001
-note="3cnnmlp"
+note="18"
 train_only
 
-# architecture="direct_cnn_mlp"
-# latent_dim=32
-# optimizer="sgd"
-# learning_rate=0.001
-# train_only
+resnet_layers_num=50
+note="50"
+train_only
 
-# architecture="direct_cnn_mlp"
-# latent_dim=32
-# optimizer="sgd"
-# learning_rate=0.005
-# train_only
+resnet_layers_num=101
+note="101"
+train_only
 
-# # Job 2: direct_cnn_vit
-# architecture="direct_cnn_vit"
-# latent_dim=32
-# train_only
+resnet_layers_num=152
+note="152"
+train_only
 
-# # Job 3, 4: direct_resnet_mlp
-# architecture="direct_resnet_mlp"
-# train_only
-
-# resnet_layers_num=50
-# train_only
-
-# Job 5: latent_cnn_unet
-# architecture="latent_cnn_unet"
-# latent_dim=4
-# train_only
-
-# learning_rate=0.001
-# architecture="latent_encoder_resnet_unet"
-# train_only
-
-# resnet_layers_num=50
-# train_only
+resnet_layers_num=200
+note="200"
+train_only
