@@ -34,19 +34,12 @@ run()
     --architecture=${architecture}
     --datasets_path=${dataset_path}
     --results_path=${results_path}
-    --latent_dim=${latent_dim}
     --epoch=${epoch}
     --batch_size=${batch_size}
     --horizon=${horizon}
     --demo_percentage=${demo_percentage}
     --vit_patch_size=${vit_patch_size}
     --resnet_layers_num=${resnet_layers_num}
-    $motion
-    $image_plus_motion
-    --idm_model_name=${idm_model_name}
-    --fdm_model_name=${fdm_model_name}
-    $freeze_idm
-    $freeze_fdm
     "
     slurm_args=""
 

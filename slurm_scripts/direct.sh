@@ -33,24 +33,13 @@ run()
     export train_args="
     --architecture=${architecture}
     --datasets_path=${dataset_path}
-    --latent_dim=${latent_dim}
     --epoch=${epoch}
     --batch_size=${batch_size}
     --horizon=${horizon}
     --demo_percentage=${demo_percentage}
-    --vit_patch_size=${vit_patch_size}
     --resnet_layers_num=${resnet_layers_num}
-    $motion
-    $image_plus_motion
-    --idm_model_name=${idm_model_name}
-    --fdm_model_name=${fdm_model_name}
     --action_type=${action_type}
     --cameras=${cameras}
-    $freeze_idm
-    $freeze_fdm
-    --optimizer=${optimizer}
-    --learning_rate=${learning_rate}
-    --momentum=${momentum}
     --data_modality=${data_modality}
     --note=${note}
     "
@@ -83,6 +72,8 @@ freeze_fdm=""
 architecture=""
 data_modality="voxel"
 action_type="absolute_pose"
+
+architecture="direct_resnet_mlp"
 
 resnet_layers_num=18
 note="18"
