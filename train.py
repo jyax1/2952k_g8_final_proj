@@ -6,7 +6,7 @@ from config import *
 '''
 Temporary
 '''
-oscar = False
+oscar = True
 if oscar:
     dp = "/users/ysong135/scratch/datasets/random"
     vp = "/users/ysong135/scratch/datasets/random"

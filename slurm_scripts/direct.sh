@@ -61,7 +61,6 @@ date=$(date +%m%d)
 demo_percentage=.9
 dataset_path="/users/ysong135/scratch/datasets/random"
 epoch=10
-batch_size=256
 horizon=1
 motion=""
 image_plus_motion=""
@@ -75,13 +74,17 @@ action_type="absolute_pose"
 
 architecture="direct_resnet_mlp"
 
-resnet_layers_num=18
-note="18"
-train_only
+# batch_size=256
 
-resnet_layers_num=50
-note="50"
-train_only
+# resnet_layers_num=18
+# note="18"
+# train_only
+
+# resnet_layers_num=50
+# note="50"
+# train_only
+
+batch_size=128
 
 resnet_layers_num=101
 note="101"
