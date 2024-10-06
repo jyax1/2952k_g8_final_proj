@@ -172,3 +172,15 @@ def resnet18_3d(input_channels=4, num_classes=7):
 def resnet50_3d(input_channels=4, num_classes=7):
     """Constructs a ResNet-50 3D model with 4 input channels."""
     return ResNet3D(Bottleneck3D, [3, 4, 6, 3], input_channels=input_channels, num_classes=num_classes)
+
+def resnet101_3d(input_channels=4, num_classes=7):
+    """Constructs a ResNet-101 3D model with 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 4, 23, 3], input_channels=input_channels, num_classes=num_classes)
+
+def resnet152_3d(input_channels=4, num_classes=7):
+    """Constructs a ResNet-152 3D model with 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 8, 36, 3], input_channels=input_channels, num_classes=num_classes)
+
+def resnet200_3d(input_channels=4, num_classes=7):
+    """Constructs a ResNet-200 3D model with 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 24, 36, 3], input_channels=input_channels, num_classes=num_classes)

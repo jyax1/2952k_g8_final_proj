@@ -185,7 +185,7 @@ if __name__ == '__main__':
         '--resnet_layers_num', '-rln',
         type=int,
         default=0,
-        choices=[0, 18, 50],
+        choices=[0, 18, 50, 101, 152, 200],
         help='Number of layers if direct_resnet_mlp architecture is chosen'
     )
     parser.add_argument(
@@ -252,7 +252,7 @@ if __name__ == '__main__':
             assert args.fdm_model_name != ''
     
     if 'resnet' in args.architecture:
-        assert args.resnet_layers_num == 18 or args.resnet_layers_num == 50, "Choose either ResNet-18 or ResNet-50"
+        assert args.resnet_layers_num != 0, "Choose either ResNet-18, 50, 101, 152, or 200"
 
     args.cameras = args.cameras.split(',')
     args.embodiments = args.embodiments.split(',')

@@ -112,7 +112,17 @@ def load_model(architecture,
             elif data_modality == 'rgbd':
                 pass
             elif data_modality == 'voxel':
-                model = resnet18_3d(input_channels=4)
+                if resnet_layers_num == 18:
+                    model = resnet18_3d()
+                elif resnet_layers_num == 50:
+                    model = resnet50_3d()
+                elif resnet_layers_num == 101:
+                    model = resnet101_3d
+                elif resnet_layers_num == 152:
+                    model = resnet152_3d
+                elif resnet_layers_num == 200:
+                    model = resnet200_3d
+                
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':
