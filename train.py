@@ -11,7 +11,7 @@ if oscar:
     dp = "/users/ysong135/scratch/datasets/random"
     vp = "/users/ysong135/scratch/datasets/random"
     b = 16
-    rp = '"/users/ysong135/Documents/action_extractor/results"'
+    rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
     vp = '/home/yilong/Documents/ae_data/abs'

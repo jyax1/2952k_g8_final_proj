@@ -84,16 +84,16 @@ resnet_layers_num=50
 note="50"
 train_only
 
-# batch_size=128
+batch_size=128
 
-# resnet_layers_num=101
-# note="101"
-# train_only
+resnet_layers_num=101
+note="101"
+train_only
 
-# resnet_layers_num=152
-# note="152"
-# train_only
+resnet_layers_num=152
+note="152"
+train_only
 
-# resnet_layers_num=200
-# note="200"
-# train_only
+resnet_layers_num=200
+note="200"
+train_only
