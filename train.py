@@ -6,16 +6,16 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = "/users/ysong135/scratch/datasets/random"
     vp = "/users/ysong135/scratch/datasets/random"
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_abs_2'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_abs_2'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
