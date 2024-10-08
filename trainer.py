@@ -97,12 +97,12 @@ class Trainer:
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
 
-                if i % validate_every == validate_every - 1:
+                if validate_every != 0 and i % validate_every == validate_every - 1:
                     val_loss, outputs, labels = self.validate()
                     self.model.train() #### Added
                     self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
-                if i % save_model_every == save_model_every - 1:
+                if save_model_every != 0 and i % save_model_every == save_model_every - 1:
                     self.save_model(epoch + 1, i + 1)
 
                 # Update tqdm progress bar
