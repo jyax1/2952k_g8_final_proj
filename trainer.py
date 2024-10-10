@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from accelerate import Accelerator
 from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
@@ -53,6 +54,9 @@ class Trainer:
 
         if not os.path.exists(results_path):
             os.makedirs(results_path)
+
+        # Initialize TensorBoard SummaryWriter
+        self.writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard_logs', model_name))
     
     def get_optimizer(self, optimizer_name):
         """Return the optimizer based on the provided optimizer_name."""
@@ -77,7 +81,6 @@ class Trainer:
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
 
             validate_every = len(self.train_loader) // 8
-            
             save_model_every = len(self.train_loader) // 4
 
             for i, (inputs, labels) in enumerate(self.train_loader):
@@ -97,10 +100,17 @@ class Trainer:
                     epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
                     running_loss = 0.0
 
+                # Log training loss to TensorBoard
+                step = epoch * len(self.train_loader) + i
+                self.writer.add_scalar('Training Loss', loss.item(), step)
+
                 if validate_every != 0 and i % validate_every == validate_every - 1:
                     val_loss, outputs, labels = self.validate()
-                    self.model.train() #### Added
+                    self.model.train()  # Return model to train mode after validation
                     self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
+
+                    # Log validation loss to TensorBoard
+                    self.writer.add_scalar('Validation Loss', val_loss, step)
 
                 if save_model_every != 0 and i % save_model_every == save_model_every - 1:
                     self.save_model(epoch + 1, i + 1)
@@ -108,13 +118,15 @@ class Trainer:
                 # Update tqdm progress bar
                 epoch_progress.update(1)
 
-
-            # Validate, save model and close the progress bar after the epoch ends
+            # Validate, save model, and close the progress bar after the epoch ends
             val_loss, outputs, labels = self.validate()
             print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
-            self.save_validation(val_loss, outputs, labels, epoch+1, len(self.train_loader)+1, end_of_epoch=True)
-            self.save_model(epoch+1, len(self.train_loader)+1)
+            self.save_validation(val_loss, outputs, labels, epoch + 1, len(self.train_loader) + 1, end_of_epoch=True)
+            self.save_model(epoch + 1, len(self.train_loader) + 1)
             epoch_progress.close()
+
+        # Close the TensorBoard writer when training is complete
+        self.writer.close()
 
     def recover_action_vector(self, output, action_vector_channels=7):
         """

@@ -82,8 +82,8 @@ def save_consecutive_images(tensor, save_path="debug/combined_image.png"):
 import matplotlib.pyplot as plt
 
 def visualize_voxel(np_voxels):
-    #occupancy = traj['obs']['voxels'][0][0,:,:,:]
-    #indices = np.argwhere(occupancy == 1)[0]
+    if isinstance(voxels, torch.Tensor):
+        voxels = voxels.cpu().numpy()
 
     # Create a 3D plot
     fig = plt.figure()

@@ -186,7 +186,7 @@ if __name__ == '__main__':
         '--resnet_layers_num', '-rln',
         type=int,
         default=0,
-        choices=[0, 18, 50, 101, 152, 200],
+        choices=[0, 18, 34, 50, 101, 152, 200],
         help='Number of layers if direct_resnet_mlp architecture is chosen'
     )
     parser.add_argument(
