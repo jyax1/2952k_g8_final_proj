@@ -116,7 +116,7 @@ class Bottleneck3D(nn.Module):
 
 
 class ResNet3D(nn.Module):
-    def __init__(self, block, layers, input_channels=4, num_classes=7):
+    def __init__(self, block, layers, input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
         super(ResNet3D, self).__init__()
         self.in_channels = 64
         self.conv1 = nn.Conv3d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -128,7 +128,19 @@ class ResNet3D(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        # Add an adjustable MLP with hidden layers
+        mlp_layers = []
+        input_size = 512 * block.expansion  # Output size from convolutional part
+        for _ in range(num_mlp_layers - 1):
+            mlp_layers.append(nn.Linear(input_size, mlp_hidden_size))
+            mlp_layers.append(nn.ReLU())
+            mlp_layers.append(nn.BatchNorm1d(mlp_hidden_size))
+            mlp_layers.append(nn.Dropout(0.5))
+            input_size = mlp_hidden_size  # Set for the next layer
+
+        mlp_layers.append(nn.Linear(mlp_hidden_size, num_classes))  # Final output layer
+        self.mlp = nn.Sequential(*mlp_layers)
 
     def _make_layer(self, block, out_channels, blocks, stride=1):
         downsample = None
@@ -158,29 +170,35 @@ class ResNet3D(nn.Module):
         x = self.layer4(x)
 
         x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        x = torch.flatten(x, 1)  # Flatten before passing to MLP
+        x = self.mlp(x)  # Pass through MLP layers
 
         return x
 
+# Define the 3D ResNet architectures
 
-def resnet18_3d(input_channels=4, num_classes=7):
-    """Constructs a ResNet-18 3D model with 4 input channels."""
-    return ResNet3D(BasicBlock3D, [2, 2, 2, 2], input_channels=input_channels, num_classes=num_classes)
+def resnet18_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-18 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(BasicBlock3D, [2, 2, 2, 2], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
 
 
-def resnet50_3d(input_channels=4, num_classes=7):
-    """Constructs a ResNet-50 3D model with 4 input channels."""
-    return ResNet3D(Bottleneck3D, [3, 4, 6, 3], input_channels=input_channels, num_classes=num_classes)
+def resnet50_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-50 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 4, 6, 3], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
 
-def resnet101_3d(input_channels=4, num_classes=7):
-    """Constructs a ResNet-101 3D model with 4 input channels."""
-    return ResNet3D(Bottleneck3D, [3, 4, 23, 3], input_channels=input_channels, num_classes=num_classes)
+def resnet101_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-101 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 4, 23, 3], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
 
-def resnet152_3d(input_channels=4, num_classes=7):
-    """Constructs a ResNet-152 3D model with 4 input channels."""
-    return ResNet3D(Bottleneck3D, [3, 8, 36, 3], input_channels=input_channels, num_classes=num_classes)
+def resnet152_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-152 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 8, 36, 3], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
 
-def resnet200_3d(input_channels=4, num_classes=7):
-    """Constructs a ResNet-200 3D model with 4 input channels."""
-    return ResNet3D(Bottleneck3D, [3, 24, 36, 3], input_channels=input_channels, num_classes=num_classes)
+def resnet200_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-200 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(Bottleneck3D, [3, 24, 36, 3], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)

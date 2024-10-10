@@ -41,7 +41,7 @@ class BaseDataset(Dataset):
                  validation=False, 
                  random_crop=False, 
                  load_actions=False, 
-                 compute_stats=True):
+                 compute_stats=False):
         self.path = path
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
