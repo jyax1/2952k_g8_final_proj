@@ -135,8 +135,8 @@ class ResNet3D(nn.Module):
         for _ in range(num_mlp_layers - 1):
             mlp_layers.append(nn.Linear(input_size, mlp_hidden_size))
             mlp_layers.append(nn.ReLU())
-            mlp_layers.append(nn.BatchNorm1d(mlp_hidden_size))
-            mlp_layers.append(nn.Dropout(0.5))
+            # mlp_layers.append(nn.BatchNorm1d(mlp_hidden_size))
+            # mlp_layers.append(nn.Dropout(0.5))
             input_size = mlp_hidden_size  # Set for the next layer
 
         mlp_layers.append(nn.Linear(mlp_hidden_size, num_classes))  # Final output layer
