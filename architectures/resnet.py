@@ -136,7 +136,7 @@ class ResNet3D(nn.Module):
             mlp_layers.append(nn.Linear(input_size, mlp_hidden_size))
             mlp_layers.append(nn.ReLU())
             mlp_layers.append(nn.BatchNorm1d(mlp_hidden_size))
-            mlp_layers.append(nn.Dropout(0.5))
+            # mlp_layers.append(nn.Dropout(0.5))
             input_size = mlp_hidden_size  # Set for the next layer
 
         mlp_layers.append(nn.Linear(mlp_hidden_size, num_classes))  # Final output layer
@@ -181,7 +181,11 @@ def resnet18_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_la
     """Constructs a ResNet-18 3D model with adjustable MLP layers and 4 input channels."""
     return ResNet3D(BasicBlock3D, [2, 2, 2, 2], input_channels=input_channels, num_classes=num_classes, 
                     mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
-
+    
+def resnet34_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
+    """Constructs a ResNet-34 3D model with adjustable MLP layers and 4 input channels."""
+    return ResNet3D(BasicBlock3D, [3, 4, 6, 3], input_channels=input_channels, num_classes=num_classes, 
+                    mlp_hidden_size=mlp_hidden_size, num_mlp_layers=num_mlp_layers)
 
 def resnet50_3d(input_channels=4, num_classes=7, mlp_hidden_size=512, num_mlp_layers=3):
     """Constructs a ResNet-50 3D model with adjustable MLP layers and 4 input channels."""

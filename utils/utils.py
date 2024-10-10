@@ -1,5 +1,5 @@
 from datasets import *
-from architectures.direct_cnn_mlp import ActionExtractionCNN
+from architectures.direct_cnn_mlp import ActionExtractionCNN, PoseExtractionCNN3D
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.direct_resnet_mlp import *
@@ -90,11 +90,17 @@ def load_model(architecture,
                data_modality
 ):
     if architecture == 'direct_cnn_mlp':
-        model = ActionExtractionCNN(latent_dim=latent_dim, 
-                                    video_length=horizon, 
-                                    motion=motion, 
-                                    image_plus_motion=image_plus_motion,
-                                    num_mlp_layers=num_mlp_layers)
+        if data_modality == 'voxel':
+            model = PoseExtractionCNN3D(latent_dim=latent_dim, 
+                                        motion=motion, 
+                                        image_plus_motion=image_plus_motion,
+                                        num_mlp_layers=num_mlp_layers)
+        else:
+            model = ActionExtractionCNN(latent_dim=latent_dim, 
+                                        video_length=horizon, 
+                                        motion=motion, 
+                                        image_plus_motion=image_plus_motion,
+                                        num_mlp_layers=num_mlp_layers)
     elif architecture == 'direct_cnn_vit':
         model = ActionExtractionViT(latent_dim=latent_dim, 
                                     video_length=horizon, 
@@ -115,6 +121,8 @@ def load_model(architecture,
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+            elif resnet_layers_num == 34:
+                model = resnet34_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 50:
                 model = resnet50_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 101:
