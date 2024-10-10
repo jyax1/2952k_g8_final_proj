@@ -4,14 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-    
-
-        
-
-
-
-
-
         {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
@@ -57,7 +49,15 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=2", "--action_type=delta_pose", "--data_modality=voxel"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--action_type=absolute_pose", "--data_modality=voxel"]
+        },
+        {
+            "name": "train direct_resnet_mlp abs rgb",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--cameras=spaceview_image", "--action_type=absolute_pose", "--data_modality=rgb"]
         },
         {
             "name": "train latent_encoder_resnet_unet",
