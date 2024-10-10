@@ -61,7 +61,7 @@ date=$(date +%m%d)
 demo_percentage=.9
 dataset_path="/users/ysong135/scratch/datasets/random"
 epoch=10
-horizon=1
+horizon=2
 motion=""
 image_plus_motion=""
 idm_model_name="idm_model.pth"
@@ -70,11 +70,11 @@ freeze_idm=""
 freeze_fdm=""
 architecture=""
 data_modality="voxel"
-action_type="absolute_pose"
+action_type="delta_pose"
 
 architecture="direct_resnet_mlp"
 
-batch_size=256
+batch_size=128
 
 resnet_layers_num=18
 note="18"
@@ -84,7 +84,7 @@ resnet_layers_num=50
 note="50"
 train_only
 
-batch_size=128
+batch_size=64
 
 resnet_layers_num=101
 note="101"
