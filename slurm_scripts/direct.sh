@@ -42,6 +42,7 @@ run()
     --cameras=${cameras}
     --data_modality=${data_modality}
     --note=${note}
+    --learning_rate=${learning_rate}
     "
     slurm_args=""
 
@@ -59,41 +60,87 @@ date=$(date +%m%d)
 
 # Parameters for the jobs
 demo_percentage=.9
-dataset_path="/users/ysong135/scratch/datasets/random"
-epoch=10
-horizon=2
+epoch=100
 motion=""
 image_plus_motion=""
-idm_model_name="idm_model.pth"
-fdm_model_name="fdm_model.pth"
+idm_model_name=""
+fdm_model_name=""
 freeze_idm=""
 freeze_fdm=""
 architecture=""
 data_modality="voxel"
-action_type="delta_pose"
+learning_rate=0.001
 
-architecture="direct_resnet_mlp"
+# Restricted Absolute
+action_type="absolute_pose"
+dataset_path="/users/ysong135/scratch/datasets/random_abs_new"
 
+horizon=1
 batch_size=128
 
+# architecture="direct_cnn_mlp"
+# resnet_layers_num=0
+# note="restricted_abs"
+# train_only
+
+# architecture="direct_resnet_mlp"
+# resnet_layers_num=18
+# note="18_restricted_abs"
+# train_only
+
+# resnet_layers_num=34
+# note="34_restricted_abs"
+# train_only
+
+# resnet_layers_num=50
+# note="50_restricted_abs"
+# train_only
+
+# batch_size=64
+
+# resnet_layers_num=101
+# note="101_restricted_abs"
+# train_only
+
+# resnet_layers_num=152
+# note="152_restricted_abs"
+# train_only
+
+# resnet_layers_num=200
+# note="200_restricted_abs"
+# train_only
+
+# Unrestricted rel
+
+action_type="absolute_pose"
+dataset_path="/users/ysong135/scratch/datasets/random_rel_new"
+
+horizon=2
+batch_size=256
+
+architecture="direct_resnet_mlp"
 resnet_layers_num=18
-note="18"
+note="18_unrestricted_rel"
+train_only
+
+resnet_layers_num=34
+note="34_unrestricted_rel"
 train_only
 
 resnet_layers_num=50
-note="50"
+note="50_unrestricted_rel"
 train_only
 
-batch_size=64
+batch_size=128
 
 resnet_layers_num=101
-note="101"
+note="101_unrestricted_rel"
 train_only
 
 resnet_layers_num=152
-note="152"
+note="152_unrestricted_rel"
 train_only
 
 resnet_layers_num=200
-note="200"
+note="200_unrestricted_rel"
 train_only
