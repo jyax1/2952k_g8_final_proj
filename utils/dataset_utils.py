@@ -81,7 +81,7 @@ def save_consecutive_images(tensor, save_path="debug/combined_image.png"):
     
 import matplotlib.pyplot as plt
 
-def visualize_voxel(np_voxels):
+def visualize_voxel(voxels):
     if isinstance(voxels, torch.Tensor):
         voxels = voxels.cpu().numpy()
 
@@ -89,8 +89,8 @@ def visualize_voxel(np_voxels):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    indices = np.argwhere(np_voxels[0] != 0)
-    colors = np_voxels[1:, indices[:, 0], indices[:, 1], indices[:, 2]].T
+    indices = np.argwhere(voxels[0] != 0)
+    colors = voxels[1:, indices[:, 0], indices[:, 1], indices[:, 2]].T
 
     ax.scatter(indices[:, 0], indices[:, 1], indices[:, 2], c=colors/255., marker='s')
 

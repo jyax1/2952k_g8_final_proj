@@ -47,6 +47,9 @@ class Trainer:
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
 
+        # Learning rate scheduler based on training loss plateau
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+
         # Prepare the model, optimizer, and dataloaders for distributed training
         self.model, self.optimizer, self.train_loader, self.validation_loader = self.accelerator.prepare(
             self.model, self.optimizer, self.train_loader, self.validation_loader
@@ -104,6 +107,11 @@ class Trainer:
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
 
+                # Log gradients to TensorBoard to monitor vanishing/exploding gradients
+                for name, param in self.model.named_parameters():
+                    if param.grad is not None:
+                        self.writer.add_histogram(f'Gradients/{name}', param.grad, step)
+
                 if validate_every != 0 and i % validate_every == validate_every - 1:
                     val_loss, outputs, labels = self.validate()
                     self.model.train()  # Return model to train mode after validation
@@ -117,6 +125,9 @@ class Trainer:
 
                 # Update tqdm progress bar
                 epoch_progress.update(1)
+
+            # Scheduler step based on training loss
+            self.scheduler.step(loss.item())
 
             # Validate, save model, and close the progress bar after the epoch ends
             val_loss, outputs, labels = self.validate()

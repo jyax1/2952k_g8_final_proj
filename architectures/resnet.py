@@ -140,6 +140,7 @@ class ResNet3D(nn.Module):
             input_size = mlp_hidden_size  # Set for the next layer
 
         mlp_layers.append(nn.Linear(mlp_hidden_size, num_classes))  # Final output layer
+        mlp_layers.append(nn.Tanh())  # Ensure output is in the [-1, 1] range
         self.mlp = nn.Sequential(*mlp_layers)
 
     def _make_layer(self, block, out_channels, blocks, stride=1):
