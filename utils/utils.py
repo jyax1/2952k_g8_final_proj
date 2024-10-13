@@ -109,28 +109,36 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
+        
+        if 'action' in action_type:
+            num_classes = 7
+        elif action_type == 'position':
+            num_classes = 3
+        elif action_type == 'pose':
+            num_classes = 9
+        
         if data_modality == 'voxel':
             input_channels = 4 * horizon
         elif data_modality == 'rgb':
             input_channels = 3 * horizon
             
         if data_modality == 'rgb':
-            model = ActionExtractionResNet(resnet_version='resnet18', video_length=horizon, action_length=1, num_mlp_layers=10)
+            model = ActionExtractionResNet(resnet_version='resnet18', video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd':
             pass
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
-                model = resnet18_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 34:
-                model = resnet34_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet34_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 50:
-                model = resnet50_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet50_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 101:
-                model = resnet101_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet101_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 152:
-                model = resnet152_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet152_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 200:
-                model = resnet200_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet200_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
                 
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion

@@ -10,6 +10,7 @@ from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.latent_decoders import *
 from architectures.direct_resnet_mlp import ActionExtractionResNet, PoseExtractionResNet
+from architectures.resnet import ResNet3D
 import csv
 from tqdm import tqdm
 from utils.utils import check_dataset
@@ -107,10 +108,12 @@ class Trainer:
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
 
-                # Log gradients to TensorBoard to monitor vanishing/exploding gradients
+                # Log gradients and absolute weigths to TensorBoard to monitor vanishing/exploding gradients
                 for name, param in self.model.named_parameters():
                     if param.grad is not None:
                         self.writer.add_histogram(f'Gradients/{name}', param.grad, step)
+                    self.writer.add_histogram(f'Weights/{name}', param.data.abs(), step)
+
 
                 if validate_every != 0 and i % validate_every == validate_every - 1:
                     val_loss, outputs, labels = self.validate()
@@ -215,6 +218,10 @@ class Trainer:
         elif isinstance(self.model, PoseExtractionResNet):
             torch.save(self.model.resnet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
             torch.save(self.model.pose_mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            
+        elif isinstance(self.model, ResNet3D):
+            torch.save(self.model.conv_part.state_dict(), "{self.model_name}_resnet-{epoch}-{iteration}.pth")
+            torch.save(self.model.mlp.state_dict(), "{self.model_name}_mlp-{epoch}-{iteration}.pth")
             
         elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))

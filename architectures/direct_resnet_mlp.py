@@ -149,7 +149,7 @@ class ResNet(nn.Module):
 from architectures.utils import resnet_builder
 
 class ActionExtractionResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_mlp_layers=3):
+    def __init__(self, resnet_version='resnet18', video_length=2, action_length=1, num_classes=7, num_mlp_layers=3):
         super(ActionExtractionResNet, self).__init__()
 
         # Define the ResNet version to use
@@ -160,7 +160,7 @@ class ActionExtractionResNet(nn.Module):
             input_size=resnet_out_dim,
             hidden_size=512,
             final_size=32,
-            output_size=7 * action_length,
+            output_size=num_classes * action_length,
             num_layers=num_mlp_layers
         )
         

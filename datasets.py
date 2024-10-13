@@ -38,10 +38,11 @@ class BaseDataset(Dataset):
                  demo_percentage=1.0, 
                  cameras=['frontview_image'], 
                  data_modality='rgb',
+                 action_type='delta_action',
                  validation=False, 
                  random_crop=False, 
                  load_actions=False, 
-                 compute_stats=False):
+                 compute_stats=True):
         self.path = path
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
@@ -56,11 +57,14 @@ class BaseDataset(Dataset):
         self.sum_square_actions = None
         self.n_samples = 0
         self.data_modality = data_modality
+        self.action_type = action_type
 
         # Load dataset and compute stats if needed
         self._load_datasets(path, demo_percentage, validation, cameras)
         if self.compute_stats:
             self._compute_action_statistics()
+            print(f"Label mean: {self.action_mean}")
+            print(f"Label std: {self.action_std}")
 
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
@@ -100,7 +104,15 @@ class BaseDataset(Dataset):
                         self.sequence_paths.append((root, demo, i, task, camera))
                         if self.compute_stats and self.load_actions:
                             # Accumulate statistics for each action during loading
-                            actions_seq = data['actions'][i]
+                            if self.action_type == 'position':
+                                actions_seq = data['obs']['robot0_eef_pos'][i]
+                            elif self.action_type == 'pose':
+                                eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
+                                eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
+                                gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
+                                actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
+                            else:
+                                actions_seq = data['actions'][i]
                             if self.sum_actions is None:
                                 self.sum_actions = np.zeros(actions_seq.shape[-1])
                                 self.sum_square_actions = np.zeros(actions_seq.shape[-1])
@@ -116,7 +128,15 @@ class BaseDataset(Dataset):
                                 self.sequence_paths.append((root, demo, i, task, camera))
                                 if self.compute_stats and self.load_actions:
                                     # Accumulate statistics for each action during loading
-                                    actions_seq = data['actions'][i]
+                                    if self.action_type == 'position':
+                                        actions_seq = data['obs']['robot0_eef_pos'][i]
+                                    elif self.action_type == 'pose':
+                                        eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
+                                        eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
+                                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
+                                        actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
+                                    else:
+                                        actions_seq = data['actions'][i]
                                     if self.sum_actions is None:
                                         self.sum_actions = np.zeros(actions_seq.shape[-1])
                                         self.sum_square_actions = np.zeros(actions_seq.shape[-1])
@@ -176,23 +196,35 @@ class DatasetVideo(BaseDataset):
         return x, y
 
 class DatasetVideo2Action(BaseDataset):
-    def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_pose', **kwargs):
+    def __init__(self, path='../datasets/', motion=False, image_plus_motion=False, action_type='delta_action', **kwargs):
         self.motion = motion
         self.image_plus_motion = image_plus_motion
         self.action_type = action_type
         assert not (self.motion and self.image_plus_motion), "Choose either only motion or only image_plus_motion"
-        super().__init__(path=path, load_actions=True, **kwargs)
+        super().__init__(path=path, load_actions=True, action_type=action_type, **kwargs)
 
     def __getitem__(self, idx):
         root, demo, index, task, camera = self.sequence_paths[idx]
         obs_seq, actions_seq = self.get_samples(root, demo, index, camera)
 
         # Handle action_type logic
-        if self.action_type == 'delta_pose':
-            actions = np.concatenate(actions_seq)  # Current logic for delta_pose
-        elif self.action_type == 'absolute_pose':
+        if self.action_type == 'delta_action':
+            actions = np.concatenate(actions_seq)  # Current logic for delta_action
+        elif self.action_type == 'absolute_action':
             # One-to-one mapping of actions to each frame (no need to skip the last frame)
             actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions = np.array(actions_seq)
+        elif self.action_type == 'position':
+            actions_seq = [root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions = np.array(actions_seq)
+        elif self.action_type == 'pose':
+            action_seq = []
+            for i in range(self.video_length):
+                eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)
+                eef_quat = root['data'][demo]['obs']['robot0_eef_quat'][index + i * (self.frame_skip + 1)]  # Shape: (4,)
+                gripper_qpos = root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]  # Shape: (2,)
+                action = np.concatenate([eef_pos, eef_quat, gripper_qpos])
+                actions_seq.append(action)
             actions = np.array(actions_seq)
 
         # If video_length == 1, return a flat action vector

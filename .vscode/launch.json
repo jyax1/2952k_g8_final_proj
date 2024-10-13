@@ -49,7 +49,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=2", "--action_type=delta_pose", "--data_modality=voxel"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--action_type=pose", "--data_modality=voxel"]
         },
         {
             "name": "train direct_resnet_mlp abs rgb",

@@ -13,9 +13,9 @@ if oscar:
     b = 16
     rp = '"/users/ysong135/Documents/action_extractor/results"'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
+    dp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
+    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -235,8 +235,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--action_type',
         type=str,
-        default='absolute_pose',
-        choices=['delta_pose', 'absolute_pose'],
+        default='absolute_action',
+        choices=['delta_action', 'absolute_action', 'position', 'pose'],
         help='Type of action representation to use'
     )
     
