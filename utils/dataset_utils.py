@@ -8,6 +8,7 @@ import torch
 import os
 from PIL import Image
 import numpy as np
+import concurrent.futures
 
 
 def hdf5_to_zarr(hdf5_path):
@@ -41,6 +42,47 @@ def hdf5_to_zarr(hdf5_path):
                 zarr_node.create_dataset(name=hdf5_node.name, data=hdf5_node[:], chunks=chunks, dtype=hdf5_node.dtype, compression=compression, compression_opts=compression_opts)
 
         # copy entire hdf5 file structure to zarr file
+        copy_node(hdf5_file, root)
+
+    print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
+    
+def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
+    '''
+    Function for duplicating an existing hdf5 file without a duplicate zarr file and saving it as a zarr file.
+    Parallelized with configurable number of workers.
+    '''
+    # Determine zarr path
+    zarr_path = hdf5_path.replace('.hdf5', '.zarr')
+
+    # Open HDF5 file
+    with h5py.File(hdf5_path, 'r') as hdf5_file:
+        # Create Zarr store
+        store = zarr.DirectoryStore(zarr_path)
+        root = zarr.group(store=store, overwrite=True)
+
+        def copy_dataset(item, zarr_node, key):
+            ''' Function to copy a single dataset in parallel '''
+            compression = item.compression if item.compression else 'blosc'
+            compression_opts = item.compression_opts if item.compression_opts else None
+            chunks = item.chunks if item.chunks else (1000,)
+            zarr_node.create_dataset(key, data=item[:], chunks=chunks, dtype=item.dtype, compression=compression, compression_opts=compression_opts)
+
+        def copy_node(hdf5_node, zarr_node):
+            ''' Recursively copy HDF5 groups and datasets to Zarr '''
+            futures = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for key, item in hdf5_node.items():
+                    if isinstance(item, h5py.Group):
+                        zarr_group = zarr_node.require_group(key)
+                        # Recursively copy groups
+                        futures.append(executor.submit(copy_node, item, zarr_group))
+                    elif isinstance(item, h5py.Dataset):
+                        # Copy datasets in parallel
+                        futures.append(executor.submit(copy_dataset, item, zarr_node, key))
+                # Wait for all futures to complete
+                concurrent.futures.wait(futures)
+
+        # Copy entire HDF5 file structure to Zarr file in parallel
         copy_node(hdf5_file, root)
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')

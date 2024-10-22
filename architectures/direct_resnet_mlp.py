@@ -101,10 +101,10 @@ class Bottleneck(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, video_length=2):
+    def __init__(self, block, layers, video_length=2, in_channels=3):
         super(ResNet, self).__init__()
         self.in_channels = 64
-        self.conv1 = nn.Conv2d(3 * video_length, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = nn.Conv2d(in_channels * video_length, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -161,32 +161,6 @@ class ActionExtractionResNet(nn.Module):
             hidden_size=512,
             final_size=32,
             output_size=num_classes * action_length,
-            num_layers=num_mlp_layers
-        )
-        
-    def forward(self, x):
-        # Pass through ResNet backbone
-        x = self.conv(x)
-        # Flatten the output to fit into the MLP
-        x = torch.flatten(x, 1)
-        # Pass through MLP head
-        x = self.mlp(x)
-        return x
-
-# PoseExtractionResNet using ResNetMLP
-class PoseExtractionResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=1, action_length=1, num_mlp_layers=3):
-        super(PoseExtractionResNet, self).__init__()
-
-        # Define the ResNet version to use
-        self.conv, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
-
-        # Use ResNetMLP for the MLP head
-        self.mlp = ResNetMLP(
-            input_size=resnet_out_dim,
-            hidden_size=512,
-            final_size=32,
-            output_size=7 * action_length,
             num_layers=num_mlp_layers
         )
         

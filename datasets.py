@@ -75,7 +75,8 @@ class BaseDataset(Dataset):
         for seq_dir in sequence_dirs:
             zarr_path = seq_dir.replace('.hdf5', '.zarr')
             if not os.path.exists(zarr_path):
-                hdf5_to_zarr(seq_dir)
+                # hdf5_to_zarr(seq_dir)
+                hdf5_to_zarr_parallel(seq_dir, max_workers=16)
 
         # Collect all Zarr files
         self.zarr_files = glob(f"{path}/**/*.zarr", recursive=True)
@@ -159,8 +160,15 @@ class BaseDataset(Dataset):
         for i in range(self.video_length):
             if self.data_modality == 'voxel':
                 obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
-                 
-            else:
+                
+            elif self.data_modality == 'rgbd':
+                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                depth_camera = '_'.join([camera.split('_')[0], "depth"])
+
+                depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)]
+                obs = np.concatenate((obs, depth), axis=2)
+                
+            elif self.data_modality == 'rgb':
                 obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
                 if self.semantic_map:
                     obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0

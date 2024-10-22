@@ -117,15 +117,15 @@ def load_model(architecture,
         elif action_type == 'pose':
             num_classes = 9
         
-        if data_modality == 'voxel':
+        if data_modality == 'voxel' or data_modality == 'rgbd':
             input_channels = 4 * horizon
         elif data_modality == 'rgb':
             input_channels = 3 * horizon
             
         if data_modality == 'rgb':
-            model = ActionExtractionResNet(resnet_version='resnet18', video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd':
-            pass
+            modle = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
