@@ -44,6 +44,22 @@
             "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=50", "-ipm", "--horizon=2", "-vps=1"]
         },
         {
+            "name": "train direct_resnet_mlp rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd"]
+        },
+        {
+            "name": "train flownet2 rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=flownet2", "--epoch=10", "-fv=FlowNet2", "--horizon=1", "--action_type=pose", "--data_modality=rgbd"]
+        },
+        {
             "name": "train direct_resnet_mlp voxel",
             "type": "debugpy",
             "request": "launch",

@@ -5,6 +5,7 @@ from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEn
 from architectures.direct_resnet_mlp import *
 from architectures.latent_decoders import *
 from architectures.resnet import *
+from architectures.flownet2 import *
 import re
 from pathlib import Path
 
@@ -87,7 +88,8 @@ def load_model(architecture,
                freeze_idm=None,
                freeze_fdm=None,
                action_type='pose',
-               data_modality='rgb' # to be extracted
+               data_modality='rgb', # to be extracted
+               flownet_verison='FlowNet2' # to be extracted
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':
@@ -123,9 +125,9 @@ def load_model(architecture,
             input_channels = 3 * horizon
             
         if data_modality == 'rgb':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd':
-            modle = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
@@ -140,6 +142,22 @@ def load_model(architecture,
             elif resnet_layers_num == 200:
                 model = resnet200_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
                 
+    elif architecture == 'flownet2':
+        if 'action' in action_type:
+            num_classes = 7
+        elif action_type == 'position':
+            num_classes = 3
+        elif action_type == 'pose':
+            num_classes = 9
+        
+        if data_modality == 'voxel' or data_modality == 'rgbd':
+            input_channels = 4 * horizon
+        elif data_modality == 'rgb':
+            input_channels = 3 * horizon
+            
+        model = FlowNet2PoseEstimation(video_length=horizon, in_channels=input_channels // horizon, num_classes=num_classes, version=flownet_verison,
+                                       num_mlp_layers=num_mlp_layers)
+        
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':

@@ -28,6 +28,7 @@ import zarr
 from torchvideotransforms import video_transforms, volume_transforms
 from utils.dataset_utils import *
 import numpy as np
+from tqdm import tqdm
 
 
 class BaseDataset(Dataset):
@@ -60,7 +61,7 @@ class BaseDataset(Dataset):
         self.action_type = action_type
 
         # Load dataset and compute stats if needed
-        self._load_datasets(path, demo_percentage, validation, cameras)
+        self._load_datasets(path, demo_percentage, validation, cameras, max_workers=64)
         if self.compute_stats:
             self._compute_action_statistics()
             print(f"Label mean: {self.action_mean}")
@@ -69,7 +70,7 @@ class BaseDataset(Dataset):
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
 
-    def _load_datasets(self, path, demo_percentage, validation, cameras):
+    def _load_datasets(self, path, demo_percentage, validation, cameras, max_workers=8):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
@@ -83,12 +84,35 @@ class BaseDataset(Dataset):
         self.stores = [zarr.DirectoryStore(zarr_file) for zarr_file in self.zarr_files]
         self.roots = [zarr.open(store, mode='r') for store in self.stores]
 
-        # Collect all observation data paths
+        def process_demo(demo, data, task, camera=None):
+            obs_frames = len(data['obs'][camera]) if camera else len(data['obs']['voxels'])
+            for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
+                self.sequence_paths.append((root, demo, i, task, camera))
+                if self.compute_stats and self.load_actions:
+                    if self.action_type == 'position':
+                        actions_seq = data['obs']['robot0_eef_pos'][i]
+                    elif self.action_type == 'pose':
+                        eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
+                        eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
+                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
+                        actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
+                    else:
+                        actions_seq = data['actions'][i]
+                    if self.sum_actions is None:
+                        self.sum_actions = np.zeros(actions_seq.shape[-1])
+                        self.sum_square_actions = np.zeros(actions_seq.shape[-1])
+
+                    self.sum_actions += actions_seq
+                    self.sum_square_actions += actions_seq ** 2
+                    self.n_samples += 1
+
+        # Process each Zarr file in parallel
         for zarr_file, root in zip(self.zarr_files, self.roots):
             if validation:
                 print(f"Loading {zarr_file} for validation")
             else:
                 print(f"Loading {zarr_file} for training")
+
             task = zarr_file.split("/")[-2].replace('_', ' ')
             demos = list(root['data'].keys())
             if validation:
@@ -96,57 +120,22 @@ class BaseDataset(Dataset):
             else:
                 demos = demos[:int(len(demos) // (1 / demo_percentage))]
 
-            for demo in demos:
-                data = root['data'][demo]
-                if self.data_modality == 'voxel':
-                    camera = 'voxel'
-                    obs_frames = len(data['obs']['voxels'])
-                    for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                        self.sequence_paths.append((root, demo, i, task, camera))
-                        if self.compute_stats and self.load_actions:
-                            # Accumulate statistics for each action during loading
-                            if self.action_type == 'position':
-                                actions_seq = data['obs']['robot0_eef_pos'][i]
-                            elif self.action_type == 'pose':
-                                eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
-                                eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
-                                gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
-                                actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
+            # Use ThreadPoolExecutor to parallelize demo processing
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for demo in tqdm(demos):
+                    data = root['data'][demo]
+                    if self.data_modality == 'voxel':
+                        futures.append(executor.submit(process_demo, demo, data, task, 'voxel'))
+                    else:
+                        for camera in cameras:
+                            if camera in data['obs'].keys():
+                                futures.append(executor.submit(process_demo, demo, data, task, camera))
                             else:
-                                actions_seq = data['actions'][i]
-                            if self.sum_actions is None:
-                                self.sum_actions = np.zeros(actions_seq.shape[-1])
-                                self.sum_square_actions = np.zeros(actions_seq.shape[-1])
-
-                            self.sum_actions += actions_seq
-                            self.sum_square_actions += actions_seq ** 2
-                            self.n_samples += 1
-                else:
-                    for camera in cameras:
-                        if camera in data['obs'].keys():
-                            obs_frames = len(data['obs'][camera])
-                            for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
-                                self.sequence_paths.append((root, demo, i, task, camera))
-                                if self.compute_stats and self.load_actions:
-                                    # Accumulate statistics for each action during loading
-                                    if self.action_type == 'position':
-                                        actions_seq = data['obs']['robot0_eef_pos'][i]
-                                    elif self.action_type == 'pose':
-                                        eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
-                                        eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
-                                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
-                                        actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
-                                    else:
-                                        actions_seq = data['actions'][i]
-                                    if self.sum_actions is None:
-                                        self.sum_actions = np.zeros(actions_seq.shape[-1])
-                                        self.sum_square_actions = np.zeros(actions_seq.shape[-1])
-
-                                    self.sum_actions += actions_seq
-                                    self.sum_square_actions += actions_seq ** 2
-                                    self.n_samples += 1
-                        else:
-                            print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
+                                print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
+                # Wait for all futures to complete
+                for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+                    pass
 
     def _compute_action_statistics(self):
         # Compute mean and std from the accumulated sums
@@ -165,7 +154,7 @@ class BaseDataset(Dataset):
                 obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
                 depth_camera = '_'.join([camera.split('_')[0], "depth"])
 
-                depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)]
+                depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)] / 255.0
                 obs = np.concatenate((obs, depth), axis=2)
                 
             elif self.data_modality == 'rgb':

@@ -9,7 +9,7 @@ from architectures.direct_cnn_mlp import ActionExtractionCNN
 from architectures.direct_cnn_vit import ActionExtractionViT
 from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from architectures.latent_decoders import *
-from architectures.direct_resnet_mlp import ActionExtractionResNet, PoseExtractionResNet
+from architectures.direct_resnet_mlp import ActionExtractionResNet
 from architectures.resnet import ResNet3D
 import csv
 from tqdm import tqdm
@@ -212,10 +212,6 @@ class Trainer:
             torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_vit-{epoch}-{iteration}.pth'))
 
         elif isinstance(self.model, ActionExtractionResNet):
-            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
-            
-        elif isinstance(self.model, PoseExtractionResNet):
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             
