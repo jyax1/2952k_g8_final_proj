@@ -153,10 +153,10 @@ class ActionExtractionResNet(nn.Module):
         super(ActionExtractionResNet, self).__init__()
 
         # Define the ResNet version to use
-        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
+        self.conv, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
 
         # Use ResNetMLP for the MLP head
-        self.action_mlp = ResNetMLP(
+        self.mlp = ResNetMLP(
             input_size=resnet_out_dim,
             hidden_size=512,
             final_size=32,
@@ -166,11 +166,11 @@ class ActionExtractionResNet(nn.Module):
         
     def forward(self, x):
         # Pass through ResNet backbone
-        x = self.resnet(x)
+        x = self.conv(x)
         # Flatten the output to fit into the MLP
         x = torch.flatten(x, 1)
         # Pass through MLP head
-        x = self.action_mlp(x)
+        x = self.mlp(x)
         return x
 
 # PoseExtractionResNet using ResNetMLP
@@ -179,10 +179,10 @@ class PoseExtractionResNet(nn.Module):
         super(PoseExtractionResNet, self).__init__()
 
         # Define the ResNet version to use
-        self.resnet, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
+        self.conv, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length)
 
         # Use ResNetMLP for the MLP head
-        self.pose_mlp = ResNetMLP(
+        self.mlp = ResNetMLP(
             input_size=resnet_out_dim,
             hidden_size=512,
             final_size=32,
@@ -192,9 +192,9 @@ class PoseExtractionResNet(nn.Module):
         
     def forward(self, x):
         # Pass through ResNet backbone
-        x = self.resnet(x)
+        x = self.conv(x)
         # Flatten the output to fit into the MLP
         x = torch.flatten(x, 1)
         # Pass through MLP head
-        x = self.pose_mlp(x)
+        x = self.mlp(x)
         return x

@@ -73,21 +73,21 @@ def load_datasets(
     elif validation and not train:
         return validation_set
     
-def load_model(architecture, 
-               horizon, 
-               results_path, 
-               latent_dim, 
-               motion, 
-               image_plus_motion,
-               num_mlp_layers, 
-               vit_patch_size, 
-               resnet_layers_num,
-               idm_model_name,
-               fdm_model_name,
-               freeze_idm,
-               freeze_fdm,
-               action_type,
-               data_modality
+def load_model(architecture,
+               horizon=1,
+               results_path='',
+               latent_dim=0,
+               motion=False,
+               image_plus_motion=False,
+               num_mlp_layers=3, # to be extracted
+               vit_patch_size=0, 
+               resnet_layers_num=18, # to be extracted
+               idm_model_name='',
+               fdm_model_name='',
+               freeze_idm=None,
+               freeze_fdm=None,
+               action_type='pose',
+               data_modality='rgb' # to be extracted
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':
@@ -190,6 +190,24 @@ def load_model(architecture,
                                                         video_length=horizon, 
                                                         freeze_idm=freeze_idm)
 
+    return model
+
+
+def load_trained_model(model, results_path, trained_model_name, device):
+    conv_model_path = f"{results_path}/{trained_model_name}"
+    
+    mlp_model_name_string = trained_model_name.replace('_resnet-', '_mlp-')
+    mlp_model_path = f"{results_path}/{mlp_model_name_string}"
+    
+    conv_state_dict = torch.load(conv_model_path)
+    mlp_state_dict = torch.load(mlp_model_path)
+
+    model.conv.load_state_dict(conv_state_dict)
+    model.mlp.load_state_dict(mlp_state_dict)
+    
+    model.conv.to(device)
+    model.mlp.to(device)
+    
     return model
 
 import matplotlib.pyplot as plt

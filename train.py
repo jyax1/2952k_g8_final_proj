@@ -13,9 +13,9 @@ if oscar:
     b = 16
     rp = '"/users/ysong135/Documents/action_extractor/results"'
 else:
-    dp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 

@@ -8,7 +8,7 @@ class ResNet18(nn.Module):
         
         self.resnet = models.resnet18(pretrained=False)
         
-        self.conv_part = nn.Sequential(*list(self.resnet.children())[:-1])
+        self.conv = nn.Sequential(*list(self.resnet.children())[:-1])
         
         mlp_layers = []
         input_size = self.resnet.fc.in_features  # Input size for the MLP, which is 512 in ResNet18
@@ -30,7 +30,7 @@ class ResNet18(nn.Module):
         self.mlp_part = nn.Sequential(*mlp_layers)
     
     def forward(self, x):
-        conv_features = self.conv_part(x)
+        conv_features = self.conv(x)
         # Flatten the convolutional output to feed into the MLP
         conv_features = conv_features.view(conv_features.size(0), -1)
         output = self.mlp_part(conv_features)
@@ -39,7 +39,7 @@ class ResNet18(nn.Module):
 
     def extract_conv_features(self, x):
         with torch.no_grad():
-            conv_features = self.conv_part(x)
+            conv_features = self.conv(x)
             conv_features = conv_features.view(conv_features.size(0), -1)
         return conv_features
 
@@ -129,7 +129,7 @@ class ResNet3D(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
 
         # Convolutional part of the model
-        self.conv_part = nn.Sequential(
+        self.conv = nn.Sequential(
             self.conv1,
             self.bn1,
             self.relu,
@@ -173,14 +173,14 @@ class ResNet3D(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        conv_output = self.conv_part(x)
+        conv_output = self.conv(x)
         conv_output_flat = torch.flatten(conv_output, 1)  # Flatten before passing to MLP
         output = self.mlp(conv_output_flat)  # Pass through MLP layers
         return output
 
     def forward_conv(self, x):
         """Forward pass through the convolutional part only."""
-        return self.conv_part(x)
+        return self.conv(x)
 
     def forward_mlp(self, x):
         """Forward pass through the MLP part only. Requires the flattened output from convolutional layers."""

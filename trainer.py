@@ -212,16 +212,16 @@ class Trainer:
             torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_vit-{epoch}-{iteration}.pth'))
 
         elif isinstance(self.model, ActionExtractionResNet):
-            torch.save(self.model.resnet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.action_mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             
         elif isinstance(self.model, PoseExtractionResNet):
-            torch.save(self.model.resnet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.pose_mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             
         elif isinstance(self.model, ResNet3D):
-            torch.save(self.model.conv_part.state_dict(), "{self.model_name}_resnet-{epoch}-{iteration}.pth")
-            torch.save(self.model.mlp.state_dict(), "{self.model_name}_mlp-{epoch}-{iteration}.pth")
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
             
         elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))

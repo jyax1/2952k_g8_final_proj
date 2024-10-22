@@ -7,6 +7,8 @@ from torchvision.utils import save_image
 from PIL import Image
 import torchvision.transforms as T
 import random
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 random.seed(0)
 
@@ -116,35 +118,57 @@ def visualize(model, validation_set, device='cuda'):
 
     visualize_and_save_images(normalized_feature_map, scaled_first_images, scaled_prediction, scaled_labels)
 
-def validate(model, validation_set, device='cuda'):
+def validate_and_record(model, validation_set, model_name, batch_size, device='cuda'):
     model.eval()
     model.to(device)
-    
-    # 20 random samples from validation set
-    indices = random.sample(range(len(validation_set)), 20)
-    images = [validation_set[i][0] for i in indices]
-    labels = [validation_set[i][1] for i in indices] if isinstance(validation_set[0], tuple) else None
-    
-    # stack
-    images_batch, labels_batch = torch.stack(images), torch.stack(labels)
-    
-    images_batch = images_batch.to(device)
-    
-    with torch.no_grad():
-        # obtain and normalize feature map
-        actions = model.forward(images_batch)
-        
-        criterion = nn.MSELoss()
-        loss = criterion(actions, labels_batch.to(device))
-        
-        for i, (label, action) in enumerate(zip(labels_batch, actions)):
-            print(f"Row {i + 1}:")
-            print(f"Label: {label.tolist()}")
-            print(f"Action: {action.tolist()}")
-            print()  # Print a blank line for readability
 
-        
-        print(f'Validation loss: {loss}')
+    # Create a DataLoader for the validation set
+    validation_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=False)
+
+    total_loss = 0.0
+    num_batches = 0
+    all_labels = []
+    all_actions = []
+
+    criterion = nn.MSELoss()
+
+    with torch.no_grad():
+        # Loop over the entire validation set in batches
+        for inputs, labels in tqdm(validation_loader, desc="Validating", leave=False):
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            # Obtain model outputs
+            outputs = model(inputs)
+
+            # Accumulate loss
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            num_batches += 1
+
+            # Collect labels and actions for random sample output
+            all_labels.extend(labels.cpu())
+            all_actions.extend(outputs.cpu())
+
+    # Calculate average validation loss
+    avg_loss = total_loss / num_batches
+
+    # Select 20 random samples from collected labels and actions
+    indices = random.sample(range(len(all_labels)), 20)
+    output_lines = []
+    for i in indices:
+        label = all_labels[i]
+        action = all_actions[i]
+        output_lines.append(f"Row {i + 1}:\nLabel: {label.tolist()}\nAction: {action.tolist()}\n")
+
+    # Write the output of 20 random samples and the overall validation loss to a file
+    output_lines.append(f'Overall Validation Loss: {avg_loss}')
+
+    output_file_path = f"validation/validate-{model_name[-4]}.txt"
+    with open(output_file_path, 'w') as f:
+        f.write('\n'.join(output_lines))
+
+    # Print the average validation loss
+    print(f'Validation loss: {avg_loss}')
         
     
 def load_params_from_model_name(model_name):
@@ -355,8 +379,8 @@ if __name__ == '__main__':
         encoder_model.fdm.load_state_dict(torch.load(fdm_model_path))
         visualize(encoder_model, validation_set)
     elif encoder_params != None and 'latent' in encoder_params['architecture'] and decoder_params != None:
-        validate(decoder_model, validation_set)
+        validate_and_record(decoder_model, validation_set)
     elif direct_params != None and 'resnet' in direct_params['architecture']:
         direct_model.resnet.load_state_dict(torch.load(resnet_model_path))
         direct_model.action_mlp.load_state_dict(torch.load(mlp_model_path))
-        validate(direct_model, validation_set)
+        validate_and_record(direct_model, validation_set)
