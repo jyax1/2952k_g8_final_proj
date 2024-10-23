@@ -25,7 +25,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_res{args.resnet_layers_num}_flownet{args.flownet_version}__{args.note}'''
+    model_name = f'''{args.architecture}_res{args.resnet_layers_num}_val{args.valsets_path.split('/')[-1]}_{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -44,7 +44,6 @@ def train(args):
         freeze_fdm=args.freeze_fdm,
         action_type=args.action_type,
         data_modality=args.data_modality,
-        flownet_version=args.flownet_version
         )
 
     # Instandiate datasets
@@ -239,13 +238,6 @@ if __name__ == '__main__':
         default='absolute_action',
         choices=['delta_action', 'absolute_action', 'position', 'pose'],
         help='Type of action representation to use'
-    )
-    parser.add_argument(
-        '--flownet_version', '-fv',
-        type=str,
-        default='FlowNet2',
-        choices=['FlowNet2', 'FlowNet2C', 'FlowNet2CS', 'FlowNet2CSS', 'FlowNet2S', 'FlowNet2SD'],
-        help="Type of FlowNet2 to select"
     )
     
     args = parser.parse_args()

@@ -5,7 +5,6 @@ from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEn
 from architectures.direct_resnet_mlp import *
 from architectures.latent_decoders import *
 from architectures.resnet import *
-from architectures.flownet import *
 import re
 from pathlib import Path
 
@@ -65,7 +64,7 @@ def load_datasets(
             action_std = train_set.action_std
         if validation:
             validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
-                                                demo_percentage=.99, cameras=cameras, validation=True, 
+                                                demo_percentage=.9, cameras=cameras, validation=True, 
                                                 motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
                                                 data_modality=data_modality, action_mean=action_mean, action_std=action_std)
 
@@ -91,7 +90,6 @@ def load_model(architecture,
                freeze_fdm=None,
                action_type='pose',
                data_modality='rgb', # to be extracted
-               flownet_verison='FlowNet2' # to be extracted
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':

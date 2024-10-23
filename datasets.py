@@ -126,7 +126,7 @@ class BaseDataset(Dataset):
             # Use ThreadPoolExecutor to parallelize demo processing
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
-                for demo in tqdm(demos):
+                for demo in demos:
                     data = root['data'][demo]
                     if self.data_modality == 'voxel':
                         futures.append(executor.submit(process_demo, demo, data, task, 'voxel'))
