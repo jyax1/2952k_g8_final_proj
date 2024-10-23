@@ -1,24 +1,3 @@
-'''
-Loads two main categories of datasets with sub-categories:
-1. Consecutive video frames with corresponding actions for supervised learning
-    a. Raw frames (Baseline)
-    b. Preprocessed into "motion, objects, scene" triplets (Sun et al.: MOSO: Decomposing MOtion, Scene and Object for Video Prediction, 2023)
-    c. Preprocessed into "motion" and raw image pairs (Inspired by Sun et al.)
-    d. Preprocessed into "objects, scene" pairs (Inspired by Sun et al.)
-    e. Preprocessed with segmentation (SAM 2)
-    f. All the above combined with different action label types:
-        i. Delta action
-        ii. Absolute gripper pose in work space
-        iii. Joint angles
-        iv. (Need to look into it for more options)
-2. Consecutive video frames without labels for self-supervised pretraining
-    (Same sub-categories)
-
-Questions:
-1. Do the frames have to be consecutive? (Can there be skipped)
-'''
-
-
 from torch.utils.data import Dataset
 import os
 from glob import glob
@@ -277,8 +256,8 @@ class DatasetVideo2VideoAndAction(BaseDataset):
 
 if __name__ == "__main__":
     train_set = DatasetVideo2Action(
-        path="/users/ysong135/scratch/datasets",
-        video_length=2,
+        path='/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel',
+        video_length=1,
         semantic_map=False,
         frame_skip=0,
         random_crop=True,

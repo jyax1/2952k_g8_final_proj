@@ -14,6 +14,7 @@ if oscar:
     rp = '"/users/ysong135/Documents/action_extractor/results"'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_highres'
     vp = '/home/yilong/Documents/ae_data/abs'
     vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
     b = 16
@@ -55,6 +56,7 @@ def train(args):
         validation=True,
         horizon=args.horizon,
         demo_percentage=args.demo_percentage,
+        val_demo_percentage=args.val_demo_percentage,
         cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
@@ -177,6 +179,12 @@ if __name__ == '__main__':
         help='Percentage of demos (spread evenly across each task) to use for training'
     )
     parser.add_argument(
+        '--val_demo_percentage', '-vdp',
+        type=float,
+        default=0.9,
+        help='Percentage of demos (spread evenly across each task) to use for validating'
+    )
+    parser.add_argument(
         '--vit_patch_size', '-vps',
         type=int,
         default=16,
@@ -238,6 +246,20 @@ if __name__ == '__main__':
         default='absolute_action',
         choices=['delta_action', 'absolute_action', 'position', 'pose'],
         help='Type of action representation to use'
+    )
+    parser.add_argument(
+        '--obs_dim', '-od',
+        type=int,
+        default=256,
+        help="Dimension of a side of the input observation, assuming that the observation is square"
+    )
+    parser.add_argument(
+        '--sam2_mask',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--sam2_box',
+        action='store_true'
     )
     
     args = parser.parse_args()

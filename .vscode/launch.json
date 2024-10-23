@@ -49,7 +49,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd", "-dpc=1.0"]
         },
         {
             "name": "train flownet2 rgbd",

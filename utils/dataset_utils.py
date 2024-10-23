@@ -145,3 +145,25 @@ def visualize_voxel(voxels):
     ax.set_zlim(0, 64)  
 
     plt.show()
+    
+    
+import cv2
+
+def save_video_from_array(frames):
+    fps = 20  # Frames per second
+    height, width = frames.shape[1], frames.shape[2]
+    video_filename = '/home/yilong/Desktop/output_video.mp4'
+
+    # Define the codec and create a VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for mp4
+    out = cv2.VideoWriter(video_filename, fourcc, fps, (width, height))
+
+    # Iterate over the frames and write them to the video
+    for i in range(frames.shape[0]):
+        frame = frames[i]
+        out.write(frame)
+
+    # Release the video writer object
+    out.release()
+
+    print(f'Video saved as {video_filename}')
