@@ -119,6 +119,6 @@ def process_subdirectory(subdir_path):
     visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=True)
 
 if __name__ == '__main__':
-    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
     
     process_subdirectory(base_path)

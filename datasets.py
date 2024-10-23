@@ -43,7 +43,9 @@ class BaseDataset(Dataset):
                  validation=False, 
                  random_crop=False, 
                  load_actions=False, 
-                 compute_stats=True):
+                 compute_stats=True,
+                 action_mean=None,  # Add precomputed action mean
+                 action_std=None):  # Add precomputed action std
         self.path = path
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
@@ -51,21 +53,22 @@ class BaseDataset(Dataset):
         self.load_actions = load_actions
         self.random_crop = random_crop
         self.sequence_paths = []
-        self.compute_stats = compute_stats  # Flag to compute stats during dataset loading
-        self.action_mean = None
-        self.action_std = None
+        self.compute_stats = compute_stats
+        self.action_mean = action_mean  # Assign precomputed mean
+        self.action_std = action_std    # Assign precomputed std
         self.sum_actions = None
         self.sum_square_actions = None
         self.n_samples = 0
         self.data_modality = data_modality
         self.action_type = action_type
 
-        # Load dataset and compute stats if needed
+        # Load dataset and compute stats if needed (only when stats are not provided)
         self._load_datasets(path, demo_percentage, validation, cameras, max_workers=64)
-        if self.compute_stats:
+        if self.compute_stats and (self.action_mean is None or self.action_std is None):
             self._compute_action_statistics()
-            print(f"Label mean: {self.action_mean}")
-            print(f"Label std: {self.action_std}")
+            
+        print(f"Label mean: {self.action_mean}")
+        print(f"Label std: {self.action_std}")
 
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])

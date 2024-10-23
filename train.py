@@ -15,7 +15,7 @@ if oscar:
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
+    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -244,7 +244,7 @@ if __name__ == '__main__':
         '--flownet_version', '-fv',
         type=str,
         default='FlowNet2',
-        choices=['FlowNet2', 'FlowNet2C', 'FlowNet2CS', 'FlowNet2CSS', 'FlowNet2CSS_ftSD', 'FlowNet2S', 'FlowNet2SD'],
+        choices=['FlowNet2', 'FlowNet2C', 'FlowNet2CS', 'FlowNet2CSS', 'FlowNet2S', 'FlowNet2SD'],
         help="Type of FlowNet2 to select"
     )
     
