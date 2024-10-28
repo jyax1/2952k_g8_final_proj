@@ -34,6 +34,7 @@ def load_datasets(
         validation=True, 
         horizon=2, 
         demo_percentage=0.9, 
+        num_demo_train=5000,
         val_demo_percentage=0.9,
         cameras=['frontview_image'],
         motion=False,
@@ -65,7 +66,7 @@ def load_datasets(
             action_std = train_set.action_std
         if validation:
             validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
-                                                demo_percentage=val_demo_percentage, cameras=cameras, validation=True, 
+                                                demo_percentage=val_demo_percentage, num_demo_train=num_demo_train, cameras=cameras, validation=True, 
                                                 motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
                                                 data_modality=data_modality, action_mean=action_mean, action_std=action_std)
 

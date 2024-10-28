@@ -16,6 +16,7 @@ class BaseDataset(Dataset):
                  semantic_map=False, 
                  frame_skip=0, 
                  demo_percentage=1.0, 
+                 num_demo_train=5000,
                  cameras=['frontview_image'], 
                  data_modality='rgb',
                  action_type='delta_action',
@@ -42,7 +43,7 @@ class BaseDataset(Dataset):
         self.action_type = action_type
 
         # Load dataset and compute stats if needed (only when stats are not provided)
-        self._load_datasets(path, demo_percentage, validation, cameras, max_workers=64)
+        self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=64)
         if self.compute_stats and (self.action_mean is None or self.action_std is None):
             self._compute_action_statistics()
             
@@ -52,7 +53,7 @@ class BaseDataset(Dataset):
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
 
-    def _load_datasets(self, path, demo_percentage, validation, cameras, max_workers=8):
+    def _load_datasets(self, path, demo_percentage, num_demo_train, validation, cameras, max_workers=8):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
@@ -97,10 +98,17 @@ class BaseDataset(Dataset):
 
             task = zarr_file.split("/")[-2].replace('_', ' ')
             demos = list(root['data'].keys())
-            if validation:
-                demos = demos[int(len(demos) // (1 / demo_percentage)):]
+            if demo_percentage != None:
+                if validation:
+                    if demo_percentage == 0.0:
+                        start_index = 0
+                    else:
+                        start_index = int(len(demos) // (1 / demo_percentage))
+                    demos = demos[start_index:]
+                else:
+                    demos = demos[:int(len(demos) // (1 / demo_percentage))]
             else:
-                demos = demos[:int(len(demos) // (1 / demo_percentage))]
+                demos = demos[:num_demo_train]
 
             # Use ThreadPoolExecutor to parallelize demo processing
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

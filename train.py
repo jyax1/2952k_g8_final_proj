@@ -11,12 +11,11 @@ if oscar:
     dp = "/users/ysong135/scratch/datasets/random"
     vp = "/users/ysong135/scratch/datasets/random"
     b = 16
-    rp = '"/users/ysong135/Documents/action_extractor/results"'
+    rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_highres'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -56,6 +55,7 @@ def train(args):
         validation=True,
         horizon=args.horizon,
         demo_percentage=args.demo_percentage,
+        num_demo_train = args.num_demo_train,
         val_demo_percentage=args.val_demo_percentage,
         cameras=args.cameras,
         motion=args.motion,
@@ -175,8 +175,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--demo_percentage', '-dpc',
         type=float,
-        default=0.9,
+        default=None,
         help='Percentage of demos (spread evenly across each task) to use for training'
+    )
+    parser.add_argument(
+        '--num_demo_train',
+        type=int,
+        default=5000,
     )
     parser.add_argument(
         '--val_demo_percentage', '-vdp',
