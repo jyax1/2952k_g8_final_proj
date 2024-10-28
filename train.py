@@ -13,9 +13,9 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
         '--data_modality', '-dm',
         type=str,
         default='rgb',
-        choices=['rgb', 'rgbd', 'voxel'],
+        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth'],
         help='Type of data to use for training'
     )
     parser.add_argument(

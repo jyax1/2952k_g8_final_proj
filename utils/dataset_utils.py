@@ -167,3 +167,75 @@ def save_video_from_array(frames):
     out.release()
 
     print(f'Video saved as {video_filename}')
+    
+
+def segment_color_object(image, color='green', threshold=150):
+    # Convert image to HSV color space
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    
+    # Define color ranges in HSV
+    if color == 'green':
+        lower_color = np.array([40, 40, threshold])
+        upper_color = np.array([80, 255, 255])
+    elif color == 'red':
+        # Red has two ranges in HSV because it wraps around the hue circle
+        lower_red1 = np.array([0, 40, threshold])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([170, 40, threshold])
+        upper_red2 = np.array([180, 255, 255])
+        
+        # Create two masks for red
+        mask1 = cv2.inRange(hsv_image, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv_image, lower_red2, upper_red2)
+        mask = cv2.bitwise_or(mask1, mask2)
+    elif color == 'blue':
+        lower_color = np.array([100, 40, threshold])
+        upper_color = np.array([140, 255, 255])
+        mask = cv2.inRange(hsv_image, lower_color, upper_color)
+    elif color == 'cyan':
+        lower_color = np.array([80, 40, threshold])
+        upper_color = np.array([100, 255, 255])
+        mask = cv2.inRange(hsv_image, lower_color, upper_color)
+    else:
+        raise ValueError("Color must be one of 'red', 'green', 'blue', or 'cyan'")
+    
+    if color != 'red':
+        # For green, blue, and cyan, we only need one mask
+        mask = cv2.inRange(hsv_image, lower_color, upper_color)
+    
+    # Apply the mask to the original image
+    segmented_image = cv2.bitwise_and(image, image, mask=mask)
+    
+    return segmented_image, mask
+
+def save_combined_image(original_image, segmented_image, mask, directory='debug', combined_name='combined_image'):
+    # Create the directory if it doesn't exist
+    os.makedirs(directory, exist_ok=True)
+    
+    # Create a figure to place the images side by side
+    plt.figure(figsize=(15, 5))
+    
+    # Display the original image
+    plt.subplot(1, 3, 1)
+    plt.imshow(original_image)
+    plt.title('Original Image')
+    plt.axis('off')
+    
+    # Display the segmented image
+    plt.subplot(1, 3, 2)
+    plt.imshow(segmented_image)
+    plt.title('Segmented Image')
+    plt.axis('off')
+    
+    # Display the mask
+    plt.subplot(1, 3, 3)
+    plt.imshow(mask, cmap='gray')
+    plt.title('Mask')
+    plt.axis('off')
+    
+    # Save the combined image
+    combined_image_path = os.path.join(directory, f'{combined_name}.png')
+    plt.savefig(combined_image_path, bbox_inches='tight')
+    plt.close()
+    
+    print(f'Combined image saved to: {combined_image_path}')
