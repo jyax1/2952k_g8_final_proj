@@ -123,10 +123,10 @@ def load_model(architecture,
         
         if data_modality == 'voxel' or data_modality == 'rgbd':
             input_channels = 4 * horizon
-        elif data_modality == 'rgb':
+        elif data_modality == 'rgb' or 'color_mask_depth':
             input_channels = 3 * horizon
             
-        if data_modality == 'rgb':
+        if data_modality == 'rgb' or 'color_mask_depth':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)

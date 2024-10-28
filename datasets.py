@@ -59,14 +59,24 @@ class BaseDataset(Dataset):
         for seq_dir in sequence_dirs:
             zarr_path = seq_dir.replace('.hdf5', '.zarr')
             if not os.path.exists(zarr_path):
-                # hdf5_to_zarr(seq_dir)
+                # Convert HDF5 to Zarr if it doesn't exist
                 hdf5_to_zarr_parallel(seq_dir, max_workers=16)
 
+            # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
+            root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
+            for camera in cameras:
+                camera_name = camera.split('_')[0]
+                camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
+                if camera_maskdepth_path not in root:
+                    # Call the preprocessing function if the camera_maskdepth doesn't exist
+                    preprocess_maskdepth_data_parallel(root, camera_name)
+        
         # Collect all Zarr files
         self.zarr_files = glob(f"{path}/**/*.zarr", recursive=True)
         self.stores = [zarr.DirectoryStore(zarr_file) for zarr_file in self.zarr_files]
         self.roots = [zarr.open(store, mode='r') for store in self.stores]
 
+        # Process each demo within each Zarr file
         def process_demo(demo, data, task, camera=None):
             obs_frames = len(data['obs'][camera]) if camera else len(data['obs']['voxels'])
             for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
@@ -98,7 +108,7 @@ class BaseDataset(Dataset):
 
             task = zarr_file.split("/")[-2].replace('_', ' ')
             demos = list(root['data'].keys())
-            if demo_percentage != None:
+            if demo_percentage is not None:
                 if validation:
                     if demo_percentage == 0.0:
                         start_index = 0
@@ -119,6 +129,8 @@ class BaseDataset(Dataset):
                         futures.append(executor.submit(process_demo, demo, data, task, 'voxel'))
                     else:
                         for camera in cameras:
+                            if self.data_modality == 'color_mask_depth':
+                                camera = camera.split('_')[0] + '_maskdepth'
                             if camera in data['obs'].keys():
                                 futures.append(executor.submit(process_demo, demo, data, task, camera))
                             else:
@@ -126,6 +138,7 @@ class BaseDataset(Dataset):
                 # Wait for all futures to complete
                 for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
                     pass
+
 
     def _compute_action_statistics(self):
         # Compute mean and std from the accumulated sums
@@ -152,6 +165,9 @@ class BaseDataset(Dataset):
                 if self.semantic_map:
                     obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
                     obs = np.concatenate((obs, obs_semantic), axis=2)
+            
+            elif self.data_modality == 'color_mask_depth':
+                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
             
             obs_seq.append(obs)
 

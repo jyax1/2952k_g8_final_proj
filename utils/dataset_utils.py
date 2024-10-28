@@ -87,6 +87,64 @@ def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
 
+
+def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=500):
+    def process_demo(demo_key):
+        print(f"Processing {demo_key} into {camera}_maskdepth")
+
+        # Get the camera images and depth images
+        images = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 3)
+        depth_images = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
+        depth_images = depth_images.squeeze(-1)
+
+        # Convert all frames to HSV
+        hsv_images = np.stack([cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images])
+
+        # Define color ranges in HSV for green and cyan
+        green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
+        cyan_lower, cyan_upper = np.array([80, 40, 100]), np.array([100, 255, 255])
+
+        # Create masks for green and cyan
+        green_mask = ((hsv_images >= green_lower) & (hsv_images <= green_upper)).all(axis=-1).astype(np.uint8) * 255
+        cyan_mask = ((hsv_images >= cyan_lower) & (hsv_images <= cyan_upper)).all(axis=-1).astype(np.uint8) * 255
+
+        # Union of green and cyan masks
+        combined_mask = np.bitwise_or(green_mask, cyan_mask)
+
+        # Create the mask-depth array by stacking green, cyan, and masked depth
+        maskdepth_array = np.zeros((images.shape[0], images.shape[1], images.shape[2], 3), dtype=np.uint8)
+        maskdepth_array[..., 0] = green_mask
+        maskdepth_array[..., 1] = cyan_mask
+        maskdepth_array[..., 2] = np.where(combined_mask, depth_images, 0)
+
+        return demo_key, maskdepth_array
+
+    # Process demos in parallel and write results in batches
+    demo_keys = list(root['data'].keys())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = []
+        for demo_key, maskdepth_array in executor.map(process_demo, demo_keys):
+            results.append((demo_key, maskdepth_array))
+
+            # Write to Zarr every `batch_size` demos to prevent memory overflow
+            if len(results) >= batch_size:
+                _write_batch_to_zarr(root, camera, results)
+                results.clear()  # Clear the results list after writing to free up memory
+
+        # Write any remaining results after processing all demos
+        if results:
+            _write_batch_to_zarr(root, camera, results)
+
+def _write_batch_to_zarr(root, camera, batch_results):
+    """Helper function to write a batch of results to Zarr."""
+    for demo_key, maskdepth_array in batch_results:
+        if f'{camera}_maskdepth' in root['data'][demo_key]['obs']:
+            del root['data'][demo_key]['obs'][f'{camera}_maskdepth']  # Remove existing data if any
+        root['data'][demo_key]['obs'].create_dataset(
+            f'{camera}_maskdepth', data=maskdepth_array, shape=maskdepth_array.shape, dtype=maskdepth_array.dtype, overwrite=True
+        )
+        print(f"Saved {camera}_maskdepth for {demo_key}")
+
 def save_consecutive_images(tensor, save_path="debug/combined_image.png"):
     # Ensure the save path directory exists
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -239,3 +297,52 @@ def save_combined_image(original_image, segmented_image, mask, directory='debug'
     plt.close()
     
     print(f'Combined image saved to: {combined_image_path}')
+    
+    
+def save_maskdepth_visualization(original_image, maskdepth_array, save_dir="debug", filename="maskdepth.png"):
+    # Ensure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
+    if isinstance(maskdepth_array, torch.Tensor) and list(maskdepth_array.size()) == [3, 128, 128]:
+        maskdepth_array = maskdepth_array.permute(1, 2, 0).numpy()
+    
+    # Extract the three channels from the maskdepth array
+    green_mask = maskdepth_array[..., 0]  # First channel (0s and 1s)
+    cyan_mask = maskdepth_array[..., 1]   # Second channel (0s and 1s)
+    depth_mask = maskdepth_array[..., 2]  # Third channel (0 to 255)
+    
+    # Convert the binary masks to be visible (0s and 1s to 0s and 255s)
+    if green_mask.max() == 1.0:
+        green_mask = (green_mask * 255).astype(np.uint8)
+        cyan_mask = (cyan_mask * 255).astype(np.uint8)
+        depth_mask = (depth_mask * 255).astype(np.uint8)
+    
+    # Set up the figure for displaying the images side by side
+    fig, axs = plt.subplots(1, 4, figsize=(16, 4))
+    
+    # Display the original image
+    if original_image != None:
+        axs[0].imshow(original_image)
+        axs[0].set_title("Original Image")
+        axs[0].axis("off")
+    
+    # Display the first channel (green mask) in black and white
+    axs[1].imshow(green_mask, cmap="gray")
+    axs[1].set_title("Green Mask (Channel 1)")
+    axs[1].axis("off")
+    
+    # Display the second channel (cyan mask) in black and white
+    axs[2].imshow(cyan_mask, cmap="gray")
+    axs[2].set_title("Cyan Mask (Channel 2)")
+    axs[2].axis("off")
+    
+    # Display the third channel (depth mask) in black and white
+    axs[3].imshow(depth_mask, cmap="gray", vmin=0, vmax=255)
+    axs[3].set_title("Depth Mask (Channel 3)")
+    axs[3].axis("off")
+    
+    # Save the figure as an image
+    save_path = os.path.join(save_dir, filename)
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+    
+    print(f"Maskdepth visualization saved at {save_path}")
