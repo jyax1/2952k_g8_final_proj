@@ -13,9 +13,9 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_val'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -61,7 +61,8 @@ def train(args):
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
         action_type=args.action_type,
-        data_modality=args.data_modality
+        data_modality=args.data_modality,
+        compute_stats=args.standardize_data
         )
 
     # Instantiate the trainer
@@ -249,7 +250,7 @@ if __name__ == '__main__':
         '--action_type',
         type=str,
         default='absolute_action',
-        choices=['delta_action', 'absolute_action', 'position', 'pose'],
+        choices=['delta_action', 'absolute_action', 'position', 'pose', 'delta_pose'],
         help='Type of action representation to use'
     )
     parser.add_argument(
@@ -264,6 +265,10 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--sam2_box',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--standardize_data',
         action='store_true'
     )
     

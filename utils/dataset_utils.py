@@ -320,7 +320,7 @@ def save_maskdepth_visualization(original_image, maskdepth_array, save_dir="debu
     fig, axs = plt.subplots(1, 4, figsize=(16, 4))
     
     # Display the original image
-    if original_image != None:
+    if isinstance(original_image, np.ndarray):
         axs[0].imshow(original_image)
         axs[0].set_title("Original Image")
         axs[0].axis("off")
@@ -346,3 +346,24 @@ def save_maskdepth_visualization(original_image, maskdepth_array, save_dir="debu
     plt.close(fig)
     
     print(f"Maskdepth visualization saved at {save_path}")
+    
+    
+def quaternion_inverse(q):
+        '''Assumes q is a normalized quaternion (w, x, y, z) and returns its inverse.'''
+        return np.array([q[0], -q[1], -q[2], -q[3]])
+
+def quaternion_multiply(q1, q2):
+    """Multiplies two quaternions q1 and q2."""
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array([
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 + y1 * w2 + z1 * x2 - x1 * z2,
+        w1 * z2 + z1 * w2 + x1 * y2 - y1 * x2
+    ])
+
+def quaternion_difference(q1, q2):
+    """Calculates the difference between two quaternions q1 and q2."""
+    q1_inv = quaternion_inverse(q1)
+    return quaternion_multiply(q2, q1_inv)

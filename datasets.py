@@ -43,7 +43,7 @@ class BaseDataset(Dataset):
         self.action_type = action_type
 
         # Load dataset and compute stats if needed (only when stats are not provided)
-        self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=64)
+        self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=1)
         if self.compute_stats and (self.action_mean is None or self.action_std is None):
             self._compute_action_statistics()
             
@@ -52,7 +52,7 @@ class BaseDataset(Dataset):
 
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
-
+    
     def _load_datasets(self, path, demo_percentage, num_demo_train, validation, cameras, max_workers=8):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
@@ -83,20 +83,34 @@ class BaseDataset(Dataset):
                 self.sequence_paths.append((root, demo, i, task, camera))
                 if self.compute_stats and self.load_actions:
                     if self.action_type == 'position':
-                        actions_seq = data['obs']['robot0_eef_pos'][i]
-                    elif self.action_type == 'pose':
+                        action = data['obs']['robot0_eef_pos'][i]
+                    elif self.action_type == 'pose' or self.action_type == 'delta_pose':
                         eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
                         eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
                         gripper_qpos = data['obs']['robot0_gripper_qpos'][i]  # Shape: (2,)
-                        actions_seq = np.concatenate([eef_pos, eef_quat, gripper_qpos])
-                    else:
-                        actions_seq = data['actions'][i]
-                    if self.sum_actions is None:
-                        self.sum_actions = np.zeros(actions_seq.shape[-1])
-                        self.sum_square_actions = np.zeros(actions_seq.shape[-1])
+                        action = np.concatenate([eef_pos, eef_quat, gripper_qpos])
 
-                    self.sum_actions += actions_seq
-                    self.sum_square_actions += actions_seq ** 2
+                        if self.action_type == 'delta_pose':
+                            eef_pos_next = data['obs']['robot0_eef_pos'][i+1]    # Shape: (3,)
+                            eef_quat_next = data['obs']['robot0_eef_quat'][i+1]  # Shape: (4,)
+                            gripper_qpos_next = data['obs']['robot0_gripper_qpos'][i+1]  # Shape: (2,)
+                            
+                            pos_diff = eef_pos_next - eef_pos  # Shape: (3,)
+
+                            quat_diff = quaternion_difference(eef_quat, eef_quat_next)  # Shape: (4,)
+
+                            gripper_diff = gripper_qpos_next - gripper_qpos  # Shape: (2,)
+                            action = np.concatenate([pos_diff, quat_diff, gripper_diff])
+                            
+                    else:
+                        action = data['actions'][i]
+                    
+                    if self.sum_actions is None:
+                        self.sum_actions = np.zeros(action.shape[-1])
+                        self.sum_square_actions = np.zeros(action.shape[-1])
+
+                    self.sum_actions += action
+                    self.sum_square_actions += action ** 2
                     self.n_samples += 1
 
         # Process each Zarr file in parallel
@@ -221,7 +235,6 @@ class DatasetVideo2Action(BaseDataset):
             actions_seq = [root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
         elif self.action_type == 'pose':
-            action_seq = []
             for i in range(self.video_length):
                 eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)
                 eef_quat = root['data'][demo]['obs']['robot0_eef_quat'][index + i * (self.frame_skip + 1)]  # Shape: (4,)
@@ -229,14 +242,37 @@ class DatasetVideo2Action(BaseDataset):
                 action = np.concatenate([eef_pos, eef_quat, gripper_qpos])
                 actions_seq.append(action)
             actions = np.array(actions_seq)
+        elif self.action_type == 'delta_pose':
+            actions_seq = []
+            for i in range(self.video_length - 1):
+                eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)
+                eef_quat = root['data'][demo]['obs']['robot0_eef_quat'][index + i * (self.frame_skip + 1)]  # Shape: (4,)
+                gripper_qpos = root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]  # Shape: (2,)
+                
+                eef_pos_next = root['data'][demo]['obs']['robot0_eef_pos'][i+1]    # Shape: (3,)
+                eef_quat_next = root['data'][demo]['obs']['robot0_eef_quat'][i+1]  # Shape: (4,)
+                gripper_qpos_next = root['data'][demo]['obs']['robot0_gripper_qpos'][i+1]  # Shape: (2,)
+                
+                pos_diff = eef_pos_next - eef_pos  # Shape: (3,)
+
+                quat_diff = quaternion_difference(eef_quat, eef_quat_next)  # Shape: (4,)
+
+                gripper_diff = gripper_qpos_next - gripper_qpos  # Shape: (2,)
+                action = np.concatenate([pos_diff, quat_diff, gripper_diff])
+                actions_seq.append(action)
+                
+            actions = np.array(actions_seq)
 
         # If video_length == 1, return a flat action vector
-        if self.video_length == 1:
+        if self.video_length == 1 or (self.action_type == 'delta_pose' and self.video_length == 2):
             actions = actions.squeeze(0)  # Remove the first dimension to make it (7)
 
         # Standardize actions if mean and std are computed
         if self.action_mean is not None and self.action_std is not None:
             actions = (actions - self.action_mean) / self.action_std
+        
+        if self.action_type == 'delta_pose':
+            actions[-2:] *= 100
 
         if self.data_modality != 'voxel':
             obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
