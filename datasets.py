@@ -11,8 +11,7 @@ from tqdm import tqdm
 
 frontview_matrices = np.load('utils/frontview_matrices.npz')
 frontview_K = frontview_matrices['K'] # Intrinsics
-frontview_R = frontview_matrices['R'] # Extrinsics
-frontview_quat = np.array([0.56, 0.43, 0.43, 0.56])
+frontview_R = frontview_matrices['R'] # Extrinsics (camera frame in terms of global frame)
 
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 

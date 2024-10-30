@@ -368,6 +368,16 @@ def quaternion_difference(q1, q2):
     q1_inv = quaternion_inverse(q1)
     return quaternion_multiply(q2, q1_inv)
 
+def get_point_in_camera_frame(point_3D, R):
+    point_3D_homogeneous = np.array([point_3D[0], point_3D[1], point_3D[2], 1])
+
+    # Transform the point from world coordinates to camera coordinates
+    point_camera = R @ point_3D_homogeneous  # Resulting shape (4,)
+
+    # Extract x, y, and z coordinates in camera space
+    y_cam, x_cam, z_cam, _ = point_camera
+    
+    return np.array([x_cam, y_cam, z_cam])
 
 def project_point(K, R, point_3D):
     """
@@ -388,7 +398,7 @@ def project_point(K, R, point_3D):
     point_camera = R @ point_3D_homogeneous  # Resulting shape (4,)
 
     # Extract x, y, and z coordinates in camera space
-    y_cam, x_cam, z_cam, _ = point_camera
+    x_cam, y_cam, z_cam, _ = point_camera
     if z_cam == 0:  # Avoid division by zero
         raise ValueError("Point is located on the camera plane (z=0), projection undefined.")
 
