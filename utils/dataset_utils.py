@@ -367,3 +367,223 @@ def quaternion_difference(q1, q2):
     """Calculates the difference between two quaternions q1 and q2."""
     q1_inv = quaternion_inverse(q1)
     return quaternion_multiply(q2, q1_inv)
+
+
+def project_point(K, R, point_3D):
+    """
+    Projects a 3D point in world coordinates onto the 2D image plane.
+    
+    Parameters:
+    - K: 3x3 intrinsic matrix
+    - R: 4x4 extrinsic matrix (contains both rotation and translation)
+    - point_3D: 3D point in world coordinates, given as (X, Y, Z)
+
+    Returns:
+    - A tuple (u, v) representing the 2D pixel coordinates.
+    """
+    # Convert the 3D point to homogeneous coordinates
+    point_3D_homogeneous = np.array([point_3D[0], point_3D[1], point_3D[2], 1])
+
+    # Transform the point from world coordinates to camera coordinates
+    point_camera = R @ point_3D_homogeneous  # Resulting shape (4,)
+
+    # Extract x, y, and z coordinates in camera space
+    y_cam, x_cam, z_cam, _ = point_camera
+    if z_cam == 0:  # Avoid division by zero
+        raise ValueError("Point is located on the camera plane (z=0), projection undefined.")
+
+    # Apply the intrinsic matrix to the normalized camera coordinates
+    pixel_coords_homogeneous = K @ np.array([x_cam, y_cam, z_cam])
+
+    # Normalize to get pixel coordinates in 2D
+    u = pixel_coords_homogeneous[0] / pixel_coords_homogeneous[2]
+    v = pixel_coords_homogeneous[1] / pixel_coords_homogeneous[2]
+
+    return (u, v)
+
+def project_point_debug(K, R, point_3D):
+    """
+    Projects a 3D point in world coordinates onto the 2D image plane.
+    
+    Parameters:
+    - K: 3x3 intrinsic matrix
+    - R: 4x4 extrinsic matrix (contains both rotation and translation)
+    - point_3D: 3D point in world coordinates, given as (X, Y, Z)
+
+    Returns:
+    - A tuple (u, v) representing the 2D pixel coordinates.
+    """
+    # Convert the 3D point to homogeneous coordinates
+    point_3D_homogeneous = np.array([point_3D[0], point_3D[1], point_3D[2], 1])
+
+    # Transform the point from world coordinates to camera coordinates
+    point_camera = R @ point_3D_homogeneous  # Resulting shape (4,)
+    x_cam, y_cam, z_cam, _ = point_camera
+
+    # Debug: Print camera-space coordinates
+    print(f"Camera-space coordinates: x={x_cam}, y={y_cam}, z={z_cam}")
+
+    if z_cam <= 0:  # Ensure the point is in front of the camera
+        raise ValueError("Point is behind the camera or on the camera plane (z <= 0), projection undefined.")
+
+    # Apply the intrinsic matrix to the normalized camera coordinates
+    pixel_coords_homogeneous = K @ np.array([x_cam, y_cam, z_cam])
+
+    # Normalize to get pixel coordinates in 2D
+    print(f"pixel_coords_homogeneous = {pixel_coords_homogeneous}")
+    u = pixel_coords_homogeneous[0] / pixel_coords_homogeneous[2]
+    v = pixel_coords_homogeneous[1] / pixel_coords_homogeneous[2]
+
+    # Debug: Print final pixel coordinates
+    print(f"Projected pixel coordinates: u={u}, v={v}")
+
+    return (u, v)
+
+def draw_and_save_point(image, point):
+    point_radius = 2
+    point_color = (0, 255, 0)  # Blue color in RGB
+    if image.max() == 1.0:
+        image = (image * 255).astype(np.uint8)
+        
+    point = (int(np.round(point[0])), int(np.round(point[1])))
+
+    # Draw the point on the image using OpenCV
+    cv2.circle(image, point, point_radius, point_color, -1)  # -1 fills the circle
+
+    # Save the image in the debug directory as 'gripper_position.png'
+    cv2.imwrite("debug/gripper_position.png", image)
+    
+    
+def quaternion_to_rotation_matrix(Q):
+    """
+    Converts a quaternion to a 3x3 rotation matrix.
+    
+    Parameters:
+    - quaternion: A list or array with four elements [w, x, y, z] where
+                  w is the scalar part and (x, y, z) are the vector parts.
+
+    Returns:
+    - A 3x3 rotation matrix as a NumPy array.
+    """
+    q0 = Q[0]
+    q1 = Q[1]
+    q2 = Q[2]
+    q3 = Q[3]
+     
+    # First row of the rotation matrix
+    r00 = 2 * (q0 * q0 + q1 * q1) - 1
+    r01 = 2 * (q1 * q2 - q0 * q3)
+    r02 = 2 * (q1 * q3 + q0 * q2)
+     
+    # Second row of the rotation matrix
+    r10 = 2 * (q1 * q2 + q0 * q3)
+    r11 = 2 * (q0 * q0 + q2 * q2) - 1
+    r12 = 2 * (q2 * q3 - q0 * q1)
+     
+    # Third row of the rotation matrix
+    r20 = 2 * (q1 * q3 - q0 * q2)
+    r21 = 2 * (q2 * q3 + q0 * q1)
+    r22 = 2 * (q0 * q0 + q3 * q3) - 1
+     
+    # 3x3 rotation matrix
+    rot_matrix = np.array([[r00, r01, r02],
+                           [r10, r11, r12],
+                           [r20, r21, r22]])
+                            
+    return rot_matrix
+
+def pose_inv(pose):
+    """
+    From /robosuite/utils/transform_utils.py
+    
+    Computes the inverse of a homogeneous matrix corresponding to the pose of some
+    frame B in frame A. The inverse is the pose of frame A in frame B.
+
+    Args:
+        pose (np.array): 4x4 matrix for the pose to inverse
+
+    Returns:
+        np.array: 4x4 matrix for the inverse pose
+    """
+
+    # Note, the inverse of a pose matrix is the following
+    # [R t; 0 1]^-1 = [R.T -R.T*t; 0 1]
+
+    # Intuitively, this makes sense.
+    # The original pose matrix translates by t, then rotates by R.
+    # We just invert the rotation by applying R-1 = R.T, and also translate back.
+    # Since we apply translation first before rotation, we need to translate by
+    # -t in the original frame, which is -R-1*t in the new frame, and then rotate back by
+    # R-1 to align the axis again.
+
+    pose_inv = np.zeros((4, 4))
+    pose_inv[:3, :3] = pose[:3, :3].T
+    pose_inv[:3, 3] = -pose_inv[:3, :3].dot(pose[:3, 3])
+    pose_inv[3, 3] = 1.0
+    return pose_inv
+
+# def get_camera_transform_matrix(R, K):
+#     """
+#     Camera transform matrix to project from world coordinates to pixel coordinates.
+
+#     Args:
+#         sim (MjSim): simulator instance
+#         camera_name (str): name of camera
+#         camera_height (int): height of camera images in pixels
+#         camera_width (int): width of camera images in pixels
+#     Return:
+#         K (np.array): 4x4 camera matrix to project from world coordinates to pixel coordinates
+#     """
+#     K_exp = np.eye(4)
+#     K_exp[:3, :3] = K
+
+#     # Takes a point in world, transforms to camera frame, and then projects onto image plane.
+#     return K_exp @ T.pose_inv(R)
+
+# def project_points_from_world_to_camera(points, world_to_camera_transform, camera_height, camera_width):
+#     """
+#     From robosuite/utils/camera_utils.py
+    
+#     Helper function to project a batch of points in the world frame
+#     into camera pixels using the world to camera transformation.
+
+#     Args:
+#         points (np.array): 3D points in world frame to project onto camera pixel locations. Should
+#             be shape [..., 3].
+#         world_to_camera_transform (np.array): 4x4 Tensor to go from robot coordinates to pixel
+#             coordinates.
+#         camera_height (int): height of the camera image
+#         camera_width (int): width of the camera image
+
+#     Return:
+#         pixels (np.array): projected pixel indices of shape [..., 2]
+#     """
+#     assert points.shape[-1] == 3  # last dimension must be 3D
+#     assert len(world_to_camera_transform.shape) == 2
+#     assert world_to_camera_transform.shape[0] == 4 and world_to_camera_transform.shape[1] == 4
+
+#     # convert points to homogenous coordinates -> (px, py, pz, 1)
+#     ones_pad = np.ones(points.shape[:-1] + (1,))
+#     points = np.concatenate((points, ones_pad), axis=-1)  # shape [..., 4]
+
+#     # batch matrix multiplication of 4 x 4 matrix and 4 x 1 vectors to do robot frame to pixels transform
+#     mat_reshape = [1] * len(points.shape[:-1]) + [4, 4]
+#     cam_trans = world_to_camera_transform.reshape(mat_reshape)  # shape [..., 4, 4]
+#     pixels = np.matmul(cam_trans, points[..., None])[..., 0]  # shape [..., 4]
+
+#     # re-scaling from homogenous coordinates to recover pixel values
+#     # (x, y, z) -> (x / z, y / z)
+#     pixels = pixels / pixels[..., 2:3]
+#     pixels = pixels[..., :2].round().astype(int)  # shape [..., 2]
+
+#     # swap first and second coordinates to get pixel indices that correspond to (height, width)
+#     # and also clip pixels that are out of range of the camera image
+#     pixels = np.concatenate(
+#         (
+#             pixels[..., 1:2].clip(0, camera_height - 1),
+#             pixels[..., 0:1].clip(0, camera_width - 1),
+#         ),
+#         axis=-1,
+#     )
+
+#     return pixels

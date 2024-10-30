@@ -52,6 +52,14 @@
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd", "-dpc=1.0"]
         },
         {
+            "name": "train direct_resnet_mlp rgbd delta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_pose", "--data_modality=rgbd", "-dpc=1.0"]
+        },
+        {
             "name": "train direct_resnet_mlp color_mask_depth",
             "type": "debugpy",
             "request": "launch",

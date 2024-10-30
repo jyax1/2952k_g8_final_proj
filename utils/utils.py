@@ -127,7 +127,7 @@ def load_model(architecture,
         elif data_modality == 'rgb' or 'color_mask_depth':
             input_channels = 3 * horizon
             
-        if data_modality == 'rgb' or 'color_mask_depth':
+        if data_modality == 'rgb' or data_modality == 'color_mask_depth':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
