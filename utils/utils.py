@@ -119,7 +119,7 @@ def load_model(architecture,
         
         if 'action' in action_type:
             num_classes = 7
-        elif action_type == 'position':
+        elif action_type == 'position' or 'delta_position':
             num_classes = 3
         elif action_type == 'pose' or 'delta_pose':
             num_classes = 9

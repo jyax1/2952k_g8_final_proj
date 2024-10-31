@@ -251,6 +251,11 @@ class DatasetVideo2Action(BaseDataset):
         elif self.action_type == 'position':
             actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
+        elif self.action_type == 'delta_position':
+            actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
+            actions = np.array(actions_diff)
         elif self.action_type == 'pose':
             for i in range(self.video_length):
                 eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)
@@ -266,17 +271,17 @@ class DatasetVideo2Action(BaseDataset):
                 eef_quat = root['data'][demo]['obs']['robot0_eef_quat'][index + i * (self.frame_skip + 1)]  # Shape: (4,)
                 gripper_qpos = root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]  # Shape: (2,)
                 
-                eef_pos_next = root['data'][demo]['obs']['robot0_eef_pos'][i+1]    # Shape: (3,)
-                eef_quat_next = root['data'][demo]['obs']['robot0_eef_quat'][i+1]  # Shape: (4,)
-                gripper_qpos_next = root['data'][demo]['obs']['robot0_gripper_qpos'][i+1]  # Shape: (2,)
+                eef_pos_next = root['data'][demo]['obs']['robot0_eef_pos'][index + (i+1) * (self.frame_skip + 1)]    # Shape: (3,)
+                eef_quat_next = root['data'][demo]['obs']['robot0_eef_quat'][index + (i+1) * (self.frame_skip + 1)]  # Shape: (4,)
+                gripper_qpos_next = root['data'][demo]['obs']['robot0_gripper_qpos'][index + (i+1) * (self.frame_skip + 1)]  # Shape: (2,)
                 
                 pos_diff = eef_pos_next - eef_pos  # Shape: (3,)
 
                 quat_diff = quaternion_difference(eef_quat, eef_quat_next)  # Shape: (4,)
 
                 gripper_diff = gripper_qpos_next - gripper_qpos  # Shape: (2,)
-                action = np.concatenate([pos_diff, quat_diff, gripper_diff])
-                actions_seq.append(action)
+                actions_diff = np.concatenate([pos_diff, quat_diff, gripper_diff])
+                actions_seq.append(actions_diff)
                 
             actions = np.array(actions_seq)
 
