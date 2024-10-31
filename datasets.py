@@ -28,7 +28,8 @@ class BaseDataset(Dataset):
                  load_actions=False, 
                  compute_stats=True,
                  action_mean=None,  # Add precomputed action mean
-                 action_std=None):  # Add precomputed action std
+                 action_std=None,
+                 coordinate_system='disentangled'):  # Add precomputed action std
         self.path = path
         self.frame_skip = frame_skip
         self.semantic_map = semantic_map
@@ -44,6 +45,7 @@ class BaseDataset(Dataset):
         self.n_samples = 0
         self.data_modality = data_modality
         self.action_type = action_type
+        self.coordinate_system = coordinate_system
 
         # Load dataset and compute stats if needed (only when stats are not provided)
         self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=1)
@@ -67,11 +69,16 @@ class BaseDataset(Dataset):
 
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
             root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
+            
             for camera in cameras:
                 camera_name = camera.split('_')[0]
                 camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
+                eef_pos_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}'
+                eef_pos_disentangled_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}_disentangled'
+
+                # If any of the required data paths are missing, preprocess them
                 if camera_maskdepth_path not in root:
-                    # Call the preprocessing function if the camera_maskdepth doesn't exist
+                    # Call the preprocessing function if any data is missing
                     preprocess_maskdepth_data_parallel(root, camera_name)
         
         # Collect all Zarr files
@@ -226,6 +233,13 @@ class DatasetVideo2Action(BaseDataset):
     def __getitem__(self, idx):
         root, demo, index, task, camera = self.sequence_paths[idx]
         obs_seq, actions_seq = self.get_samples(root, demo, index, camera)
+        
+        if self.coordinate_system == 'global':
+            position = 'robot0_eef_pos'
+        elif self.coordinate_system == 'camera':
+            position = f'robot0_eef_pos_{camera}'
+        elif self.coordinate_system == 'disentangled':
+            position = f'robot0_eef_pos_{camera}_disentangled'
 
         # Handle action_type logic
         if self.action_type == 'delta_action':
@@ -235,7 +249,7 @@ class DatasetVideo2Action(BaseDataset):
             actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
         elif self.action_type == 'position':
-            actions_seq = [root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
         elif self.action_type == 'pose':
             for i in range(self.video_length):

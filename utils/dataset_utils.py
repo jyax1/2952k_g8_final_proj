@@ -86,6 +86,93 @@ def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
         copy_node(hdf5_file, root)
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
+    
+def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
+    def process_demo(demo_key):
+        # print(f"Processing {demo_key} into {camera}_maskdepth and related data")
+
+        # Step 1: Process maskdepth data
+        images = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 3)
+        depth_images = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
+        depth_images = depth_images.squeeze(-1)
+
+        hsv_images = np.stack([cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images])
+        green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
+        cyan_lower, cyan_upper = np.array([80, 40, 100]), np.array([100, 255, 255])
+
+        green_mask = ((hsv_images >= green_lower) & (hsv_images <= green_upper)).all(axis=-1).astype(np.uint8) * 255
+        cyan_mask = ((hsv_images >= cyan_lower) & (hsv_images <= cyan_upper)).all(axis=-1).astype(np.uint8) * 255
+
+        combined_mask = np.bitwise_or(green_mask, cyan_mask)
+
+        maskdepth_array = np.zeros((images.shape[0], images.shape[1], images.shape[2], 3), dtype=np.uint8)
+        maskdepth_array[..., 0] = green_mask
+        maskdepth_array[..., 1] = cyan_mask
+        maskdepth_array[..., 2] = np.where(combined_mask, depth_images, 0)
+
+        # Step 2: Process robot0_eef_pos_{camera_name}
+        global_positions = root['data'][demo_key]['obs']['robot0_eef_pos'][:]  # Shape: (trajectory_length, 3)
+        trajectory_length = global_positions.shape[0]
+        
+        # Convert global positions to homogeneous coordinates
+        homogeneous_positions = np.hstack((global_positions, np.ones((trajectory_length, 1))))
+
+        # Apply extrinsic matrix R to get positions in the camera frame
+        camera_positions_homogeneous = (R @ homogeneous_positions.T).T
+        camera_positions = camera_positions_homogeneous[:, :3]  # Take only the first 3 components
+
+        # Step 3: Process robot0_eef_pos_{camera_name}_disentangled
+        # Compute (x/z, y/z, log(z)) for each point in camera_positions
+        x, y, z = camera_positions[:, 0], camera_positions[:, 1], camera_positions[:, 2]
+        disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
+
+        return demo_key, maskdepth_array, camera_positions, disentangled_positions
+
+    # Process demos in parallel and write results in batches
+    demo_keys = list(root['data'].keys())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = []
+        for demo_key, maskdepth_array, camera_positions, disentangled_positions in executor.map(process_demo, demo_keys):
+            results.append((demo_key, maskdepth_array, camera_positions, disentangled_positions))
+
+            # Write to Zarr every batch_size demos to prevent memory overflow
+            if len(results) >= batch_size:
+                _write_batch_to_zarr(root, camera, results)
+                results.clear()  # Clear the results list after writing to free up memory
+
+        # Write any remaining results after processing all demos
+        if results:
+            _write_batch_to_zarr(root, camera, results)
+
+def _write_batch_to_zarr(root, camera, batch_results):
+    """Helper function to write a batch of results to Zarr."""
+    for demo_key, maskdepth_array, camera_positions, disentangled_positions in batch_results:
+        # Save maskdepth data
+        maskdepth_key = f'{camera}_maskdepth'
+        if maskdepth_key in root['data'][demo_key]['obs']:
+            del root['data'][demo_key]['obs'][maskdepth_key]
+        root['data'][demo_key]['obs'].create_dataset(
+            maskdepth_key, data=maskdepth_array, shape=maskdepth_array.shape, dtype=maskdepth_array.dtype, overwrite=True
+        )
+        print(f"Saved {maskdepth_key} for {demo_key}")
+
+        # Save camera-space end-effector positions
+        eef_pos_key = f'robot0_eef_pos_{camera}'
+        if eef_pos_key in root['data'][demo_key]['obs']:
+            del root['data'][demo_key]['obs'][eef_pos_key]
+        root['data'][demo_key]['obs'].create_dataset(
+            eef_pos_key, data=camera_positions, shape=camera_positions.shape, dtype=camera_positions.dtype, overwrite=True
+        )
+        print(f"Saved {eef_pos_key} for {demo_key}")
+
+        # Save disentangled end-effector positions
+        eef_pos_disentangled_key = f'robot0_eef_pos_{camera}_disentangled'
+        if eef_pos_disentangled_key in root['data'][demo_key]['obs']:
+            del root['data'][demo_key]['obs'][eef_pos_disentangled_key]
+        root['data'][demo_key]['obs'].create_dataset(
+            eef_pos_disentangled_key, data=disentangled_positions, shape=disentangled_positions.shape, dtype=disentangled_positions.dtype, overwrite=True
+        )
+        print(f"Saved {eef_pos_disentangled_key} for {demo_key}")
 
 
 def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=500):
@@ -597,3 +684,24 @@ def pose_inv(pose):
 #     )
 
 #     return pixels
+
+
+def save_image_to_debug(image, filename="image.png"):
+    """
+    Saves an RGB image to the debug directory using matplotlib.
+
+    Parameters:
+    - image (np.ndarray): A (128, 128, 3) RGB image.
+    - filename (str): The name of the file to save. Default is "image.png".
+    """
+    # Ensure the image has the correct shape and data type
+    if image.shape != (128, 128, 3) or image.dtype != np.uint8:
+        raise ValueError("Image must be a (128, 128, 3) array with dtype=np.uint8.")
+
+    # Ensure the debug directory exists
+    os.makedirs("debug", exist_ok=True)
+
+    # Save the image in the debug directory
+    save_path = os.path.join("debug", filename)
+    plt.imsave(save_path, image)
+    print(f"Image saved to {save_path}")

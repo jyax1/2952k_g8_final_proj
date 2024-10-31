@@ -41,7 +41,8 @@ def load_datasets(
         image_plus_motion=False,
         action_type='',
         data_modality='rgb',
-        compute_stats=True
+        compute_stats=True,
+        coordinate_system='disentangled'
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
@@ -62,14 +63,15 @@ def load_datasets(
             train_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
                                             motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
-                                            data_modality=data_modality, compute_stats=compute_stats)
+                                            data_modality=data_modality, compute_stats=compute_stats, coordinate_system=coordinate_system)
             action_mean = train_set.action_mean
             action_std = train_set.action_std
         if validation:
             validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
                                                 demo_percentage=val_demo_percentage, num_demo_train=num_demo_train, cameras=cameras, validation=True, 
                                                 motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
-                                                data_modality=data_modality, action_mean=action_mean, action_std=action_std, compute_stats=compute_stats)
+                                                data_modality=data_modality, action_mean=action_mean, action_std=action_std, 
+                                                compute_stats=compute_stats, coordinate_system=coordinate_system)
 
     if train and validation:
         return train_set, validation_set

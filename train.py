@@ -13,9 +13,9 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
     vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_val'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -62,7 +62,8 @@ def train(args):
         image_plus_motion=args.image_plus_motion,
         action_type=args.action_type,
         data_modality=args.data_modality,
-        compute_stats=args.standardize_data
+        compute_stats=args.standardize_data,
+        coordinate_system=args.coordinate_system
         )
 
     # Instantiate the trainer
@@ -270,6 +271,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '--standardize_data',
         action='store_true'
+    )
+    parser.add_argument(
+        '--coordinate_system',
+        choices=['global', 'camera', 'disentangled']
     )
     
     args = parser.parse_args()
