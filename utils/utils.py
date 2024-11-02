@@ -119,10 +119,12 @@ def load_model(architecture,
         
         if 'action' in action_type:
             num_classes = 7
-        elif action_type == 'position' or 'delta_position':
+        elif action_type == 'position' or action_type == 'delta_position':
             num_classes = 3
-        elif action_type == 'pose' or 'delta_pose':
+        elif action_type == 'pose' or action_type == 'delta_pose':
             num_classes = 9
+        elif action_type == 'position+gripper' or action_type == 'delta_position+gripper':
+            num_classes = 5
         
         if data_modality == 'voxel' or data_modality == 'rgbd':
             input_channels = 4 * horizon

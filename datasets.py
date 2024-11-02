@@ -11,7 +11,8 @@ from tqdm import tqdm
 
 frontview_matrices = np.load('utils/frontview_matrices.npz')
 frontview_K = frontview_matrices['K'] # Intrinsics
-frontview_R = frontview_matrices['R'] # Extrinsics (camera frame in terms of global frame)
+camera_frame_in_global_frame = frontview_matrices['R'] # (camera frame in terms of global frame)
+frontview_R = pose_inv(camera_frame_in_global_frame) # Extrinsics
 
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 
@@ -79,7 +80,7 @@ class BaseDataset(Dataset):
                 # If any of the required data paths are missing, preprocess them
                 if camera_maskdepth_path not in root:
                     # Call the preprocessing function if any data is missing
-                    preprocess_maskdepth_data_parallel(root, camera_name)
+                    preprocess_data_parallel(root, camera_name, frontview_R)
         
         # Collect all Zarr files
         self.zarr_files = glob(f"{path}/**/*.zarr", recursive=True)
@@ -92,8 +93,36 @@ class BaseDataset(Dataset):
             for i in range(obs_frames - self.video_length * (self.frame_skip + 1)):
                 self.sequence_paths.append((root, demo, i, task, camera))
                 if self.compute_stats and self.load_actions:
+                    camera_name = camera.split('_')[0]
+                    
+                    if self.coordinate_system == 'global':
+                        position = 'robot0_eef_pos'
+                    elif self.coordinate_system == 'camera':
+                        position = f'robot0_eef_pos_{camera_name}'
+                    elif self.coordinate_system == 'disentangled':
+                        position = f'robot0_eef_pos_{camera_name}_disentangled'
+                        
                     if self.action_type == 'position':
-                        action = data['obs']['robot0_eef_pos'][i]
+                        action = data['obs'][position][i]
+                        
+                    elif self.action_type == 'delta_position':
+                        pos = data['obs'][position][i]
+                        pos_next = data['obs'][position][i+1]
+                        action = pos_next - pos
+                        
+                    elif self.action_type == 'position+gripper':
+                        eef_pos = data['obs'][position][i]
+                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]
+                        action = np.concatenate([eef_pos, gripper_qpos])
+                        
+                    elif self.action_type == 'delta_position+gripper':
+                        eef_pos = data['obs'][position][i]
+                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]
+                        
+                        eef_pos_next = data['obs'][position][i+1]
+                        gripper_qpos_next = data['obs']['robot0_gripper_qpos'][i+1]
+                        action = np.concatenate([eef_pos_next - eef_pos, gripper_qpos_next - gripper_qpos])
+
                     elif self.action_type == 'pose' or self.action_type == 'delta_pose':
                         eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
                         eef_quat = data['obs']['robot0_eef_quat'][i]  # Shape: (4,)
@@ -234,28 +263,45 @@ class DatasetVideo2Action(BaseDataset):
         root, demo, index, task, camera = self.sequence_paths[idx]
         obs_seq, actions_seq = self.get_samples(root, demo, index, camera)
         
+        camera_name = camera.split('_')[0]
         if self.coordinate_system == 'global':
             position = 'robot0_eef_pos'
         elif self.coordinate_system == 'camera':
-            position = f'robot0_eef_pos_{camera}'
+            position = f'robot0_eef_pos_{camera_name}'
         elif self.coordinate_system == 'disentangled':
-            position = f'robot0_eef_pos_{camera}_disentangled'
+            position = f'robot0_eef_pos_{camera_name}_disentangled'
 
         # Handle action_type logic
         if self.action_type == 'delta_action':
             actions = np.concatenate(actions_seq)  # Current logic for delta_action
+            
         elif self.action_type == 'absolute_action':
             # One-to-one mapping of actions to each frame (no need to skip the last frame)
             actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
+            
         elif self.action_type == 'position':
             actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions = np.array(actions_seq)
+            
+        elif self.action_type == 'position+gripper':
+            actions_seq = [np.concatenate([root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)], 
+                                          root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]]) for i in range(self.video_length)]
+            actions = np.array(actions_seq)
+            
         elif self.action_type == 'delta_position':
             actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length)]
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
+            
+        elif self.action_type == 'delta_position+gripper':
+            actions_seq = [np.concatenate([root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)], 
+                                          root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]]) for i in range(self.video_length-1)]
+            actions_seq_next = [np.concatenate([root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)], 
+                                          root['data'][demo]['obs']['robot0_gripper_qpos'][index + (i+1) * (self.frame_skip + 1)]]) for i in range(self.video_length-1)]
+            actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
             actions = np.array(actions_diff)
+            
         elif self.action_type == 'pose':
             for i in range(self.video_length):
                 eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)
@@ -264,6 +310,7 @@ class DatasetVideo2Action(BaseDataset):
                 action = np.concatenate([eef_pos, eef_quat, gripper_qpos])
                 actions_seq.append(action)
             actions = np.array(actions_seq)
+            
         elif self.action_type == 'delta_pose':
             actions_seq = []
             for i in range(self.video_length - 1):

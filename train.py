@@ -14,8 +14,11 @@ if oscar:
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
-    vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
+    # dp = '/home/yilong/Documents/policy_data/lift/obs'
+    # vp = '/home/yilong/Documents/ae_data/abs'
+    # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_val2'
+    # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -25,7 +28,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_res{args.resnet_layers_num}_val{args.valsets_path.split('/')[-1]}_{args.note}'''
+    model_name = f'''{args.architecture}_action_type{args.action_type}_data_modality{args.action_type}_coordinate_system{args.coordinate_system}_{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -251,7 +254,7 @@ if __name__ == '__main__':
         '--action_type',
         type=str,
         default='absolute_action',
-        choices=['delta_action', 'absolute_action', 'position', 'delta_position', 'pose', 'delta_pose'],
+        choices=['delta_action', 'absolute_action', 'position', 'delta_position', 'position+gripper', 'delta_position+gripper', 'pose', 'delta_pose'],
         help='Type of action representation to use'
     )
     parser.add_argument(
@@ -274,7 +277,8 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--coordinate_system',
-        choices=['global', 'camera', 'disentangled']
+        choices=['global', 'camera', 'disentangled'],
+        default='disentangled'
     )
     
     args = parser.parse_args()

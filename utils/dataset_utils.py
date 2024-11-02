@@ -215,14 +215,14 @@ def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=5
 
             # Write to Zarr every `batch_size` demos to prevent memory overflow
             if len(results) >= batch_size:
-                _write_batch_to_zarr(root, camera, results)
+                _write_batch_to_zarr_(root, camera, results)
                 results.clear()  # Clear the results list after writing to free up memory
 
         # Write any remaining results after processing all demos
         if results:
-            _write_batch_to_zarr(root, camera, results)
+            _write_batch_to_zarr_(root, camera, results)
 
-def _write_batch_to_zarr(root, camera, batch_results):
+def _write_batch_to_zarr_(root, camera, batch_results):
     """Helper function to write a batch of results to Zarr."""
     for demo_key, maskdepth_array in batch_results:
         if f'{camera}_maskdepth' in root['data'][demo_key]['obs']:
