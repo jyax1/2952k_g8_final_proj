@@ -125,15 +125,35 @@ def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
         # Compute (x/z, y/z, log(z)) for each point in camera_positions
         x, y, z = camera_positions[:, 0], camera_positions[:, 1], camera_positions[:, 2]
         disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
+        
+        # Step 4: Process {camera}_rgbdcrop
+        rgbd_image = root['data'][demo_key]['obs'][f'{camera}_rgbd'][:]  # Shape: (trajectory_length, 128, 128, 4)
 
-        return demo_key, maskdepth_array, camera_positions, disentangled_positions
+        trajectory_length, height, width, _ = rgbd_image.shape
+
+        # Calculate bounding boxes for each frame in parallel
+        bbox_coords = np.array([cv2.boundingRect(combined_mask[i]) for i in range(trajectory_length)])
+
+        # Create a bounding box mask for each frame
+        bbox_masks = np.zeros((trajectory_length, height, width), dtype=np.uint8)
+        for i, (x, y, w, h) in enumerate(bbox_coords):
+            bbox_masks[i, y:y+h, x:x+w] = 1
+
+        # Expand bbox_masks to match the RGB-D image shape
+        bbox_masks_expanded = bbox_masks[..., np.newaxis]  # Shape: (trajectory_length, height, width, 1)
+
+        # Mask the RGB-D image with the bounding box mask, setting regions outside the bounding box to zero
+        rgbd_cropped = rgbd_image * bbox_masks_expanded
+
+
+        return demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped
 
     # Process demos in parallel and write results in batches
     demo_keys = list(root['data'].keys())
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = []
-        for demo_key, maskdepth_array, camera_positions, disentangled_positions in executor.map(process_demo, demo_keys):
-            results.append((demo_key, maskdepth_array, camera_positions, disentangled_positions))
+        for demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped in executor.map(process_demo, demo_keys):
+            results.append((demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped))
 
             # Write to Zarr every batch_size demos to prevent memory overflow
             if len(results) >= batch_size:
@@ -146,7 +166,7 @@ def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
 
 def _write_batch_to_zarr(root, camera, batch_results):
     """Helper function to write a batch of results to Zarr."""
-    for demo_key, maskdepth_array, camera_positions, disentangled_positions in batch_results:
+    for demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped in batch_results:
         # Save maskdepth data
         maskdepth_key = f'{camera}_maskdepth'
         if maskdepth_key in root['data'][demo_key]['obs']:
@@ -154,7 +174,7 @@ def _write_batch_to_zarr(root, camera, batch_results):
         root['data'][demo_key]['obs'].create_dataset(
             maskdepth_key, data=maskdepth_array, shape=maskdepth_array.shape, dtype=maskdepth_array.dtype, overwrite=True
         )
-        print(f"Saved {maskdepth_key} for {demo_key}")
+        # print(f"Saved {maskdepth_key} for {demo_key}")
 
         # Save camera-space end-effector positions
         eef_pos_key = f'robot0_eef_pos_{camera}'
@@ -163,7 +183,7 @@ def _write_batch_to_zarr(root, camera, batch_results):
         root['data'][demo_key]['obs'].create_dataset(
             eef_pos_key, data=camera_positions, shape=camera_positions.shape, dtype=camera_positions.dtype, overwrite=True
         )
-        print(f"Saved {eef_pos_key} for {demo_key}")
+        # print(f"Saved {eef_pos_key} for {demo_key}")
 
         # Save disentangled end-effector positions
         eef_pos_disentangled_key = f'robot0_eef_pos_{camera}_disentangled'
@@ -172,7 +192,14 @@ def _write_batch_to_zarr(root, camera, batch_results):
         root['data'][demo_key]['obs'].create_dataset(
             eef_pos_disentangled_key, data=disentangled_positions, shape=disentangled_positions.shape, dtype=disentangled_positions.dtype, overwrite=True
         )
-        print(f"Saved {eef_pos_disentangled_key} for {demo_key}")
+        # print(f"Saved {eef_pos_disentangled_key} for {demo_key}")
+        
+        rgbdcrop_key = f'{camera}_rgbdcrop'
+        if rgbdcrop_key in root['data'][demo_key]['obs']:
+            del root['data'][demo_key]['obs'][rgbdcrop_key]
+        root['data'][demo_key]['obs'].create_dataset(
+            rgbdcrop_key, data=rgbd_cropped, shape=rgbd_cropped.shape, dtype=rgbd_cropped.dtype, overwrite=True
+        )
 
 
 def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=500):
@@ -498,44 +525,6 @@ def project_point(K, R, point_3D):
 
     return (u, v)
 
-def project_point_debug(K, R, point_3D):
-    """
-    Projects a 3D point in world coordinates onto the 2D image plane.
-    
-    Parameters:
-    - K: 3x3 intrinsic matrix
-    - R: 4x4 extrinsic matrix (contains both rotation and translation)
-    - point_3D: 3D point in world coordinates, given as (X, Y, Z)
-
-    Returns:
-    - A tuple (u, v) representing the 2D pixel coordinates.
-    """
-    # Convert the 3D point to homogeneous coordinates
-    point_3D_homogeneous = np.array([point_3D[0], point_3D[1], point_3D[2], 1])
-
-    # Transform the point from world coordinates to camera coordinates
-    point_camera = R @ point_3D_homogeneous  # Resulting shape (4,)
-    x_cam, y_cam, z_cam, _ = point_camera
-
-    # Debug: Print camera-space coordinates
-    print(f"Camera-space coordinates: x={x_cam}, y={y_cam}, z={z_cam}")
-
-    if z_cam <= 0:  # Ensure the point is in front of the camera
-        raise ValueError("Point is behind the camera or on the camera plane (z <= 0), projection undefined.")
-
-    # Apply the intrinsic matrix to the normalized camera coordinates
-    pixel_coords_homogeneous = K @ np.array([x_cam, y_cam, z_cam])
-
-    # Normalize to get pixel coordinates in 2D
-    print(f"pixel_coords_homogeneous = {pixel_coords_homogeneous}")
-    u = pixel_coords_homogeneous[0] / pixel_coords_homogeneous[2]
-    v = pixel_coords_homogeneous[1] / pixel_coords_homogeneous[2]
-
-    # Debug: Print final pixel coordinates
-    print(f"Projected pixel coordinates: u={u}, v={v}")
-
-    return (u, v)
-
 def draw_and_save_point(image, point):
     point_radius = 2
     point_color = (0, 255, 0)  # Blue color in RGB
@@ -618,72 +607,6 @@ def pose_inv(pose):
     pose_inv[:3, 3] = -pose_inv[:3, :3].dot(pose[:3, 3])
     pose_inv[3, 3] = 1.0
     return pose_inv
-
-# def get_camera_transform_matrix(R, K):
-#     """
-#     Camera transform matrix to project from world coordinates to pixel coordinates.
-
-#     Args:
-#         sim (MjSim): simulator instance
-#         camera_name (str): name of camera
-#         camera_height (int): height of camera images in pixels
-#         camera_width (int): width of camera images in pixels
-#     Return:
-#         K (np.array): 4x4 camera matrix to project from world coordinates to pixel coordinates
-#     """
-#     K_exp = np.eye(4)
-#     K_exp[:3, :3] = K
-
-#     # Takes a point in world, transforms to camera frame, and then projects onto image plane.
-#     return K_exp @ T.pose_inv(R)
-
-# def project_points_from_world_to_camera(points, world_to_camera_transform, camera_height, camera_width):
-#     """
-#     From robosuite/utils/camera_utils.py
-    
-#     Helper function to project a batch of points in the world frame
-#     into camera pixels using the world to camera transformation.
-
-#     Args:
-#         points (np.array): 3D points in world frame to project onto camera pixel locations. Should
-#             be shape [..., 3].
-#         world_to_camera_transform (np.array): 4x4 Tensor to go from robot coordinates to pixel
-#             coordinates.
-#         camera_height (int): height of the camera image
-#         camera_width (int): width of the camera image
-
-#     Return:
-#         pixels (np.array): projected pixel indices of shape [..., 2]
-#     """
-#     assert points.shape[-1] == 3  # last dimension must be 3D
-#     assert len(world_to_camera_transform.shape) == 2
-#     assert world_to_camera_transform.shape[0] == 4 and world_to_camera_transform.shape[1] == 4
-
-#     # convert points to homogenous coordinates -> (px, py, pz, 1)
-#     ones_pad = np.ones(points.shape[:-1] + (1,))
-#     points = np.concatenate((points, ones_pad), axis=-1)  # shape [..., 4]
-
-#     # batch matrix multiplication of 4 x 4 matrix and 4 x 1 vectors to do robot frame to pixels transform
-#     mat_reshape = [1] * len(points.shape[:-1]) + [4, 4]
-#     cam_trans = world_to_camera_transform.reshape(mat_reshape)  # shape [..., 4, 4]
-#     pixels = np.matmul(cam_trans, points[..., None])[..., 0]  # shape [..., 4]
-
-#     # re-scaling from homogenous coordinates to recover pixel values
-#     # (x, y, z) -> (x / z, y / z)
-#     pixels = pixels / pixels[..., 2:3]
-#     pixels = pixels[..., :2].round().astype(int)  # shape [..., 2]
-
-#     # swap first and second coordinates to get pixel indices that correspond to (height, width)
-#     # and also clip pixels that are out of range of the camera image
-#     pixels = np.concatenate(
-#         (
-#             pixels[..., 1:2].clip(0, camera_height - 1),
-#             pixels[..., 0:1].clip(0, camera_width - 1),
-#         ),
-#         axis=-1,
-#     )
-
-#     return pixels
 
 
 def save_image_to_debug(image, filename="image.png"):

@@ -127,15 +127,19 @@ def load_model(architecture,
         elif action_type == 'position+gripper' or action_type == 'delta_position+gripper':
             num_classes = 5
         
-        if data_modality == 'voxel' or data_modality == 'rgbd':
+        if data_modality == 'voxel' or data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
             input_channels = 4 * horizon * len(cameras)
         elif data_modality == 'rgb' or 'color_mask_depth':
             input_channels = 3 * horizon * len(cameras)
+        elif data_modality == 'cropped_rgbd+color_mask_depth':
+            input_channels = 7 * horizon * len(cameras)
             
         if data_modality == 'rgb' or data_modality == 'color_mask_depth':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
-        elif data_modality == 'rgbd':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+        elif data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+        elif data_modality == 'cropped_rgbd+color_mask_depth':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)

@@ -11,8 +11,11 @@ from tqdm import tqdm
 
 frontview_matrices = np.load('utils/frontview_matrices.npz')
 frontview_K = frontview_matrices['K'] # Intrinsics
-camera_frame_in_global_frame = frontview_matrices['R'] # (camera frame in terms of global frame)
-frontview_R = pose_inv(camera_frame_in_global_frame) # Extrinsics
+frontview_R = pose_inv(frontview_matrices['R']) # Extrinsics
+
+sideview_matrices = np.load('utils/sideview_matrices.npz')
+sideview_K = sideview_matrices['K'] # Intrinsics
+sideview_R = pose_inv(sideview_matrices['R']) # Extrinsics
 
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 
@@ -185,6 +188,8 @@ class BaseDataset(Dataset):
                         for camera in cameras:
                             if self.data_modality == 'color_mask_depth':
                                 camera = camera.split('_')[0] + '_maskdepth'
+                            elif 'cropped_rgbd' in self.data_modality:
+                                camera == camera.split('_')[0] + '_croppedrgbd'
                             if camera in data['obs'].keys():
                                 futures.append(executor.submit(process_demo, demo, data, task, camera))
                             else:
@@ -199,42 +204,6 @@ class BaseDataset(Dataset):
         self.action_mean = self.sum_actions / self.n_samples
         variance = (self.sum_square_actions / self.n_samples) - (self.action_mean ** 2)
         self.action_std = np.sqrt(variance)
-
-    # def get_samples(self, root, demo, index, camera):
-    #     obs_seq = []
-    #     actions_seq = []
-        
-    #     for i in range(self.video_length):
-    #         if self.data_modality == 'voxel':
-    #             obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
-                
-    #         elif self.data_modality == 'rgbd':
-    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-    #             depth_camera = '_'.join([camera.split('_')[0], "depth"])
-
-    #             depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)] / 255.0
-    #             obs = np.concatenate((obs, depth), axis=2)
-                
-    #         elif self.data_modality == 'rgb':
-    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-    #             if self.semantic_map:
-    #                 obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
-    #                 obs = np.concatenate((obs, obs_semantic), axis=2)
-            
-    #         elif self.data_modality == 'color_mask_depth':
-    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-            
-    #         obs_seq.append(obs)
-
-    #         if self.load_actions:
-    #             action = root['data'][demo]['actions'][index + i * (self.frame_skip + 1)]
-    #             if i != self.video_length - 1:
-    #                 actions_seq.append(action)
-
-    #     if self.load_actions:
-    #         return obs_seq, actions_seq
-        
-    #     return obs_seq
     
     def get_samples(self, root, demo, index):
         obs_seq = []
@@ -265,6 +234,17 @@ class BaseDataset(Dataset):
                 elif self.data_modality == 'color_mask_depth':
                     obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
                     frames.append(obs)
+                    
+                elif self.data_modality == 'cropped_rgbd':
+                    obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                    frames.append(obs)
+                    
+                elif self.data_modality == 'cropped_rgbd+color_mask_depth':
+                    obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                    mask_depth_camera = '_'.join([camera.split('_')[0], "maskdepth"])
+                    mask_depth = root['data'][demo]['obs'][mask_depth_camera][index + i * (self.frame_skip + 1)] / 255.0
+                    obs = np.concatenate((obs, mask_depth), axis=2)
+                    frames.append(obs)
             
             # Concatenate frames from all cameras along the channel dimension
             obs_seq.append(np.concatenate(frames, axis=2))
@@ -290,7 +270,7 @@ class DatasetVideo(BaseDataset):
     
     def __getitem__(self, idx):
         root, demo, index, task, camera = self.sequence_paths[idx]
-        obs_seq = self.get_samples(root, demo, index, camera)
+        obs_seq = self.get_samples(root, demo, index)
         obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]
         x = torch.cat([obs_seq[i] for i in self.x_pattern], dim=0)
         y = torch.cat([obs_seq[i] for i in self.y_pattern], dim=0)
@@ -306,7 +286,7 @@ class DatasetVideo2Action(BaseDataset):
 
     def __getitem__(self, idx):
         root, demo, index, task, camera = self.sequence_paths[idx]
-        obs_seq, actions_seq = self.get_samples(root, demo, index, camera)
+        obs_seq, actions_seq = self.get_samples(root, demo, index)
         
         camera_name = camera.split('_')[0]
         if self.coordinate_system == 'global':

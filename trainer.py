@@ -15,6 +15,36 @@ import csv
 from tqdm import tqdm
 from utils.utils import check_dataset
 
+class DeltaControlLoss(nn.Module):
+    def __init__(self, direction_weight=0.5):
+        super(DeltaControlLoss, self).__init__()
+        self.direction_weight = direction_weight
+
+    def forward(self, predictions, targets):
+        # Split the vectors
+        pred_direction, pred_magnitude = predictions[:, :3], predictions[:, :3].norm(dim=1, keepdim=True)
+        target_direction, target_magnitude = targets[:, :3], targets[:, :3].norm(dim=1, keepdim=True)
+
+        # Normalize to get unit vectors for direction
+        pred_direction_normalized = F.normalize(pred_direction, dim=1)
+        target_direction_normalized = F.normalize(target_direction, dim=1)
+
+        # Compute directional loss (cosine similarity)
+        direction_loss = 1 - F.cosine_similarity(pred_direction_normalized, target_direction_normalized).mean()
+
+        # Compute magnitude loss (MSE for magnitude)
+        magnitude_loss = F.mse_loss(pred_magnitude, target_magnitude)
+
+        # Combine direction and magnitude loss for the first three components
+        vector_loss = (self.direction_weight * direction_loss) + ((1 - self.direction_weight) * magnitude_loss)
+
+        # Compute MSE loss for the last two components
+        mse_loss_last_two = F.mse_loss(predictions[:, 3:], targets[:, 3:])
+
+        # Total loss
+        total_loss = vector_loss + mse_loss_last_two
+        return total_loss
+
 class Trainer:
     def __init__(self, 
                  model, 
@@ -26,7 +56,8 @@ class Trainer:
                  batch_size=32, 
                  epochs=100, 
                  lr=0.001, 
-                 momentum=0.9):
+                 momentum=0.9,
+                 action_type='position'):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name
@@ -43,7 +74,7 @@ class Trainer:
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
-        self.criterion = nn.MSELoss()
+        self.criterion = DeltaControlLoss() if 'delta' in action_type else nn.MSELoss()
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)

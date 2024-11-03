@@ -68,6 +68,22 @@
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=color_mask_depth", "-dpc=1.0"]
         },
         {
+            "name": "train direct_resnet_mlp cropped_rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp cropped_rgbd+color_mask_depth",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd+color_mask_depth", "-dpc=1.0"]
+        },
+        {
             "name": "train direct_resnet_mlp rgb bi_cameras",
             "type": "debugpy",
             "request": "launch",
