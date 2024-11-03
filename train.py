@@ -13,11 +13,11 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_val2'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_val'
     # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
@@ -28,7 +28,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_action_type{args.action_type}_data_modality{args.action_type}_coordinate_system{args.coordinate_system}_{args.note}'''
+    model_name = f'''{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -36,6 +36,7 @@ def train(args):
         horizon=args.horizon,
         results_path=args.results_path,
         latent_dim=args.latent_dim,
+        cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
         num_mlp_layers=args.num_mlp_layers,
@@ -111,7 +112,7 @@ if __name__ == '__main__':
         '--data_modality', '-dm',
         type=str,
         default='rgb',
-        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth'],
+        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth', 'cropped_rgbd', 'cropped_rgbd+color_mask_depth'],
         help='Type of data to use for training'
     )
     parser.add_argument(

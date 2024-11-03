@@ -47,6 +47,7 @@ class BaseDataset(Dataset):
         self.data_modality = data_modality
         self.action_type = action_type
         self.coordinate_system = coordinate_system
+        self.cameras = cameras
 
         # Load dataset and compute stats if needed (only when stats are not provided)
         self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=1)
@@ -199,30 +200,74 @@ class BaseDataset(Dataset):
         variance = (self.sum_square_actions / self.n_samples) - (self.action_mean ** 2)
         self.action_std = np.sqrt(variance)
 
-    def get_samples(self, root, demo, index, camera):
+    # def get_samples(self, root, demo, index, camera):
+    #     obs_seq = []
+    #     actions_seq = []
+        
+    #     for i in range(self.video_length):
+    #         if self.data_modality == 'voxel':
+    #             obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
+                
+    #         elif self.data_modality == 'rgbd':
+    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+    #             depth_camera = '_'.join([camera.split('_')[0], "depth"])
+
+    #             depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)] / 255.0
+    #             obs = np.concatenate((obs, depth), axis=2)
+                
+    #         elif self.data_modality == 'rgb':
+    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+    #             if self.semantic_map:
+    #                 obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
+    #                 obs = np.concatenate((obs, obs_semantic), axis=2)
+            
+    #         elif self.data_modality == 'color_mask_depth':
+    #             obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+            
+    #         obs_seq.append(obs)
+
+    #         if self.load_actions:
+    #             action = root['data'][demo]['actions'][index + i * (self.frame_skip + 1)]
+    #             if i != self.video_length - 1:
+    #                 actions_seq.append(action)
+
+    #     if self.load_actions:
+    #         return obs_seq, actions_seq
+        
+    #     return obs_seq
+    
+    def get_samples(self, root, demo, index):
         obs_seq = []
         actions_seq = []
-        for i in range(self.video_length):
-            if self.data_modality == 'voxel':
-                obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
-                
-            elif self.data_modality == 'rgbd':
-                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-                depth_camera = '_'.join([camera.split('_')[0], "depth"])
 
-                depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)] / 255.0
-                obs = np.concatenate((obs, depth), axis=2)
+        for i in range(self.video_length):
+            frames = []
+            
+            for camera in self.cameras:
+                if self.data_modality == 'voxel':
+                    obs = root['data'][demo]['obs']['voxels'][index + i * (self.frame_skip + 1)] / 255.0
+                    frames.append(obs)
                 
-            elif self.data_modality == 'rgb':
-                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-                if self.semantic_map:
-                    obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
-                    obs = np.concatenate((obs, obs_semantic), axis=2)
+                elif self.data_modality == 'rgbd':
+                    obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                    depth_camera = '_'.join([camera.split('_')[0], "depth"])
+                    depth = root['data'][demo]['obs'][depth_camera][index + i * (self.frame_skip + 1)] / 255.0
+                    obs = np.concatenate((obs, depth), axis=2)
+                    frames.append(obs)
+                
+                elif self.data_modality == 'rgb':
+                    obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                    if self.semantic_map:
+                        obs_semantic = root['data'][demo]['obs'][f"{camera}_semantic"][index + i * (self.frame_skip + 1)] / 255.0
+                        obs = np.concatenate((obs, obs_semantic), axis=2)
+                    frames.append(obs)
+                
+                elif self.data_modality == 'color_mask_depth':
+                    obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
+                    frames.append(obs)
             
-            elif self.data_modality == 'color_mask_depth':
-                obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
-            
-            obs_seq.append(obs)
+            # Concatenate frames from all cameras along the channel dimension
+            obs_seq.append(np.concatenate(frames, axis=2))
 
             if self.load_actions:
                 action = root['data'][demo]['actions'][index + i * (self.frame_skip + 1)]
@@ -231,7 +276,7 @@ class BaseDataset(Dataset):
 
         if self.load_actions:
             return obs_seq, actions_seq
-        
+
         return obs_seq
 
     def __len__(self):
@@ -290,9 +335,10 @@ class DatasetVideo2Action(BaseDataset):
             actions = np.array(actions_seq)
             
         elif self.action_type == 'delta_position':
-            actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
-            actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length)]
+            actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length-1)]
+            actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length-1)]
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
+            actions = np.array(actions_diff)
             
         elif self.action_type == 'delta_position+gripper':
             actions_seq = [np.concatenate([root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)], 
@@ -333,7 +379,7 @@ class DatasetVideo2Action(BaseDataset):
             actions = np.array(actions_seq)
 
         # If video_length == 1, return a flat action vector
-        if self.video_length == 1 or (self.action_type == 'delta_pose' and self.video_length == 2):
+        if self.video_length == 1 or ('delta' in self.action_type and self.video_length == 2):
             actions = actions.squeeze(0)  # Remove the first dimension to make it (7)
 
         # Standardize actions if mean and std are computed

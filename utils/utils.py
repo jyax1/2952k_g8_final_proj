@@ -84,6 +84,7 @@ def load_model(architecture,
                horizon=1,
                results_path='',
                latent_dim=0,
+               cameras=['frontview_image', 'sideview_image'],
                motion=False,
                image_plus_motion=False,
                num_mlp_layers=3, # to be extracted
@@ -127,9 +128,9 @@ def load_model(architecture,
             num_classes = 5
         
         if data_modality == 'voxel' or data_modality == 'rgbd':
-            input_channels = 4 * horizon
+            input_channels = 4 * horizon * len(cameras)
         elif data_modality == 'rgb' or 'color_mask_depth':
-            input_channels = 3 * horizon
+            input_channels = 3 * horizon * len(cameras)
             
         if data_modality == 'rgb' or data_modality == 'color_mask_depth':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3, action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
