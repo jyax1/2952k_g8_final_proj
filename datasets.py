@@ -70,7 +70,7 @@ class BaseDataset(Dataset):
             zarr_path = seq_dir.replace('.hdf5', '.zarr')
             if not os.path.exists(zarr_path):
                 # Convert HDF5 to Zarr if it doesn't exist
-                hdf5_to_zarr_parallel(seq_dir, max_workers=16)
+                hdf5_to_zarr_parallel(seq_dir, max_workers=8)
 
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
             root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
@@ -321,13 +321,12 @@ class DatasetVideo2Action(BaseDataset):
             actions = np.array(actions_diff)
             
         elif self.action_type == 'delta_position+gripper':
-            actions_seq = [np.concatenate([root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)], 
-                                          root['data'][demo]['obs']['robot0_gripper_qpos'][index + i * (self.frame_skip + 1)]]) for i in range(self.video_length-1)]
-            actions_seq_next = [np.concatenate([root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)], 
-                                          root['data'][demo]['obs']['robot0_gripper_qpos'][index + (i+1) * (self.frame_skip + 1)]]) for i in range(self.video_length-1)]
+            gripper_actions = [actions_seq[i][-1] for i in range(len(actions_seq))]
+            actions_seq = [root['data'][demo]['obs'][position][index + i * (self.frame_skip + 1)] for i in range(self.video_length-1)]
+            actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length-1)]
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
-            actions = np.array(actions_diff)
-            
+            actions = np.array([np.append(actions_diff[i], gripper_actions[i]) for i in range(len(actions_diff))])
+
         elif self.action_type == 'pose':
             for i in range(self.video_length):
                 eef_pos = root['data'][demo]['obs']['robot0_eef_pos'][index + i * (self.frame_skip + 1)]    # Shape: (3,)

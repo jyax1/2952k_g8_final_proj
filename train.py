@@ -81,7 +81,7 @@ def train(args):
         batch_size=args.batch_size, 
         epochs=args.epoch,
         lr=args.learning_rate,
-        action_type=args.action_type
+        cosine_similarity_loss=args.cosine_similarity_loss
         )
 
     # Train the model
@@ -281,6 +281,10 @@ if __name__ == '__main__':
         '--coordinate_system',
         choices=['global', 'camera', 'disentangled'],
         default='disentangled'
+    )
+    parser.add_argument(
+        '--cosine_similarity_loss',
+        action='store_true'
     )
     
     args = parser.parse_args()

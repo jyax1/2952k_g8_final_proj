@@ -18,7 +18,7 @@ from utils.utils import check_dataset
 import torch.nn.functional as F
 
 class DeltaControlLoss(nn.Module):
-    def __init__(self, direction_weight=0.85):
+    def __init__(self, direction_weight=0.95):
         super(DeltaControlLoss, self).__init__()
         self.direction_weight = direction_weight
 
@@ -41,10 +41,10 @@ class DeltaControlLoss(nn.Module):
         vector_loss = (self.direction_weight * direction_loss) + ((1 - self.direction_weight) * magnitude_loss)
 
         # Compute MSE loss for the last two components
-        mse_loss_last_two = F.mse_loss(predictions[:, 3:], targets[:, 3:])
+        mse_loss_gripper = F.mse_loss(predictions[:, 3:], targets[:, 3:])
 
         # Total loss
-        total_loss = vector_loss + mse_loss_last_two
+        total_loss = vector_loss + mse_loss_gripper
         return total_loss
 
 class Trainer:
@@ -59,7 +59,7 @@ class Trainer:
                  epochs=100, 
                  lr=0.001, 
                  momentum=0.9,
-                 action_type='position'):
+                 cosine_similarity_loss=False):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name
@@ -76,7 +76,7 @@ class Trainer:
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
-        self.criterion = DeltaControlLoss() if 'delta' in action_type else nn.MSELoss()
+        self.criterion = DeltaControlLoss() if cosine_similarity_loss else nn.MSELoss()
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)

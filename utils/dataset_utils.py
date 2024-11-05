@@ -127,7 +127,9 @@ def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
         disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
         
         # Step 4: Process {camera}_rgbdcrop
-        rgbd_image = root['data'][demo_key]['obs'][f'{camera}_rgbd'][:]  # Shape: (trajectory_length, 128, 128, 4)
+        rgb_image = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 4)
+        depth = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
+        rgbd_image = np.concatenate((rgb_image, depth), axis=3)
 
         trajectory_length, height, width, _ = rgbd_image.shape
 
