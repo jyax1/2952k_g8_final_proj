@@ -75,11 +75,16 @@ class BaseDataset(Dataset):
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
             root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
             
-            for camera in cameras:
-                camera_name = camera.split('_')[0]
+            for i in range(len(cameras)):
+                camera_name = cameras[i].split('_')[0]
                 camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
                 eef_pos_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}'
                 eef_pos_disentangled_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}_disentangled'
+                
+                if self.data_modality == 'color_mask_depth':
+                    cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
+                elif 'cropped_rgbd' in self.data_modality:
+                    cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
 
                 # If any of the required data paths are missing, preprocess them
                 if camera_maskdepth_path not in root:
@@ -189,7 +194,7 @@ class BaseDataset(Dataset):
                             if self.data_modality == 'color_mask_depth':
                                 camera = camera.split('_')[0] + '_maskdepth'
                             elif 'cropped_rgbd' in self.data_modality:
-                                camera == camera.split('_')[0] + '_croppedrgbd'
+                                camera = camera.split('_')[0] + '_rgbdcrop'
                             if camera in data['obs'].keys():
                                 futures.append(executor.submit(process_demo, demo, data, task, camera))
                             else:
