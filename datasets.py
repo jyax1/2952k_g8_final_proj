@@ -17,6 +17,10 @@ sideview_matrices = np.load('utils/sideview_matrices.npz')
 sideview_K = sideview_matrices['K'] # Intrinsics
 sideview_R = pose_inv(sideview_matrices['R']) # Extrinsics
 
+agentview_matrices = np.load('utils/agentview_matrices.npz')
+agentview_K = agentview_matrices['K'] # Intrinsics
+agentview_R = pose_inv(agentview_matrices['R']) # Extrinsics
+
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 
                  video_length=2, 
@@ -126,11 +130,10 @@ class BaseDataset(Dataset):
                         
                     elif self.action_type == 'delta_position+gripper':
                         eef_pos = data['obs'][position][i]
-                        gripper_qpos = data['obs']['robot0_gripper_qpos'][i]
-                        
                         eef_pos_next = data['obs'][position][i+1]
-                        gripper_qpos_next = data['obs']['robot0_gripper_qpos'][i+1]
-                        action = np.concatenate([eef_pos_next - eef_pos, gripper_qpos_next - gripper_qpos])
+                        gripper_action = data['actions'][i][-1]
+                        
+                        action = np.append(eef_pos_next - eef_pos, gripper_action)
 
                     elif self.action_type == 'pose' or self.action_type == 'delta_pose':
                         eef_pos = data['obs']['robot0_eef_pos'][i]    # Shape: (3,)
