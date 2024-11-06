@@ -21,6 +21,10 @@ agentview_matrices = np.load('utils/agentview_matrices.npz')
 agentview_K = agentview_matrices['K'] # Intrinsics
 agentview_R = pose_inv(agentview_matrices['R']) # Extrinsics
 
+sideagentview_matrices = np.load('utils/sideagentview_matrices.npz')
+sideagentview_K = sideagentview_matrices['K'] # Intrinsics
+sideagentview_R = pose_inv(sideagentview_matrices['R']) # Extrinsics
+
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 
                  video_length=2, 
@@ -417,16 +421,29 @@ class DatasetVideo2VideoAndAction(BaseDataset):
 
 
 if __name__ == "__main__":
-    train_set = DatasetVideo2Action(
-        path='/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel',
-        video_length=1,
-        semantic_map=False,
-        frame_skip=0,
-        random_crop=True,
-        demo_percentage=0.9,
-        cameras=['frontview_image'],
-        motion=True
-    )
+    DEPTH_MINMAX = {'birdview_depth': [1.180, 2.480],
+                'agentview_depth': [0.1, 1.1],
+                'sideagentview_depth': [0.1, 1.1],
+                'sideview_depth': [1.0, 2.0],
+                'robot0_eye_in_hand_depth': [0., 1.0],
+                'sideview2_depth': [0.8, 2.2],
+                'backview_depth': [0.6, 1.6],
+                'frontview_depth': [1.2, 2.2],
+                'spaceview_depth': [0.45, 1.45],
+                'farspaceview_depth': [0.58, 1.58],
+                }
+    (frontview_x_min, frontview_x_max), (frontview_y_min, frontview_y_max), (frontview_z_min, frontview_z_max) = get_visible_xyz_range(frontview_R, frontview_K, z_range = (1.2, 2.2))
+    
+    (sideview_x_min, sideview_x_max), (sideview_y_min, sideview_y_max), (sideview_z_min, sideview_z_max) = get_visible_xyz_range(sideview_R, sideview_K, z_range = (1.0, 2.0))
 
-    print(train_set[0][0])
-    print('break')
+    (agentview_x_min, agentview_x_max), (agentview_y_min, agentview_y_max), (agentview_z_min, agentview_z_max) = get_visible_xyz_range(agentview_R, agentview_K, z_range = (0.1, 1.1))
+    
+    (sideagentview_x_min, sideagentview_x_max), (sideagentview_y_min, sideagentview_y_max), (sideagentview_z_min, sideagentview_z_max) = get_visible_xyz_range(sideagentview_R, sideagentview_K, z_range = (0.1, 1.1))
+
+    print(f"frontview: x: {frontview_x_min:.2f}, {frontview_x_max:.2f}, y: {frontview_y_min:.2f}, {frontview_y_max:.2f}, z: {frontview_z_min:.2f}, {frontview_z_max:.2f}")
+    
+    print(f"sideview: x: {sideview_x_min:.2f}, {sideview_x_max:.2f}, y: {sideview_y_min:.2f}, {sideview_y_max:.2f}, z: {sideview_z_min:.2f}, {sideview_z_max:.2f}")
+    
+    print(f"agentview: x: {agentview_x_min:.2f}, {agentview_x_max:.2f}, y: {agentview_y_min:.2f}, {agentview_y_max:.2f}, z: {agentview_z_min:.2f}, {agentview_z_max:.2f}")
+    
+    print(f"sideagentview: x: {sideagentview_x_min:.2f}, {sideagentview_x_max:.2f}, y: {sideagentview_y_min:.2f}, {sideagentview_y_max:.2f}, z: {sideagentview_z_min:.2f}, {sideagentview_z_max:.2f}")

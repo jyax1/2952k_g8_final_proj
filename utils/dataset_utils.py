@@ -630,3 +630,48 @@ def save_image_to_debug(image, filename="image.png"):
     save_path = os.path.join("debug", filename)
     plt.imsave(save_path, image)
     print(f"Image saved to {save_path}")
+    
+    
+def get_visible_xyz_range(extrinsics, intrinsics, z_range=(0.1, 10)):
+    """
+    Calculates the range of x, y, z positions in the global frame that would be visible within the camera's frame.
+
+    Parameters:
+    - extrinsics (numpy.ndarray): 4x4 camera extrinsics matrix (world to camera transformation).
+    - intrinsics (numpy.ndarray): 3x3 camera intrinsics matrix.
+    - z_range (tuple): The minimum and maximum depth (z) values to consider in the global frame.
+
+    Returns:
+    - x_range (tuple): The minimum and maximum x values in the global frame.
+    - y_range (tuple): The minimum and maximum y values in the global frame.
+    - z_range (tuple): The minimum and maximum z values in the global frame.
+    """
+    # Define image corners in normalized pixel coordinates (top-left, top-right, bottom-right, bottom-left)
+    img_corners = np.array([
+        [0, 0],  # top-left
+        [intrinsics[0, 2] * 2, 0],  # top-right (2 * cx)
+        [intrinsics[0, 2] * 2, intrinsics[1, 2] * 2],  # bottom-right (2 * cx, 2 * cy)
+        [0, intrinsics[1, 2] * 2]  # bottom-left (0, 2 * cy)
+    ])
+
+    # Convert image plane corners to camera coordinates (homogeneous coordinates)
+    camera_corners = []
+    for u, v in img_corners:
+        # Calculate the direction vector in camera coordinates
+        pixel_vec = np.linalg.inv(intrinsics) @ np.array([u, v, 1])
+        pixel_vec /= np.linalg.norm(pixel_vec)
+
+        # Project to z-range in camera coordinates
+        for z in z_range:
+            camera_corners.append(pixel_vec * z)
+
+    # Convert camera frame corners to the world frame
+    camera_corners = np.array(camera_corners)
+    global_corners = np.linalg.inv(extrinsics) @ np.hstack((camera_corners, np.ones((camera_corners.shape[0], 1)))).T
+
+    # Extract x, y, z ranges from the global frame corners
+    x_min, x_max = np.min(global_corners[0]), np.max(global_corners[0])
+    y_min, y_max = np.min(global_corners[1]), np.max(global_corners[1])
+    z_min, z_max = np.min(global_corners[2]), np.max(global_corners[2])
+
+    return (x_min, x_max), (y_min, y_max), (z_min, z_max)
