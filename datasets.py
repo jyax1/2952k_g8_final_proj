@@ -251,13 +251,17 @@ class BaseDataset(Dataset):
                     obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
                     frames.append(obs)
                     
-                elif self.data_modality == 'cropped_rgbd+color_mask_depth':
+                elif self.data_modality == 'cropped_rgbd+color_mask_depth' or self.data_modality == 'cropped_rgbd+color_mask':
                     obs = root['data'][demo]['obs'][camera][index + i * (self.frame_skip + 1)] / 255.0
                     mask_depth_camera = '_'.join([camera.split('_')[0], "maskdepth"])
                     mask_depth = root['data'][demo]['obs'][mask_depth_camera][index + i * (self.frame_skip + 1)] / 255.0
+                    
+                    if self.data_modality == 'cropped_rgbd+color_mask':
+                        mask_depth = mask_depth[:, :, :2]
+                    
                     obs = np.concatenate((obs, mask_depth), axis=2)
                     frames.append(obs)
-            
+                    
             # Concatenate frames from all cameras along the channel dimension
             obs_seq.append(np.concatenate(frames, axis=2))
 
@@ -338,6 +342,9 @@ class DatasetVideo2Action(BaseDataset):
             actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length-1)]
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
             actions = np.array([np.append(actions_diff[i], gripper_actions[i]) for i in range(len(actions_diff))])
+            
+            self.action_mean[-1] == 0.
+            self.action_std[-1] == 1.
 
         elif self.action_type == 'pose':
             for i in range(self.video_length):
@@ -432,6 +439,7 @@ if __name__ == "__main__":
                 'spaceview_depth': [0.45, 1.45],
                 'farspaceview_depth': [0.58, 1.58],
                 }
+    
     (frontview_x_min, frontview_x_max), (frontview_y_min, frontview_y_max), (frontview_z_min, frontview_z_max) = get_visible_xyz_range(frontview_R, frontview_K, z_range = (1.2, 2.2))
     
     (sideview_x_min, sideview_x_max), (sideview_y_min, sideview_y_max), (sideview_z_min, sideview_z_max) = get_visible_xyz_range(sideview_R, sideview_K, z_range = (1.0, 2.0))

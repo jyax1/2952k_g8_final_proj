@@ -133,6 +133,8 @@ def load_model(architecture,
             input_channels = 4 * horizon * len(cameras)
         elif data_modality == 'rgb' or 'color_mask_depth':
             input_channels = 3 * horizon * len(cameras)
+        elif data_modality == 'cropped_rgbd+color_mask':
+            input_channels = 6 * horizon * len(cameras)
         elif data_modality == 'cropped_rgbd+color_mask_depth':
             input_channels = 7 * horizon * len(cameras)
             

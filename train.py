@@ -113,7 +113,7 @@ if __name__ == '__main__':
         '--data_modality', '-dm',
         type=str,
         default='rgb',
-        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth', 'cropped_rgbd', 'cropped_rgbd+color_mask_depth'],
+        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth', 'cropped_rgbd', 'cropped_rgbd+color_mask', 'cropped_rgbd+color_mask_depth'],
         help='Type of data to use for training'
     )
     parser.add_argument(
