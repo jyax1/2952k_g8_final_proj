@@ -75,8 +75,10 @@ idm_model_name=""
 fdm_model_name=""
 freeze_idm=""
 freeze_fdm=""
-architecture=""
+architecture="direct_resnet_mlp"
 learning_rate=0.001
+val_demo_percentage=0.0
+demo_percentage=1.0
 
 resnet_layers_num=18
 num_mlp_layers=3
@@ -116,7 +118,7 @@ coordinate_system=global
 note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview"
 train_only
 
-cosine_similarity_loss_flag=true
+cosine_similarity_loss_flag="--cosine_similarity_loss"
 
 cameras="frontview_image"
 data_modality="cropped_rgbd+color_mask_depth"
