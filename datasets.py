@@ -343,8 +343,8 @@ class DatasetVideo2Action(BaseDataset):
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
             actions = np.array([np.append(actions_diff[i], gripper_actions[i]) for i in range(len(actions_diff))])
             
-            self.action_mean[-1] == 0.
-            self.action_std[-1] == 1.
+            self.action_mean[-1] = 0.
+            self.action_std[-1] = 1.
 
         elif self.action_type == 'pose':
             for i in range(self.video_length):
