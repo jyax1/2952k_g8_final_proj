@@ -2,7 +2,7 @@
 
 run()
 {
-    jn=TRAIN_${architecture}_latent_dim${latent_dim}_batch_size${batch_size}_horizon${horizon}_epoch${epoch}_demo${demo_percentage}_vps${vit_patch_size}_rln${resnet_layers_num}_opt${optimizer}_lr${learning_rate}_note${note}
+    jn=TRAIN_note${note}
 
     if [ -n "$motion" ]; then
         jn="${jn}_motion"
@@ -32,17 +32,19 @@ run()
 
     export train_args="
     --architecture=${architecture}
-    --datasets_path=${dataset_path}
     --epoch=${epoch}
     --batch_size=${batch_size}
-    --horizon=${horizon}
-    --demo_percentage=${demo_percentage}
     --resnet_layers_num=${resnet_layers_num}
+    --horizon=${horizon}
+    --data_modality=${data_modality}
     --action_type=${action_type}
     --cameras=${cameras}
-    --data_modality=${data_modality}
     --note=${note}
     --learning_rate=${learning_rate}
+    --val_demo_percentage=${val_demo_percentage}
+    --demo_percentage=${demo_percentage}
+    --coordinate_system=${coordinate_system}
+    --standardize_data
     "
     slurm_args=""
 
@@ -59,7 +61,7 @@ train_only()
 date=$(date +%m%d)
 
 # Parameters for the jobs
-demo_percentage=.9
+demo_percentage=1.0
 epoch=100
 motion=""
 image_plus_motion=""
@@ -68,79 +70,42 @@ fdm_model_name=""
 freeze_idm=""
 freeze_fdm=""
 architecture=""
-data_modality="voxel"
 learning_rate=0.001
 
-# Restricted Absolute
-action_type="absolute_pose"
-dataset_path="/users/ysong135/scratch/datasets/random_abs_new"
-
-horizon=1
-batch_size=128
-
-# architecture="direct_cnn_mlp"
-# resnet_layers_num=0
-# note="restricted_abs"
-# train_only
-
-# architecture="direct_resnet_mlp"
-# resnet_layers_num=18
-# note="18_restricted_abs"
-# train_only
-
-# resnet_layers_num=34
-# note="34_restricted_abs"
-# train_only
-
-# resnet_layers_num=50
-# note="50_restricted_abs"
-# train_only
-
-# batch_size=64
-
-# resnet_layers_num=101
-# note="101_restricted_abs"
-# train_only
-
-# resnet_layers_num=152
-# note="152_restricted_abs"
-# train_only
-
-# resnet_layers_num=200
-# note="200_restricted_abs"
-# train_only
-
-# Unrestricted rel
-
-action_type="absolute_pose"
-dataset_path="/users/ysong135/scratch/datasets/random_rel_new"
-
-horizon=2
-batch_size=256
-
-architecture="direct_resnet_mlp"
 resnet_layers_num=18
-note="18_unrestricted_rel"
+num_mlp_layers=3
+
+# delta_position+gripper
+action_type="delta_position+gripper"
+horizon=2
+batch_size=1632
+
+cameras="frontview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|frontview"
 train_only
 
-resnet_layers_num=34
-note="34_unrestricted_rel"
+cameras="frontview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=camera
+note="delta_position+gripper|cropped_rgbd+color_maskd|camera|frontview"
 train_only
 
-resnet_layers_num=50
-note="50_unrestricted_rel"
+cameras="frontview_image,sideview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_maskd|global|frontviewsideview"
 train_only
 
-batch_size=128
-
-resnet_layers_num=101
-note="101_unrestricted_rel"
+cameras="agentview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|agentview"
 train_only
 
-resnet_layers_num=152
-note="152_unrestricted_rel"
-train_only
-
-resnet_layers_num=200
-note="200_unrestricted_rel"
+cameras="agentview_image,sideagentview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview"
 train_only
