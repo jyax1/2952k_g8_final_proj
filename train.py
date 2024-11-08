@@ -6,7 +6,7 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg"
     vp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg_val"
