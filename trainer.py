@@ -166,10 +166,10 @@ class Trainer:
             self.scheduler.step(loss.item())
 
             # Validate, save model, and close the progress bar after the epoch ends
-            val_loss, outputs, labels = self.validate()
-            print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
-            self.save_validation(val_loss, outputs, labels, epoch + 1, len(self.train_loader) + 1, end_of_epoch=True)
-            self.save_model(epoch + 1, len(self.train_loader) + 1)
+            # val_loss, outputs, labels = self.validate()
+            # print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
+            # self.save_validation(val_loss, outputs, labels, epoch + 1, len(self.train_loader) + 1, end_of_epoch=True)
+            # self.save_model(epoch + 1, len(self.train_loader) + 1)
             epoch_progress.close()
 
         # Close the TensorBoard writer when training is complete

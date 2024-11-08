@@ -8,8 +8,8 @@ Temporary
 '''
 oscar = False
 if oscar:
-    dp = "/users/ysong135/scratch/datasets/random_rel_new"
-    vp = "/users/ysong135/scratch/datasets/random_rel_new"
+    dp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg"
+    vp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg_val"
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
