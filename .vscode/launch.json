@@ -44,12 +44,101 @@
             "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=50", "-ipm", "--horizon=2", "-vps=1"]
         },
         {
+            "name": "train direct_resnet_mlp rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp rgbd delta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_pose", "--data_modality=rgbd", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp color_mask_depth",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp cropped_rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp cropped_rgbd+color_mask_depth",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd+color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp rgb bi_cameras",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--cameras=frontview_image,agentview_image", "--action_type=position+gripper", "--data_modality=rgb", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp color_mask_depth delta_position",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_position", "--data_modality=color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp color_mask_depth delta_position+gripper",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_position+gripper", "--data_modality=color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp color_mask_depth position disentangled",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", 
+            "--horizon=1", "--action_type=position", "--standardize_data", "--coordinate_system=disentangled", "--data_modality=color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train direct_resnet_mlp color_mask_depth delta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_pose", "--data_modality=color_mask_depth", "-dpc=1.0"]
+        },
+        {
+            "name": "train flownet2 rgbd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=flownet2", "--epoch=10", "-fv=FlowNet2", "--horizon=1", "--action_type=pose", "--data_modality=rgbd"]
+        },
+        {
             "name": "train direct_resnet_mlp voxel",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=2", "--action_type=delta_pose", "--data_modality=voxel"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--action_type=pose", "--data_modality=voxel"]
         },
         {
             "name": "train direct_resnet_mlp abs rgb",

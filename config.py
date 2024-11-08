@@ -11,6 +11,7 @@ ARCHITECTURES = [
     'latent_decoder_aux_separate_unet_vit',
     'latent_decoder_aux_combined_unet_mlp',
     'latent_decoder_aux_combined_vit',
+    'flownet2'
 ]
 
 VALID_LATENT_DIMS = [4, 8, 16, 32]

@@ -18,7 +18,7 @@ def center_crop(tensor, output_size=112):
     
     return cropped_tensor
 
-def resnet_builder(resnet_version, video_length):
+def resnet_builder(resnet_version, video_length, in_channels=3):
     if resnet_version == 'resnet18':
         block = BasicBlock
         layers = [2, 2, 2, 2]
@@ -30,4 +30,4 @@ def resnet_builder(resnet_version, video_length):
     else:
         raise ValueError("Unsupported ResNet version. Choose 'resnet18' or 'resnet50'.")
     
-    return ResNet(block, layers, video_length), resnet_out_dim
+    return ResNet(block, layers, video_length, in_channels=in_channels), resnet_out_dim

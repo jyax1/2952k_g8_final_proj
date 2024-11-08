@@ -1,4 +1,5 @@
 /outputs
 **/__pycache__/
 **/*.pyc
+/debug
 /results

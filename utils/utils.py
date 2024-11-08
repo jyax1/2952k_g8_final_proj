@@ -34,11 +34,15 @@ def load_datasets(
         validation=True, 
         horizon=2, 
         demo_percentage=0.9, 
+        num_demo_train=5000,
+        val_demo_percentage=0.9,
         cameras=['frontview_image'],
         motion=False,
         image_plus_motion=False,
         action_type='',
         data_modality='rgb',
+        compute_stats=True,
+        coordinate_system='disentangled'
 ):
     if 'latent' in architecture and 'decoder' not in architecture and 'aux' not in architecture:
         if train:
@@ -59,12 +63,15 @@ def load_datasets(
             train_set = DatasetVideo2Action(path=datasets_path, video_length=horizon, 
                                             demo_percentage=demo_percentage, cameras=cameras,
                                             motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
-                                            data_modality=data_modality)
+                                            data_modality=data_modality, compute_stats=compute_stats, coordinate_system=coordinate_system)
+            action_mean = train_set.action_mean
+            action_std = train_set.action_std
         if validation:
             validation_set = DatasetVideo2Action(path=valsets_path, video_length=horizon, 
-                                                demo_percentage=.99, cameras=cameras, validation=True, 
+                                                demo_percentage=val_demo_percentage, num_demo_train=num_demo_train, cameras=cameras, validation=True, 
                                                 motion=motion, image_plus_motion=image_plus_motion, action_type=action_type,
-                                                data_modality=data_modality)
+                                                data_modality=data_modality, action_mean=action_mean, action_std=action_std, 
+                                                compute_stats=compute_stats, coordinate_system=coordinate_system)
 
     if train and validation:
         return train_set, validation_set
@@ -73,21 +80,22 @@ def load_datasets(
     elif validation and not train:
         return validation_set
     
-def load_model(architecture, 
-               horizon, 
-               results_path, 
-               latent_dim, 
-               motion, 
-               image_plus_motion,
-               num_mlp_layers, 
-               vit_patch_size, 
-               resnet_layers_num,
-               idm_model_name,
-               fdm_model_name,
-               freeze_idm,
-               freeze_fdm,
-               action_type,
-               data_modality
+def load_model(architecture,
+               horizon=1,
+               results_path='',
+               latent_dim=0,
+               cameras=['frontview_image', 'sideview_image'],
+               motion=False,
+               image_plus_motion=False,
+               num_mlp_layers=3, # to be extracted
+               vit_patch_size=0, 
+               resnet_layers_num=18, # to be extracted
+               idm_model_name='',
+               fdm_model_name='',
+               freeze_idm=None,
+               freeze_fdm=None,
+               action_type='pose',
+               data_modality='rgb', # to be extracted
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':
@@ -109,29 +117,63 @@ def load_model(architecture,
                                     vit_patch_size=vit_patch_size)
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
-        if data_modality == 'voxel':
-            input_channels = 4 * horizon
-        elif data_modality == 'rgb':
-            input_channels = 3 * horizon
+        
+        if 'action' in action_type:
+            num_classes = 7
+        elif action_type == 'position' or action_type == 'delta_position':
+            num_classes = 3
+        elif action_type == 'pose' or action_type == 'delta_pose':
+            num_classes = 9
+        elif action_type == 'position+gripper':
+            num_classes = 5
+        elif action_type == 'delta_position+gripper':
+            num_classes = 4
+        
+        if data_modality == 'voxel' or data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
+            input_channels = 4 * horizon * len(cameras)
+        elif data_modality == 'rgb' or 'color_mask_depth':
+            input_channels = 3 * horizon * len(cameras)
+        elif data_modality == 'cropped_rgbd+color_mask':
+            input_channels = 6 * horizon * len(cameras)
+        elif data_modality == 'cropped_rgbd+color_mask_depth':
+            input_channels = 7 * horizon * len(cameras)
             
-        if data_modality == 'rgb':
-            model = ActionExtractionResNet(resnet_version='resnet18', video_length=horizon, action_length=1, num_mlp_layers=10)
-        elif data_modality == 'rgbd':
-            pass
+        if data_modality == 'rgb' or data_modality == 'color_mask_depth':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+        elif data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+        elif data_modality == 'cropped_rgbd+color_mask_depth':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
-                model = resnet18_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 34:
-                model = resnet34_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet34_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 50:
-                model = resnet50_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet50_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 101:
-                model = resnet101_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet101_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 152:
-                model = resnet152_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet152_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 200:
-                model = resnet200_3d(input_channels=input_channels, num_mlp_layers=num_mlp_layers)
+                model = resnet200_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
                 
+    # elif architecture == 'flownet2':
+    #     if 'action' in action_type:
+    #         num_classes = 7
+    #     elif action_type == 'position':
+    #         num_classes = 3
+    #     elif action_type == 'pose':
+    #         num_classes = 9
+        
+    #     if data_modality == 'voxel' or data_modality == 'rgbd':
+    #         input_channels = 4 * horizon
+    #     elif data_modality == 'rgb':
+    #         input_channels = 3 * horizon
+            
+    #     model = FlowNet2PoseEstimation(video_length=horizon, in_channels=input_channels // horizon, num_classes=num_classes, version=flownet_verison,
+    #                                    num_mlp_layers=num_mlp_layers)
+        
     elif architecture == 'latent_encoder_cnn_unet':
         model = LatentEncoderPretrainCNNUNet(latent_dim=latent_dim, video_length=horizon) # doesn't support motion
     elif architecture == 'latent_encoder_resnet_unet':
@@ -182,6 +224,24 @@ def load_model(architecture,
                                                         video_length=horizon, 
                                                         freeze_idm=freeze_idm)
 
+    return model
+
+
+def load_trained_model(model, results_path, trained_model_name, device):
+    conv_model_path = f"{results_path}/{trained_model_name}"
+    
+    mlp_model_name_string = trained_model_name.replace('_resnet-', '_mlp-')
+    mlp_model_path = f"{results_path}/{mlp_model_name_string}"
+    
+    conv_state_dict = torch.load(conv_model_path)
+    mlp_state_dict = torch.load(mlp_model_path)
+
+    model.conv.load_state_dict(conv_state_dict)
+    model.mlp.load_state_dict(mlp_state_dict)
+    
+    model.conv.to(device)
+    model.mlp.to(device)
+    
     return model
 
 import matplotlib.pyplot as plt

@@ -28,10 +28,12 @@ def load_demo_data(dataset):
         for demo in demos:
             data = root['data'][demo]
             actions = data['actions'][:]  # Load all actions for this demo at once
+            pos = data['obs']['robot0_eef_pos']
+            ori = data['obs']['robot0_eef_quat']
 
             # Extract delta positions, orientations, and gripper motions
-            delta_pos = actions[:, :3]  # First 3 dimensions
-            delta_ori = actions[:, 3:6]  # Next 3 dimensions (orientation)
+            delta_pos = pos  # First 3 dimensions
+            delta_ori = ori
             delta_grip = actions[:, 6]   # Last dimension (gripper)
 
             delta_positions.append(delta_pos)
@@ -119,6 +121,6 @@ def process_subdirectory(subdir_path):
     visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=True)
 
 if __name__ == '__main__':
-    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_abs'
+    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test/'
     
     process_subdirectory(base_path)

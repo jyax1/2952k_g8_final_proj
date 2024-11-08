@@ -13,9 +13,12 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
-    vp = '/home/yilong/Documents/ae_data/abs'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_2'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg'
+    # dp = '/home/yilong/Documents/policy_data/lift/obs'
+    # vp = '/home/yilong/Documents/ae_data/abs'
+    # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_val'
+    # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
 
@@ -25,7 +28,7 @@ Temporary
 
 def train(args):
 
-    model_name = f'''{args.architecture}_res{args.resnet_layers_num}_opt{args.optimizer}_lr{args.learning_rate}_mmt{args.momentum}_{args.note}'''
+    model_name = f'''{args.note}'''
 
     # Instantiate model
     model = load_model(
@@ -33,6 +36,7 @@ def train(args):
         horizon=args.horizon,
         results_path=args.results_path,
         latent_dim=args.latent_dim,
+        cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
         num_mlp_layers=args.num_mlp_layers,
@@ -43,7 +47,7 @@ def train(args):
         freeze_idm=args.freeze_idm,
         freeze_fdm=args.freeze_fdm,
         action_type=args.action_type,
-        data_modality=args.data_modality
+        data_modality=args.data_modality,
         )
 
     # Instandiate datasets
@@ -55,11 +59,15 @@ def train(args):
         validation=True,
         horizon=args.horizon,
         demo_percentage=args.demo_percentage,
+        num_demo_train = args.num_demo_train,
+        val_demo_percentage=args.val_demo_percentage,
         cameras=args.cameras,
         motion=args.motion,
         image_plus_motion=args.image_plus_motion,
         action_type=args.action_type,
-        data_modality=args.data_modality
+        data_modality=args.data_modality,
+        compute_stats=args.standardize_data,
+        coordinate_system=args.coordinate_system
         )
 
     # Instantiate the trainer
@@ -72,7 +80,8 @@ def train(args):
         optimizer_name=args.optimizer,
         batch_size=args.batch_size, 
         epochs=args.epoch,
-        lr=args.learning_rate
+        lr=args.learning_rate,
+        cosine_similarity_loss=args.cosine_similarity_loss
         )
 
     # Train the model
@@ -104,7 +113,7 @@ if __name__ == '__main__':
         '--data_modality', '-dm',
         type=str,
         default='rgb',
-        choices=['rgb', 'rgbd', 'voxel'],
+        choices=['rgb', 'rgbd', 'voxel', 'color_mask_depth', 'cropped_rgbd', 'cropped_rgbd+color_mask', 'cropped_rgbd+color_mask_depth'],
         help='Type of data to use for training'
     )
     parser.add_argument(
@@ -173,8 +182,19 @@ if __name__ == '__main__':
     parser.add_argument(
         '--demo_percentage', '-dpc',
         type=float,
-        default=0.9,
+        default=None,
         help='Percentage of demos (spread evenly across each task) to use for training'
+    )
+    parser.add_argument(
+        '--num_demo_train',
+        type=int,
+        default=5000,
+    )
+    parser.add_argument(
+        '--val_demo_percentage', '-vdp',
+        type=float,
+        default=0.9,
+        help='Percentage of demos (spread evenly across each task) to use for validating'
     )
     parser.add_argument(
         '--vit_patch_size', '-vps',
@@ -217,7 +237,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--learning_rate', '-lr',
         type=float,
-        default=1e-4,
+        default=1e-3,
         help='Learning rate to use for training'
     )
     parser.add_argument(
@@ -235,9 +255,36 @@ if __name__ == '__main__':
     parser.add_argument(
         '--action_type',
         type=str,
-        default='absolute_pose',
-        choices=['delta_pose', 'absolute_pose'],
+        default='absolute_action',
+        choices=['delta_action', 'absolute_action', 'position', 'delta_position', 'position+gripper', 'delta_position+gripper', 'pose', 'delta_pose'],
         help='Type of action representation to use'
+    )
+    parser.add_argument(
+        '--obs_dim', '-od',
+        type=int,
+        default=256,
+        help="Dimension of a side of the input observation, assuming that the observation is square"
+    )
+    parser.add_argument(
+        '--sam2_mask',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--sam2_box',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--standardize_data',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--coordinate_system',
+        choices=['global', 'camera', 'disentangled'],
+        default='disentangled'
+    )
+    parser.add_argument(
+        '--cosine_similarity_loss',
+        action='store_true'
     )
     
     args = parser.parse_args()
