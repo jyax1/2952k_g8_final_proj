@@ -1,5 +1,10 @@
 #!/bin/bash
 
+cosine_similarity_loss_flag=""
+if [ "$cosine_similarity_loss" = true ]; then
+    cosine_similarity_loss_flag="--cosine_similarity_loss"
+fi
+
 run()
 {
     jn=TRAIN_note${note}
@@ -45,6 +50,7 @@ run()
     --demo_percentage=${demo_percentage}
     --coordinate_system=${coordinate_system}
     --standardize_data
+    ${cosine_similarity_loss_flag}
     "
     slurm_args=""
 
@@ -108,4 +114,36 @@ cameras="agentview_image,sideagentview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=global
 note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview"
+train_only
+
+cosine_similarity_loss_flag=true
+
+cameras="frontview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|frontview|cos"
+train_only
+
+cameras="frontview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=camera
+note="delta_position+gripper|cropped_rgbd+color_maskd|camera|frontview|cos"
+train_only
+
+cameras="frontview_image,sideview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_maskd|global|frontviewsideview|cos"
+train_only
+
+cameras="agentview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|agentview|cos"
+train_only
+
+cameras="agentview_image,sideagentview_image"
+data_modality="cropped_rgbd+color_mask_depth"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview|cos"
 train_only

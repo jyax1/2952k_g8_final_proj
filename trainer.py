@@ -18,7 +18,7 @@ from utils.utils import check_dataset
 import torch.nn.functional as F
 
 class DeltaControlLoss(nn.Module):
-    def __init__(self, direction_weight=0.95):
+    def __init__(self, direction_weight=1.0):
         super(DeltaControlLoss, self).__init__()
         self.direction_weight = direction_weight
 
