@@ -3,7 +3,7 @@
 #SBATCH -n 2
 #SBATCH --time=200:00:00
 #SBATCH -p 3090-gcondo --gres=gpu:1 --gres-flags=enforce-binding
-#SBATCH --mem=16Gb
+#SBATCH --mem=32Gb
 
 # Use '%A' for array-job ID, '%J' for job ID and '%a' for task ID
 #SBATCH -e outputs/%J.err

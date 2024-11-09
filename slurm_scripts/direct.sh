@@ -91,31 +91,31 @@ batch_size=1632
 cameras="frontview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|frontview"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|frontview"
 train_only
 
 cameras="frontview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=camera
-note="delta_position+gripper|cropped_rgbd+color_maskd|camera|frontview"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|camera|frontview"
 train_only
 
 cameras="frontview_image,sideview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_maskd|global|frontviewsideview"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|frontviewsideview"
 train_only
 
 cameras="agentview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|agentview"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|agentview"
 train_only
 
 cameras="agentview_image,sideagentview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|agentviewsideagentview"
 train_only
 
 cosine_similarity_loss_flag="--cosine_similarity_loss"
@@ -123,29 +123,61 @@ cosine_similarity_loss_flag="--cosine_similarity_loss"
 cameras="frontview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|frontview|cos"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|frontview|cos"
 train_only
 
 cameras="frontview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=camera
-note="delta_position+gripper|cropped_rgbd+color_maskd|camera|frontview|cos"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|camera|frontview|cos"
 train_only
 
 cameras="frontview_image,sideview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_maskd|global|frontviewsideview|cos"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|frontviewsideview|cos"
 train_only
 
 cameras="agentview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_maskd|disentangled|agentview|cos"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|agentview|cos"
 train_only
 
 cameras="agentview_image,sideagentview_image"
 data_modality="cropped_rgbd+color_mask_depth"
 coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_maskd|global|agentviewsideagentview|cos"
+note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|agentviewsideagentview|cos"
+train_only
+
+data_modality="cropped_rgbd+color_mask"
+
+cameras="agentview_image,sideagentview_image"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_mask|global|agentviewsideagentview|cos"
+train_only
+
+cameras="frontview_image"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_mask|disentangled|frontview|cos"
+train_only
+
+cameras="frontview_image"
+coordinate_system=camera
+note="delta_position+gripper|cropped_rgbd+color_mask|camera|frontview|cos"
+train_only
+
+cameras="frontview_image,sideview_image"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_mask|global|frontviewsideview|cos"
+train_only
+
+cameras="agentview_image"
+coordinate_system=disentangled
+note="delta_position+gripper|cropped_rgbd+color_mask|disentangled|agentview|cos"
+train_only
+
+cameras="agentview_image,sideagentview_image"
+coordinate_system=global
+note="delta_position+gripper|cropped_rgbd+color_mask|global|agentviewsideagentview|cos"
 train_only
