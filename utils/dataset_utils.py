@@ -527,6 +527,20 @@ def project_point(K, R, point_3D):
 
     return (u, v)
 
+def visualize_visible_points(K, R, x_range, y_range, z_range):
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, K[0, 2] * 2)
+    ax.set_ylim(0, K[1, 2] * 2)
+    ax.invert_yaxis()
+
+    for x in np.linspace(x_range[0], x_range[1], 10):
+        for y in np.linspace(y_range[0], y_range[1], 10):
+            for z in np.linspace(z_range[0], z_range[1], 10):
+                u, v = project_point(K, R, np.array([x, y, z]))
+                ax.plot(u, v, 'ro')
+
+    plt.show()
+
 def draw_and_save_point(image, point):
     point_radius = 2
     point_color = (0, 255, 0)  # Blue color in RGB
