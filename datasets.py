@@ -59,9 +59,11 @@ class BaseDataset(Dataset):
         self.action_type = action_type
         self.coordinate_system = coordinate_system
         self.cameras = cameras
+        self.all_cameras = ['frontview_image', 'sideview_image', 'agentview_image', 'sideagentview_image']
+        # self.all_cameras = ['frontview_image', 'sideview_image', 'agentview_image']
 
         # Load dataset and compute stats if needed (only when stats are not provided)
-        self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, max_workers=1)
+        self._load_datasets(path, demo_percentage, num_demo_train, validation, cameras, self.all_cameras, max_workers=1)
         if self.compute_stats and (self.action_mean is None or self.action_std is None):
             self._compute_action_statistics()
             
@@ -71,7 +73,7 @@ class BaseDataset(Dataset):
         # Define transformation
         self.transform = video_transforms.Compose([volume_transforms.ClipToTensor()])
     
-    def _load_datasets(self, path, demo_percentage, num_demo_train, validation, cameras, max_workers=8):
+    def _load_datasets(self, path, demo_percentage, num_demo_train, validation, cameras, all_cameras, max_workers=8):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
@@ -83,21 +85,22 @@ class BaseDataset(Dataset):
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
             root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
             
-            for i in range(len(cameras)):
-                camera_name = cameras[i].split('_')[0]
+            for i in range(len(all_cameras)):
+                camera_name = all_cameras[i].split('_')[0]
                 camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
-                eef_pos_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}'
-                eef_pos_disentangled_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}_disentangled'
-                
-                if self.data_modality == 'color_mask_depth':
-                    cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
-                elif 'cropped_rgbd' in self.data_modality:
-                    cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
+                # eef_pos_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}'
+                # eef_pos_disentangled_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}_disentangled'
 
                 # If any of the required data paths are missing, preprocess them
                 if camera_maskdepth_path not in root:
                     # Call the preprocessing function if any data is missing
                     preprocess_data_parallel(root, camera_name, frontview_R)
+                    
+            for i in range(len(cameras)):
+                if self.data_modality == 'color_mask_depth':
+                    cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
+                elif 'cropped_rgbd' in self.data_modality:
+                    cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
         
         # Collect all Zarr files
         self.zarr_files = glob(f"{path}/**/*.zarr", recursive=True)
@@ -197,15 +200,16 @@ class BaseDataset(Dataset):
                     if self.data_modality == 'voxel':
                         futures.append(executor.submit(process_demo, demo, data, task, 'voxel'))
                     else:
-                        for camera in cameras:
-                            if self.data_modality == 'color_mask_depth':
-                                camera = camera.split('_')[0] + '_maskdepth'
-                            elif 'cropped_rgbd' in self.data_modality:
-                                camera = camera.split('_')[0] + '_rgbdcrop'
-                            if camera in data['obs'].keys():
-                                futures.append(executor.submit(process_demo, demo, data, task, camera))
-                            else:
-                                print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
+                        camera = cameras[0]
+                        if self.data_modality == 'color_mask_depth':
+                            camera = cameras[0].split('_')[0] + '_maskdepth'
+                        elif 'cropped_rgbd' in self.data_modality:
+                            camera = cameras[0].split('_')[0] + '_rgbdcrop'
+                            
+                        if camera in data['obs'].keys():
+                            futures.append(executor.submit(process_demo, demo, data, task, camera))
+                        else:
+                            print(f'Camera {camera} not found in demo {demo}, file {zarr_file}')
                 # Wait for all futures to complete
                 for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
                     pass
@@ -343,8 +347,9 @@ class DatasetVideo2Action(BaseDataset):
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
             actions = np.array([np.append(actions_diff[i], gripper_actions[i]) for i in range(len(actions_diff))])
             
-            self.action_mean[-1] = 0.
-            self.action_std[-1] = 1.
+            if isinstance(self.action_mean, np.ndarray) and isinstance(self.action_std, np.ndarray):
+                self.action_mean[-1] = 0.
+                self.action_std[-1] = 1.
 
         elif self.action_type == 'pose':
             for i in range(self.video_length):
@@ -440,18 +445,14 @@ if __name__ == "__main__":
                 'farspaceview_depth': [0.58, 1.58],
                 }
     
-    (frontview_x_min, frontview_x_max), (frontview_y_min, frontview_y_max), (frontview_z_min, frontview_z_max) = get_visible_xyz_range(frontview_R, frontview_K, z_range = (1.2, 2.2))
+    frontview_x_range, frontview_y_range, frontview_z_range = get_visible_xyz_range(frontview_R, frontview_K, z_range=(1.2, 2.2))
+    sideview_x_range, sideview_y_range, sideview_z_range = get_visible_xyz_range(sideview_R, sideview_K, z_range=(1.0, 2.0))
+    agentview_x_range, agentview_y_range, agentview_z_range = get_visible_xyz_range(agentview_R, agentview_K, z_range=(0.1, 1.1))
+    sideagentview_x_range, sideagentview_y_range, sideagentview_z_range = get_visible_xyz_range(sideagentview_R, sideagentview_K, z_range=(0.1, 1.1))
     
-    (sideview_x_min, sideview_x_max), (sideview_y_min, sideview_y_max), (sideview_z_min, sideview_z_max) = get_visible_xyz_range(sideview_R, sideview_K, z_range = (1.0, 2.0))
-
-    (agentview_x_min, agentview_x_max), (agentview_y_min, agentview_y_max), (agentview_z_min, agentview_z_max) = get_visible_xyz_range(agentview_R, agentview_K, z_range = (0.1, 1.1))
+    print(f"frontview: x: {frontview_x_range[0]:.2f}, {frontview_x_range[1]:.2f}, y: {frontview_y_range[0]:.2f}, {frontview_y_range[1]:.2f}, z: {frontview_z_range[0]:.2f}, {frontview_z_range[1]:.2f}")
+    print(f"sideview: x: {sideview_x_range[0]:.2f}, {sideview_x_range[1]:.2f}, y: {sideview_y_range[0]:.2f}, {sideview_y_range[1]:.2f}, z: {sideview_z_range[0]:.2f}, {sideview_z_range[1]:.2f}")
+    print(f"agentview: x: {agentview_x_range[0]:.2f}, {agentview_x_range[1]:.2f}, y: {agentview_y_range[0]:.2f}, {agentview_y_range[1]:.2f}, z: {agentview_z_range[0]:.2f}, {agentview_z_range[1]:.2f}")
+    print(f"sideagentview: x: {sideagentview_x_range[0]:.2f}, {sideagentview_x_range[1]:.2f}, y: {sideagentview_y_range[0]:.2f}, {sideagentview_y_range[1]:.2f}, z: {sideagentview_z_range[0]:.2f}, {sideagentview_z_range[1]:.2f}") 
     
-    (sideagentview_x_min, sideagentview_x_max), (sideagentview_y_min, sideagentview_y_max), (sideagentview_z_min, sideagentview_z_max) = get_visible_xyz_range(sideagentview_R, sideagentview_K, z_range = (0.1, 1.1))
-
-    print(f"frontview: x: {frontview_x_min:.2f}, {frontview_x_max:.2f}, y: {frontview_y_min:.2f}, {frontview_y_max:.2f}, z: {frontview_z_min:.2f}, {frontview_z_max:.2f}")
-    
-    print(f"sideview: x: {sideview_x_min:.2f}, {sideview_x_max:.2f}, y: {sideview_y_min:.2f}, {sideview_y_max:.2f}, z: {sideview_z_min:.2f}, {sideview_z_max:.2f}")
-    
-    print(f"agentview: x: {agentview_x_min:.2f}, {agentview_x_max:.2f}, y: {agentview_y_min:.2f}, {agentview_y_max:.2f}, z: {agentview_z_min:.2f}, {agentview_z_max:.2f}")
-    
-    print(f"sideagentview: x: {sideagentview_x_min:.2f}, {sideagentview_x_max:.2f}, y: {sideagentview_y_min:.2f}, {sideagentview_y_max:.2f}, z: {sideagentview_z_min:.2f}, {sideagentview_z_max:.2f}")
+    visualize_visible_points(agentview_K, agentview_R, agentview_x_range, agentview_y_range, agentview_z_range)

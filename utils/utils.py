@@ -144,6 +144,8 @@ def load_model(architecture,
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'cropped_rgbd+color_mask_depth':
             model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+        elif data_modality == 'cropped_rgbd+color_mask':
+            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=6*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)

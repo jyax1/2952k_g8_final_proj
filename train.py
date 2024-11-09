@@ -8,16 +8,16 @@ Temporary
 '''
 oscar = False
 if oscar:
-    dp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg"
-    vp = "/users/ysong135/scratch/datasets/obs_rel_color_smoothg_val"
+    dp = "/users/ysong135/scratch/datasets/train"
+    vp = "/users/ysong135/scratch/datasets/val"
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg'
+    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_val'
+    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent_val'
     # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'

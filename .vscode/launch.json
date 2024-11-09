@@ -89,7 +89,7 @@
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--cameras=frontview_image,agentview_image", "--action_type=position+gripper", "--data_modality=rgb", "-dpc=1.0"]
+            "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--cameras=frontview_image,sideview_image", "--action_type=delta_position+gripper", "--data_modality=rgb", "-dpc=1.0"]
         },
         {
             "name": "train direct_resnet_mlp color_mask_depth delta_position",
