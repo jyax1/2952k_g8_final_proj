@@ -6,7 +6,7 @@ from config import *
 '''
 Temporary
 '''
-oscar = True
+oscar = False
 if oscar:
     dp = "/users/ysong135/scratch/datasets/train"
     vp = "/users/ysong135/scratch/datasets/val"
@@ -14,7 +14,6 @@ if oscar:
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent'
-    dp = '/home/yilong/Documents/diffusion_policy/data/robomimic/datasets/lift/obs'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'

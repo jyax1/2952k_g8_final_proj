@@ -38,7 +38,7 @@ class BaseDataset(Dataset):
                  validation=False, 
                  random_crop=False, 
                  load_actions=False, 
-                 compute_stats=True,
+                 compute_stats=False,
                  action_mean=None,  # Add precomputed action mean
                  action_std=None,
                  coordinate_system='disentangled'):  # Add precomputed action std
@@ -220,6 +220,14 @@ class BaseDataset(Dataset):
         self.action_mean = self.sum_actions / self.n_samples
         variance = (self.sum_square_actions / self.n_samples) - (self.action_mean ** 2)
         self.action_std = np.sqrt(variance)
+        
+        # Generate the file name based on self.action_type
+        file_name = f'action_statistics_{self.action_type}.npz'
+        save_path = os.path.join(self.path, file_name)
+        
+        # Save the computed mean and std to an .npz file
+        np.savez(save_path, action_mean=self.action_mean, action_std=self.action_std)
+        print(f"Saved action statistics to {save_path}")
     
     def get_samples(self, root, demo, index):
         obs_seq = []

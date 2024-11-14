@@ -50,7 +50,13 @@ def load_demo_data(dataset):
     delta_orientations = np.concatenate(delta_orientations, axis=0)
     delta_gripper = np.concatenate(delta_gripper, axis=0)
     hdf5_colors = np.array(hdf5_colors)
-    
+
+    # Print the maximum and minimum values of each dimension in delta_positions
+    print("Maximum and minimum values in delta_positions:")
+    print(f"X: max = {np.max(delta_positions[:, 0])}, min = {np.min(delta_positions[:, 0])}")
+    print(f"Y: max = {np.max(delta_positions[:, 1])}, min = {np.min(delta_positions[:, 1])}")
+    print(f"Z: max = {np.max(delta_positions[:, 2])}, min = {np.min(delta_positions[:, 2])}")
+
     return delta_positions, delta_orientations, delta_gripper, hdf5_colors
 
 def visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=False):
@@ -121,6 +127,6 @@ def process_subdirectory(subdir_path):
     visualize_action_distributions(delta_positions, delta_orientations, delta_gripper, hdf5_colors, task_name, save_image=True)
 
 if __name__ == '__main__':
-    base_path = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_test/'
+    base_path = '/home/yilong/Documents/policy_data/lift/obs/'
     
     process_subdirectory(base_path)
