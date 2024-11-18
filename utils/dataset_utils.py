@@ -15,34 +15,32 @@ def hdf5_to_zarr(hdf5_path):
     '''
     Function for duplicating an existing hdf5 file without a duplicate zarr file and saving it as a zarr file.
     '''
-    # determine zarr path
+    print(f'Converting {hdf5_path} to zarr file')
+    
+    hdf5_file = h5py.File(hdf5_path, 'r')
     zarr_path = hdf5_path.replace('.hdf5', '.zarr')
+    root = zarr.open(zarr_path, mode='w')
 
-    # open hdf5 file
-    with h5py.File(hdf5_path, 'r') as hdf5_file:
-        # create zarr store
-        store = zarr.DirectoryStore(zarr_path)
-        root = zarr.group(store=store, overwrite=True)
-        
-        def copy_node(hdf5_node, zarr_node):
-            if isinstance(hdf5_node, h5py.Group):
-                for key, item in hdf5_node.items():
-                    if isinstance(item, h5py.Group):
-                        zarr_group = zarr_node.require_group(key)
-                        copy_node(item, zarr_group)
-                    elif isinstance(item, h5py.Dataset):
-                        compression = item.compression if item.compression else 'blosc'
-                        compression_opts = item.compression_opts if item.compression_opts else None
-                        chunks = item.chunks if item.chunks else (1000,)
-                        zarr_node.create_dataset(key, data=item[:], chunks=chunks, dtype=item.dtype, compression=compression, compression_opts=compression_opts)
-            elif isinstance(hdf5_node, h5py.Dataset):
-                compression = hdf5_node.compression if hdf5_node.compression else 'blosc'
-                compression_opts = hdf5_node.compression_opts if hdf5_node.compression_opts else None
-                chunks = hdf5_node.chunks if hdf5_node.chunks else (1000,)
-                zarr_node.create_dataset(name=hdf5_node.name, data=hdf5_node[:], chunks=chunks, dtype=hdf5_node.dtype, compression=compression, compression_opts=compression_opts)
+    def copy_dataset(item, zarr_node, key):
+        ''' Copy HDF5 dataset to Zarr '''
+        compression = item.compression
+        compression_opts = item.compression_opts
+        chunks = item.chunks if item.chunks else (1000,)
+        zarr_node.create_dataset(key, data=item[:], chunks=chunks, dtype=item.dtype, compression=compression, compression_opts=compression_opts)
 
-        # copy entire hdf5 file structure to zarr file
-        copy_node(hdf5_file, root)
+    def copy_node(hdf5_node, zarr_node):
+        ''' Recursively copy HDF5 groups and datasets to Zarr '''
+        for key, item in hdf5_node.items():
+            if isinstance(item, h5py.Group):
+                zarr_group = zarr_node.require_group(key)
+                # Recursively copy groups
+                copy_node(item, zarr_group)
+            elif isinstance(item, h5py.Dataset):
+                # Copy datasets
+                copy_dataset(item, zarr_node, key)
+
+    # Copy entire HDF5 file structure to Zarr file
+    copy_node(hdf5_file, root)
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
     
@@ -51,39 +49,36 @@ def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
     Function for duplicating an existing hdf5 file without a duplicate zarr file and saving it as a zarr file.
     Parallelized with configurable number of workers.
     '''
-    # Determine zarr path
+    print(f'Converting {hdf5_path} to zarr file in parallel')
+    
+    hdf5_file = h5py.File(hdf5_path, 'r')
     zarr_path = hdf5_path.replace('.hdf5', '.zarr')
+    root = zarr.open(zarr_path, mode='w')
 
-    # Open HDF5 file
-    with h5py.File(hdf5_path, 'r') as hdf5_file:
-        # Create Zarr store
-        store = zarr.DirectoryStore(zarr_path)
-        root = zarr.group(store=store, overwrite=True)
+    def copy_dataset(item, zarr_node, key):
+        ''' Copy HDF5 dataset to Zarr '''
+        compression = item.compression
+        compression_opts = item.compression_opts
+        chunks = item.chunks if item.chunks else (1000,)
+        zarr_node.create_dataset(key, data=item[:], chunks=chunks, dtype=item.dtype, compression=compression, compression_opts=compression_opts)
 
-        def copy_dataset(item, zarr_node, key):
-            ''' Function to copy a single dataset in parallel '''
-            compression = item.compression if item.compression else 'blosc'
-            compression_opts = item.compression_opts if item.compression_opts else None
-            chunks = item.chunks if item.chunks else (1000,)
-            zarr_node.create_dataset(key, data=item[:], chunks=chunks, dtype=item.dtype, compression=compression, compression_opts=compression_opts)
+    def copy_node(hdf5_node, zarr_node):
+        ''' Recursively copy HDF5 groups and datasets to Zarr '''
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for key, item in hdf5_node.items():
+                if isinstance(item, h5py.Group):
+                    zarr_group = zarr_node.require_group(key)
+                    # Recursively copy groups
+                    futures.append(executor.submit(copy_node, item, zarr_group))
+                elif isinstance(item, h5py.Dataset):
+                    # Copy datasets in parallel
+                    futures.append(executor.submit(copy_dataset, item, zarr_node, key))
+            # Wait for all futures to complete
+            concurrent.futures.wait(futures)
 
-        def copy_node(hdf5_node, zarr_node):
-            ''' Recursively copy HDF5 groups and datasets to Zarr '''
-            futures = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for key, item in hdf5_node.items():
-                    if isinstance(item, h5py.Group):
-                        zarr_group = zarr_node.require_group(key)
-                        # Recursively copy groups
-                        futures.append(executor.submit(copy_node, item, zarr_group))
-                    elif isinstance(item, h5py.Dataset):
-                        # Copy datasets in parallel
-                        futures.append(executor.submit(copy_dataset, item, zarr_node, key))
-                # Wait for all futures to complete
-                concurrent.futures.wait(futures)
-
-        # Copy entire HDF5 file structure to Zarr file in parallel
-        copy_node(hdf5_file, root)
+    # Copy entire HDF5 file structure to Zarr file in parallel
+    copy_node(hdf5_file, root)
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
     
@@ -127,9 +122,11 @@ def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
         disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
         
         # Step 4: Process {camera}_rgbdcrop
-        rgb_image = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 4)
-        depth = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
-        rgbd_image = np.concatenate((rgb_image, depth), axis=3)
+        # rgb_image = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 4)
+        # depth = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
+        # rgbd_image = np.concatenate((rgb_image, depth), axis=3)  # Shape: (trajectory_length, 128, 128, 4)
+        
+        rgbd_image = root['data'][demo_key]['obs'][f'{camera}_rgbd'][:]  # Shape: (trajectory_length, 128, 128, 4)
 
         trajectory_length, height, width, _ = rgbd_image.shape
 

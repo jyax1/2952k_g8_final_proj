@@ -13,11 +13,11 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    dp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent'
+    dp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
-    vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent_val'
+    vp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
     # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'
@@ -82,7 +82,11 @@ def train(args):
         epochs=args.epoch,
         lr=args.learning_rate,
         cosine_similarity_loss=args.cosine_similarity_loss
-        )
+    )
+
+    # Load checkpoint if provided
+    if args.checkpoint:
+        trainer.load_checkpoint(args.checkpoint)
 
     # Train the model
     trainer.train()
@@ -119,7 +123,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--results_path', '-rp', 
         type=str, 
-        default=rp, 
+        default=rp,
         help='Path to where the results should be stored'
     )
     parser.add_argument(
@@ -158,7 +162,7 @@ if __name__ == '__main__':
         help='Length of the video'
     )
     parser.add_argument(
-        '--idm_model_name', '-idm', 
+        '--idm_model_name', '-idm',
         type=str, 
         default='', 
         help='Path to pretrained latent IDM model'
@@ -286,7 +290,13 @@ if __name__ == '__main__':
         '--cosine_similarity_loss',
         action='store_true'
     )
-    
+    parser.add_argument(
+        '--checkpoint',
+        type=str,
+        default='',
+        help='Path to a checkpoint file to resume training'
+    )
+
     args = parser.parse_args()
     assert 128 % args.latent_dim == 0, "latent_dim must divide 128 evenly."
 
@@ -304,7 +314,7 @@ if __name__ == '__main__':
 
     args.cameras = args.cameras.split(',')
     args.embodiments = args.embodiments.split(',')
-    
+
     if args.valsets_path == '':
         args.valsets_path = args.datasets_path
 

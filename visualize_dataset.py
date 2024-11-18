@@ -4,8 +4,8 @@ import numpy as np
 import h5py
 
 # Define the path to the HDF5 file and output directory
-hdf5_file_path = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color_smoothg_sideagent/organized_vSmoothGripper.hdf5'
-output_dir = 'debug/smooth_gripper_agent'
+hdf5_file_path = '/home/yilong/Documents/policy_data/lift/obs/lift_iiwa200.hdf5'
+output_dir = 'debug/lift_iiwa200'
 
 # Create the output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
