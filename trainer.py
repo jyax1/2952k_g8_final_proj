@@ -94,7 +94,8 @@ class Trainer:
 
         # Initialize TensorBoard SummaryWriter
         self.writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard_logs', model_name))
-    
+        self.start_epoch = 0  # Initialize start_epoch
+
     def get_optimizer(self, optimizer_name):
         """Return the optimizer based on the provided optimizer_name."""
         if optimizer_name.lower() == 'adam':
@@ -111,8 +112,16 @@ class Trainer:
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
+    def load_checkpoint(self, checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.start_epoch = checkpoint['epoch']
+        print(f"Loaded checkpoint from {checkpoint_path}, starting from epoch {self.start_epoch}")
+
     def train(self):
-        for epoch in range(self.epochs):
+        for epoch in range(self.start_epoch, self.epochs):
             self.model.train()
             running_loss = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
@@ -164,6 +173,9 @@ class Trainer:
 
             # Scheduler step based on training loss
             self.scheduler.step(loss.item())
+
+            # Save checkpoint at the end of each epoch
+            self.save_model(epoch + 1, len(self.train_loader))
 
             # Validate, save model, and close the progress bar after the epoch ends
             # val_loss, outputs, labels = self.validate()
@@ -236,6 +248,15 @@ class Trainer:
                 writer.writerow([f"corresponding labels:\n {sample_labels}"])
 
     def save_model(self, epoch, iteration):
+        checkpoint_path = os.path.join(self.results_path, f'{self.model_name}_checkpoint.pth')
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+        }, checkpoint_path)
+        print(f"Saved checkpoint to {checkpoint_path}")
+
         if isinstance(self.model, ActionExtractionCNN):
             torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_cnn-{epoch}-{iteration}.pth'))
             torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
