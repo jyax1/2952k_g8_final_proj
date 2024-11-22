@@ -4,7 +4,7 @@ import argparse
 from utils.utils import *
 from validation_visualization import *
 
-class PoseEstimator():
+class ActionIdentifier():
     def __init__(self, encoder, decoder):
         self.encoder = encoder
         self.decoder = decoder
@@ -18,22 +18,34 @@ class PoseEstimator():
     def forward(self, x):
         return self.decoder(self.encoder(x))
     
+def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in_channels, action_length, num_classes, num_mlp_layers):
+    model = ActionExtractionResNet(
+        resnet_version=resnet_version,
+        video_length=video_length,
+        in_channels=in_channels,
+        action_length=action_length,
+        num_classes=num_classes,
+        num_mlp_layers=num_mlp_layers
+    )
+
+    # Load the saved conv and mlp parts into the model
+    model.conv.load_state_dict(torch.load(conv_path))
+    model.mlp.load_state_dict(torch.load(mlp_path))
+
+    # Initialize ActionIdentifier with the loaded ActionExtractionResNet model
+    action_identifier = ActionIdentifier(encoder=model.conv, decoder=model.mlp)
+    
+    return action_identifier
+    
 def validate_pose_estimator(args):
     architecture = 'direct_resnet_mlp'
-    match = re.search(r'res(\d+)', args.trained_model_name)
-    
-    if "_rgb_" in args.trained_model_name:
-        data_modality = 'rgb'
-    else:
-        data_modality = 'voxel'
+    data_modality = 'cropped_rgbd+color_mask'
         
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     batch_size = 100
 
-    if match:
-        resnet_layers_num = int(match.group(1))
-    else:
-        resnet_layers_num = 18
+    resnet_layers_num = 18
+    action_type = 'delta_position+gripper'
 
     model = load_model(
         architecture,
@@ -49,7 +61,7 @@ def validate_pose_estimator(args):
         fdm_model_name='',
         freeze_idm=None,
         freeze_fdm=None,
-        action_type='pose',
+        action_type=action_type,
         data_modality=data_modality # to be extracted
         )
     
