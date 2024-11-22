@@ -250,5 +250,16 @@
             "console": "integratedTerminal",
             "args": [ "--direct_model_name=direct_resnet_mlp_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_mlp-2-9156.pth"]
         },
+
+        {
+            "name": "process dataset actions to latent actions",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "process_dataset_actions_to_latent_actions.py",
+            "console": "integratedTerminal",
+            "args": [ "--dataset_path=/home/yilong/Documents/policy_data/lift/obs/lift_panda1000/lift_panda1000_raw.hdf5", 
+            "--encoder_model_path=results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth",
+            "--data_modality=cropped_rgbd+color_mask", "--action_type=delta_position+gripper", "--video_length=2"]
+        },
     ]
 }

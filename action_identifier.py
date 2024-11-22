@@ -46,10 +46,11 @@ def validate_pose_estimator(args):
 
     resnet_layers_num = 18
     action_type = 'delta_position+gripper'
+    video_length = 2
 
     model = load_model(
         architecture,
-        horizon=1,
+        horizon=video_length,
         results_path='',
         latent_dim=0,
         motion=False,
