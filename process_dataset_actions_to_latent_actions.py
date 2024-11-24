@@ -86,25 +86,34 @@ def process_dataset_actions_to_latent_actions(dataset_path, encoder, data_modali
                 for i, (demo, idx) in enumerate(zip(demos, indices)):
                     if current_demo is None:
                         current_demo = demo
+                        # Calculate correct dataset size
+                        sequence_length = len(f['data'][demo]['obs']['frontview_image'])
+                        action_length = sequence_length - (video_length - 1)
                         # Resize actions dataset for first demo
                         if demo in f['data']:
                             del f['data'][demo]['actions']
-                        f['data'][demo].create_dataset('actions', shape=(len(f['data'][demo]['obs']['frontview_image']), latent_dim), dtype=np.float32)
+                        f['data'][demo].create_dataset('actions', shape=(action_length, latent_dim), dtype=np.float32)
                     
                     if demo != current_demo:
                         # Write accumulated actions
                         actions_dset = f['data'][current_demo]['actions']
                         for action, idx in zip(current_actions, current_indices):
-                            actions_dset[idx] = action
+                            if idx < len(actions_dset):  # Verify index is in bounds
+                                actions_dset[idx] = action
+                            else:
+                                print(f"Warning: Skipping out of bounds index {idx} for demo {current_demo}")
                         
                         # Reset for new demo
                         current_demo = demo
                         current_actions = []
                         current_indices = []
-                        # Resize actions dataset for new demo
+                        # Calculate correct dataset size for new demo
+                        sequence_length = len(f['data'][demo]['obs']['frontview_image'])
+                        action_length = sequence_length - (video_length - 1)
+                        # Resize actions dataset
                         if demo in f['data']:
                             del f['data'][demo]['actions']
-                        f['data'][demo].create_dataset('actions', shape=(len(f['data'][demo]['obs']['frontview_image']), latent_dim), dtype=np.float32)
+                        f['data'][demo].create_dataset('actions', shape=(action_length, latent_dim), dtype=np.float32)
                     
                     current_actions.append(latent_actions[i])
                     current_indices.append(idx)
@@ -113,7 +122,10 @@ def process_dataset_actions_to_latent_actions(dataset_path, encoder, data_modali
             if current_demo is not None:
                 actions_dset = f['data'][current_demo]['actions']
                 for action, idx in zip(current_actions, current_indices):
-                    actions_dset[idx] = action
+                    if idx < len(actions_dset):  # Verify index is in bounds
+                        actions_dset[idx] = action
+                    else:
+                        print(f"Warning: Skipping out of bounds index {idx} for demo {current_demo}")
     
     print(f"Created new dataset with latent actions at: {new_dataset_path}")
 
