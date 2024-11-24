@@ -1,6 +1,6 @@
 import argparse
-from utils.utils import *
-from config import ARCHITECTURES
+from ..utils.utils import *
+from ..config import ARCHITECTURES
 import torch
 import matplotlib.pyplot as plt
 from torchvision.utils import save_image

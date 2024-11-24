@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from datasets import BaseDataset
+from ..datasets import BaseDataset
 from einops import rearrange
 from tqdm import tqdm
 import shutil
@@ -131,7 +131,7 @@ def process_dataset_actions_to_latent_actions(dataset_path, encoder, data_modali
 
 if __name__ == "__main__":
     import argparse
-    from utils.utils import load_model
+    from ..utils.utils import load_model
 
     parser = argparse.ArgumentParser(description="Process dataset actions to latent actions")
     parser.add_argument('--dataset_path', type=str, required=True, help='Path to the HDF5 dataset')
