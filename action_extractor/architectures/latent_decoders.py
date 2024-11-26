@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from architectures.latent_encoders import FramesConvolution, FDM
-from architectures.direct_cnn_vit import ActionTransformer, ActionTransformerMLP
-from architectures.utils import resnet_builder
+from .latent_encoders import FramesConvolution, FDM
+from .direct_cnn_vit import ActionTransformer, ActionTransformerMLP
+from .utils import resnet_builder
 
 class LatentDecoderMLP(nn.Module):
     def __init__(self, idm_model_path, latent_dim=16, video_length=2, latent_length=1, mlp_layers=3):

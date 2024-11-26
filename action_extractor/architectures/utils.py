@@ -1,4 +1,4 @@
-from architectures.direct_resnet_mlp import BasicBlock, Bottleneck, ResNet
+from .direct_resnet_mlp import BasicBlock, Bottleneck, ResNet
 
 def center_crop(tensor, output_size=112):
     '''

@@ -9,6 +9,7 @@ import os
 from PIL import Image
 import numpy as np
 import concurrent.futures
+import importlib.resources
 
 
 def hdf5_to_zarr(hdf5_path):
@@ -620,6 +621,27 @@ def pose_inv(pose):
     pose_inv[:3, 3] = -pose_inv[:3, :3].dot(pose[:3, 3])
     pose_inv[3, 3] = 1.0
     return pose_inv
+
+# Load camera matrices using importlib.resources
+with importlib.resources.path('action_extractor.utils', 'frontview_matrices.npz') as frontview_path:
+    frontview_matrices = np.load(frontview_path)
+    frontview_K = frontview_matrices['K']  # Intrinsics
+    frontview_R = pose_inv(frontview_matrices['R'])  # Extrinsics
+
+with importlib.resources.path('action_extractor.utils', 'sideview_matrices.npz') as sideview_path:
+    sideview_matrices = np.load(sideview_path)
+    sideview_K = sideview_matrices['K']
+    sideview_R = pose_inv(sideview_matrices['R'])
+
+with importlib.resources.path('action_extractor.utils', 'agentview_matrices.npz') as agentview_path:
+    agentview_matrices = np.load(agentview_path)
+    agentview_K = agentview_matrices['K']
+    agentview_R = pose_inv(agentview_matrices['R'])
+
+with importlib.resources.path('action_extractor.utils', 'sideagentview_matrices.npz') as sideagentview_path:
+    sideagentview_matrices = np.load(sideagentview_path)
+    sideagentview_K = sideagentview_matrices['K']
+    sideagentview_R = pose_inv(sideagentview_matrices['R'])
 
 
 def save_image_to_debug(image, filename="image.png"):

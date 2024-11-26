@@ -261,5 +261,32 @@
             "--encoder_model_path=results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth",
             "--data_modality=cropped_rgbd+color_mask", "--action_type=delta_position+gripper", "--video_length=2"]
         },
+        
+        // python train.py  --epoch 50 --batch_size 1632 -rln 18 --horizon 2 --data_modality cropped_rgbd+color_mask --action_type delta_position+gripper --note iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632 --cameras frontview_image,sideview_image --learning_rate 0.001 --num_mlp_layers 3 --val_demo_percentage 0.9 --demo_percentage 0.9 --standardize_data --coordinate_system global --cosine_similarity_loss
+
+
+        {
+            "name": "debug frontside",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "action_extractor/train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp",
+            "--epoch=50",
+            "--batch_size=16",
+            "-rln=18",
+            "--horizon=2",
+            "--data_modality=cropped_rgbd+color_mask",
+            "--action_type=delta_position+gripper",
+            "--note=iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632",
+            "--cameras=frontview_image,sideview_image",
+            "--learning_rate=0.001",
+            "--num_mlp_layers=3",
+            "--val_demo_percentage=0.9",
+            "--demo_percentage=0.9",
+            "--coordinate_system=global",
+            "--cosine_similarity_loss"
+        ]
+        }
     ]
 }

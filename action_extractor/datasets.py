@@ -1,29 +1,17 @@
-from torch.utils.data import Dataset
 import os
-from glob import glob
+import numpy as np
 import torch
+from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
+from action_extractor.utility_scripts.validation_visualization import *
+from action_extractor.utils.dataset_utils import *
+
+from torch.utils.data import Dataset
+from glob import glob
 from einops import rearrange
 import zarr
 from torchvideotransforms import video_transforms, volume_transforms
-from utils.dataset_utils import *
 import numpy as np
 from tqdm import tqdm
-
-frontview_matrices = np.load('utils/frontview_matrices.npz')
-frontview_K = frontview_matrices['K'] # Intrinsics
-frontview_R = pose_inv(frontview_matrices['R']) # Extrinsics
-
-sideview_matrices = np.load('utils/sideview_matrices.npz')
-sideview_K = sideview_matrices['K'] # Intrinsics
-sideview_R = pose_inv(sideview_matrices['R']) # Extrinsics
-
-agentview_matrices = np.load('utils/agentview_matrices.npz')
-agentview_K = agentview_matrices['K'] # Intrinsics
-agentview_R = pose_inv(agentview_matrices['R']) # Extrinsics
-
-sideagentview_matrices = np.load('utils/sideagentview_matrices.npz')
-sideagentview_K = sideagentview_matrices['K'] # Intrinsics
-sideagentview_R = pose_inv(sideagentview_matrices['R']) # Extrinsics
 
 class BaseDataset(Dataset):
     def __init__(self, path='../datasets/', 

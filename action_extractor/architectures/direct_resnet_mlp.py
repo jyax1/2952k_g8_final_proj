@@ -146,7 +146,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x) # [b, 512, 1, 1], [b, 2048, 1, 1]
         return x
 
-from architectures.utils import resnet_builder
+from .utils import resnet_builder
 
 class ActionExtractionResNet(nn.Module):
     def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, action_length=1, num_classes=7, num_mlp_layers=3):

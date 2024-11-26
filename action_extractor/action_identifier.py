@@ -1,37 +1,22 @@
 import argparse
 import numpy as np
 import torch
-from utils.utils import *
-from validation_visualization import *
-from utils.dataset_utils import *
+import torch.nn as nn
+from .utils.utils import *
+from .utility_scripts.validation_visualization import *
+from .utils.dataset_utils import frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
 
-# Load camera matrices
-frontview_matrices = np.load('utils/frontview_matrices.npz')
-frontview_K = frontview_matrices['K']  # Intrinsics
-frontview_R = pose_inv(frontview_matrices['R'])  # Extrinsics
-
-sideview_matrices = np.load('utils/sideview_matrices.npz')
-sideview_K = sideview_matrices['K']  # Intrinsics
-sideview_R = pose_inv(sideview_matrices['R'])  # Extrinsics
-
-agentview_matrices = np.load('utils/agentview_matrices.npz')
-agentview_K = agentview_matrices['K']  # Intrinsics
-agentview_R = pose_inv(agentview_matrices['R'])  # Extrinsics
-
-sideagentview_matrices = np.load('utils/sideagentview_matrices.npz')
-sideagentview_K = sideagentview_matrices['K']  # Intrinsics
-sideagentview_R = pose_inv(sideagentview_matrices['R'])  # Extrinsics
-
-class ActionIdentifier():
-    def __init__(self, encoder, decoder, stats_path='action_statistics_delta_position+gripper.npz', 
+class ActionIdentifier(nn.Module):
+    def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
                  coordinate_system='global', camera_name='frontview'):
+        super(ActionIdentifier, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         
         # Load standardization stats
         stats = np.load(stats_path)
-        self.action_mean = stats['action_mean']
-        self.action_std = stats['action_std']
+        self.action_mean = torch.tensor(stats['action_mean'], dtype=torch.float32)
+        self.action_std = torch.tensor(stats['action_std'], dtype=torch.float32)
         
         # Set coordinate system and camera parameters  
         self.coordinate_system = coordinate_system
@@ -48,7 +33,7 @@ class ActionIdentifier():
             self.R = sideagentview_R
         else:
             raise ValueError(f"Unknown camera name: {camera_name}")
-        
+    
     def forward_conv(self, x):
         return self.encoder(x)
     
@@ -56,7 +41,7 @@ class ActionIdentifier():
         action = self.decoder(x)
         
         # Unstandardize
-        action = action * self.action_std + self.action_mean
+        action = action * self.action_std.to(action.device) + self.action_mean.to(action.device)
         
         # Convert to global coordinates if needed
         if self.coordinate_system in ['camera', 'disentangled']:
@@ -65,8 +50,9 @@ class ActionIdentifier():
         return action
     
     def forward(self, x):
-            
-        return self.forward_mlp(self.forward_conv(x))
+        x = self.forward_conv(x)
+        x = torch.flatten(x, 1)
+        return self.forward_mlp(x)
     
     def transform_to_global(self, action):
         # Extract position component (first 3 dimensions) and other components
@@ -95,6 +81,7 @@ def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in
                          action_length, num_classes, num_mlp_layers, 
                          stats_path='action_statistics_delta_position+gripper.npz',
                          coordinate_system='global', camera_name='frontview'):
+    
     model = ActionExtractionResNet(
         resnet_version=resnet_version,
         video_length=video_length,
@@ -115,7 +102,6 @@ def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in
         stats_path=stats_path,
         coordinate_system=coordinate_system,
         camera_name=camera_name,
-        R=R
     )
     
     return action_identifier

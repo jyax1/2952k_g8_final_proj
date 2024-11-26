@@ -45,7 +45,11 @@ class DeltaControlLoss(nn.Module):
 
         # Total loss
         total_loss = vector_loss + mse_loss_gripper
-        return total_loss
+
+        # Compute deviations in each axis
+        deviations = pred_direction_normalized - target_direction_normalized
+
+        return total_loss, deviations
 
 class Trainer:
     def __init__(self, 
@@ -135,7 +139,7 @@ class Trainer:
 
                 self.optimizer.zero_grad()
                 outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
+                loss, deviations = self.criterion(outputs, labels)
                 self.accelerator.backward(loss)
                 self.optimizer.step()
 
@@ -150,20 +154,27 @@ class Trainer:
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
 
-                # Log gradients and absolute weigths to TensorBoard to monitor vanishing/exploding gradients
+                # Log deviations to TensorBoard
+                self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
+                self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
+                self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
+
+                # Log gradients and absolute weights to TensorBoard to monitor vanishing/exploding gradients
                 for name, param in self.model.named_parameters():
                     if param.grad is not None:
                         self.writer.add_histogram(f'Gradients/{name}', param.grad, step)
                     self.writer.add_histogram(f'Weights/{name}', param.data.abs(), step)
 
-
                 if validate_every != 0 and i % validate_every == validate_every - 1:
-                    val_loss, outputs, labels = self.validate()
+                    val_loss, outputs, labels, val_deviations = self.validate()
                     self.model.train()  # Return model to train mode after validation
                     self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
-                    # Log validation loss to TensorBoard
+                    # Log validation loss and deviations to TensorBoard
                     self.writer.add_scalar('Validation Loss', val_loss, step)
+                    self.writer.add_scalar('Validation Deviation/X', val_deviations[0].mean().item(), step)
+                    self.writer.add_scalar('Validation Deviation/Y', val_deviations[1].mean().item(), step)
+                    self.writer.add_scalar('Validation Deviation/Z', val_deviations[2].mean().item(), step)
 
                 if save_model_every != 0 and i % save_model_every == save_model_every - 1:
                     self.save_model(epoch + 1, i + 1)
@@ -177,11 +188,6 @@ class Trainer:
             # Save checkpoint at the end of each epoch
             self.save_model(epoch + 1, len(self.train_loader))
 
-            # Validate, save model, and close the progress bar after the epoch ends
-            # val_loss, outputs, labels = self.validate()
-            # print(f'Epoch [{epoch + 1}/{self.epochs}], Validation Loss: {val_loss:.4f}')
-            # self.save_validation(val_loss, outputs, labels, epoch + 1, len(self.train_loader) + 1, end_of_epoch=True)
-            # self.save_model(epoch + 1, len(self.train_loader) + 1)
             epoch_progress.close()
 
         # Close the TensorBoard writer when training is complete
@@ -216,8 +222,8 @@ class Trainer:
     def validate(self):
         self.model.eval()
         total_val_loss = 0.0
+        all_deviations = []
         with torch.no_grad():
-            
             for inputs, labels in tqdm(self.validation_loader, desc="Validating", leave=False):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
@@ -226,10 +232,12 @@ class Trainer:
                     outputs = self.recover_action_vector(outputs)
                     labels = self.recover_action_vector(labels)
                     
-                loss = self.criterion(outputs, labels)
+                loss, deviations = self.criterion(outputs, labels)
                 total_val_loss += loss.item()
+                all_deviations.append(deviations)
 
-        return total_val_loss / len(self.validation_loader), outputs, labels
+        avg_deviations = torch.cat(all_deviations).mean(dim=0)
+        return total_val_loss / len(self.validation_loader), outputs, labels, avg_deviations
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         if end_of_epoch:
