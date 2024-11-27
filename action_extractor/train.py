@@ -17,7 +17,7 @@ else:
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
-    vp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
+    vp = '/home/yilong/Documents/policy_data/lift/validate'
     # vp = '/home/yilong/Documents/policy_data/lift/obs'
     b = 16
     rp = '/home/yilong/Documents/action_extractor/results'

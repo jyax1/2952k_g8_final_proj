@@ -5,12 +5,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from accelerate import Accelerator
-from architectures.direct_cnn_mlp import ActionExtractionCNN
-from architectures.direct_cnn_vit import ActionExtractionViT
-from architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
-from architectures.latent_decoders import *
-from architectures.direct_resnet_mlp import ActionExtractionResNet
-from architectures.resnet import ResNet3D
+from action_extractor.architectures.direct_cnn_mlp import ActionExtractionCNN
+from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
+from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
+from action_extractor.architectures.latent_decoders import *
+from action_extractor.architectures.direct_resnet_mlp import ActionExtractionResNet
+from action_extractor.architectures.resnet import ResNet3D
 import csv
 from tqdm import tqdm
 from utils.utils import check_dataset
@@ -46,8 +46,8 @@ class DeltaControlLoss(nn.Module):
         # Total loss
         total_loss = vector_loss + mse_loss_gripper
 
-        # Compute deviations in each axis
-        deviations = pred_direction_normalized - target_direction_normalized
+        # Compute absolute deviations in each axis
+        deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
 
         return total_loss, deviations
 
@@ -154,7 +154,7 @@ class Trainer:
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
 
-                # Log deviations to TensorBoard
+                # Log mean of absolute deviations to TensorBoard
                 self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
                 self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
                 self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
@@ -170,7 +170,7 @@ class Trainer:
                     self.model.train()  # Return model to train mode after validation
                     self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
-                    # Log validation loss and deviations to TensorBoard
+                    # Log validation loss and mean of absolute values deviations to TensorBoard
                     self.writer.add_scalar('Validation Loss', val_loss, step)
                     self.writer.add_scalar('Validation Deviation/X', val_deviations[0].mean().item(), step)
                     self.writer.add_scalar('Validation Deviation/Y', val_deviations[1].mean().item(), step)

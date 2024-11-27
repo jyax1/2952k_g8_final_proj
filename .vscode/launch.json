@@ -278,7 +278,7 @@
             "--horizon=2",
             "--data_modality=cropped_rgbd+color_mask",
             "--action_type=delta_position+gripper",
-            "--note=iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632",
+            "--note=debug-frontside",
             "--cameras=frontview_image,sideview_image",
             "--learning_rate=0.001",
             "--num_mlp_layers=3",
