@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from ..datasets import BaseDataset
+from action_extractor.datasets import BaseDataset
 from einops import rearrange
 from tqdm import tqdm
 import shutil
@@ -134,13 +134,18 @@ if __name__ == "__main__":
     from ..utils.utils import load_model
 
     parser = argparse.ArgumentParser(description="Process dataset actions to latent actions")
-    parser.add_argument('--dataset_path', type=str, required=True, help='Path to the HDF5 dataset')
-    parser.add_argument('--encoder_model_path', type=str, required=True, help='Path to the encoder model')
-    parser.add_argument('--data_modality', type=str, required=True, 
-                      choices=['cropped_rgbd+color_mask', 'cropped_rgbd+color_mask_depth'],
-                      help='Data modality to process')
-    parser.add_argument('--action_type', type=str, required=True, help='Type of action to process')
-    parser.add_argument('--video_length', type=int, required=True, help='Length of video sequence')
+    parser.add_argument('--dataset_path', type=str, 
+                        default='/home/yilong/Documents/policy_data/lift/obs_policy/lift_panda1000_policy_obs.hdf5',
+                        required=True, help='Path to the HDF5 dataset')
+    parser.add_argument('--encoder_model_path', type=str,
+                        default='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-53-353.pth',
+                        required=True, help='Path to the encoder model')
+    parser.add_argument('--data_modality', type=str, required=True,
+                        defult='cropped_rgbd+color_mask', 
+                        choices=['cropped_rgbd+color_mask', 'cropped_rgbd+color_mask_depth'],
+                        help='Data modality to process')
+    parser.add_argument('--action_type', type=str, required=False, help='Type of action to process')
+    parser.add_argument('--video_length', type=int, default=2, required=True, help='Length of video sequence')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for processing')
     parser.add_argument('--cameras', type=str, nargs='+', default=['frontview_image', 'sideview_image'], help='Camera views to process')
 

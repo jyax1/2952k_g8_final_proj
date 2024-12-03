@@ -2,9 +2,9 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from .utils.utils import *
-from .utility_scripts.validation_visualization import *
-from .utils.dataset_utils import frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
+from action_extractor.architectures import ActionExtractionResNet
+from action_extractor.utils.utils import load_model, load_trained_model, load_datasets, validate_and_record
+from action_extractor.utils.dataset_utils import frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
 
 class ActionIdentifier(nn.Module):
     def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
@@ -92,8 +92,15 @@ def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in
     )
 
     # Load the saved conv and mlp parts into the model
-    model.conv.load_state_dict(torch.load(conv_path))
-    model.mlp.load_state_dict(torch.load(mlp_path))
+    if conv_path != None:
+        model.conv.load_state_dict(torch.load(conv_path))
+    else:
+        model.conv = None
+        
+    if mlp_path != None:
+        model.mlp.load_state_dict(torch.load(mlp_path))
+    else:
+        model.mlp = None
 
     # Initialize ActionIdentifier with the loaded ActionExtractionResNet model
     action_identifier = ActionIdentifier(

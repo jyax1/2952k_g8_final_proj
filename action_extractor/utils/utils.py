@@ -1,4 +1,4 @@
-from datasets import *
+from action_extractor.datasets import *
 from action_extractor.architectures.direct_cnn_mlp import ActionExtractionCNN, PoseExtractionCNN3D
 from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
 from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet

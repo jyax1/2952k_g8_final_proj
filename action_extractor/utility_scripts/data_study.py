@@ -4,7 +4,7 @@ import numpy as np
 import seaborn as sns
 import os
 
-from ..datasets import DatasetVideo2Action
+from action_extractor.datasets import DatasetVideo2Action
 
 os.makedirs("debug", exist_ok=True)
 
