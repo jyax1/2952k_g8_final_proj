@@ -2,7 +2,6 @@ import os
 import numpy as np
 import torch
 from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
-from action_extractor.utility_scripts.validation_visualization import *
 from action_extractor.utils.dataset_utils import *
 
 from torch.utils.data import Dataset
@@ -429,6 +428,7 @@ class DatasetVideo2VideoAndAction(BaseDataset):
 
 
 if __name__ == "__main__":
+    from action_extractor.utility_scripts.validation_visualization import visualize_visible_points
     DEPTH_MINMAX = {'birdview_depth': [1.180, 2.480],
                 'agentview_depth': [0.1, 1.1],
                 'sideagentview_depth': [0.1, 1.1],

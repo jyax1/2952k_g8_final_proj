@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from action_extractor.architectures import ActionExtractionResNet
-from action_extractor.utils.utils import load_model, load_trained_model, load_datasets, validate_and_record
+from action_extractor.utils.utils import load_model, load_trained_model, load_datasets
+from action_extractor.utility_scripts import validate_and_record
 from action_extractor.utils.dataset_utils import frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
 
 class ActionIdentifier(nn.Module):
