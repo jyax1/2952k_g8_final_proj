@@ -99,6 +99,7 @@ class Trainer:
         # Initialize TensorBoard SummaryWriter
         self.writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard_logs', model_name))
         self.start_epoch = 0  # Initialize start_epoch
+        self.best_val_loss = float('inf')  # Initialize with infinity
 
     def get_optimizer(self, optimizer_name):
         """Return the optimizer based on the provided optimizer_name."""
@@ -130,11 +131,7 @@ class Trainer:
             running_loss = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
 
-            validate_every = len(self.train_loader) // 2
-            save_model_every = len(self.train_loader) // 2
-
             for i, (inputs, labels) in enumerate(self.train_loader):
-                self.model.train()
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
 
                 self.optimizer.zero_grad()
@@ -145,50 +142,30 @@ class Trainer:
 
                 running_loss += loss.item()
 
-                if i % 5 == 4:  # Update progress bar every 5 iterations
-                    avg_loss = running_loss / 5
-                    epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
-                    running_loss = 0.0
-
                 # Log training loss to TensorBoard
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
 
-                # Log mean of absolute deviations to TensorBoard
-                self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
-                self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
-                self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
-
-                # Log gradients and absolute weights to TensorBoard to monitor vanishing/exploding gradients
-                for name, param in self.model.named_parameters():
-                    if param.grad is not None:
-                        self.writer.add_histogram(f'Gradients/{name}', param.grad, step)
-                    self.writer.add_histogram(f'Weights/{name}', param.data.abs(), step)
-
-                if validate_every != 0 and i % validate_every == validate_every - 1:
-                    val_loss, outputs, labels, val_deviations = self.validate()
-                    self.model.train()  # Return model to train mode after validation
-                    self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
-
-                    # Log validation loss and mean of absolute values deviations to TensorBoard
-                    self.writer.add_scalar('Validation Loss', val_loss, step)
-                    self.writer.add_scalar('Validation Deviation/X', val_deviations[0].mean().item(), step)
-                    self.writer.add_scalar('Validation Deviation/Y', val_deviations[1].mean().item(), step)
-                    self.writer.add_scalar('Validation Deviation/Z', val_deviations[2].mean().item(), step)
-
-                if save_model_every != 0 and i % save_model_every == save_model_every - 1:
-                    self.save_model(epoch + 1, i + 1)
-
-                # Update tqdm progress bar
                 epoch_progress.update(1)
 
-            # Scheduler step based on training loss
-            self.scheduler.step(loss.item())
-
-            # Save checkpoint at the end of each epoch
-            self.save_model(epoch + 1, len(self.train_loader))
-
             epoch_progress.close()
+
+            # Perform validation after each epoch
+            val_loss, outputs, labels, avg_deviations = self.validate()
+
+            # Log validation loss to TensorBoard
+            self.writer.add_scalar('Validation Loss', val_loss, epoch)
+
+            # Learning rate scheduler step based on validation loss
+            self.scheduler.step(val_loss)
+
+            # Save the model if validation loss has decreased
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.save_model(epoch + 1)
+                print(f"Validation loss improved to {val_loss:.6f}. Model saved at epoch {epoch + 1}.")
+            else:
+                print(f"Validation loss did not improve at epoch {epoch + 1}.")
 
         # Close the TensorBoard writer when training is complete
         self.writer.close()
@@ -234,10 +211,11 @@ class Trainer:
                     
                 loss, deviations = self.criterion(outputs, labels)
                 total_val_loss += loss.item()
-                all_deviations.append(deviations)
+                all_deviations.append(deviations.cpu())
 
+        avg_val_loss = total_val_loss / len(self.validation_loader)
         avg_deviations = torch.cat(all_deviations).mean(dim=0)
-        return total_val_loss / len(self.validation_loader), outputs, labels, avg_deviations
+        return avg_val_loss, outputs, labels, avg_deviations
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         if end_of_epoch:
@@ -255,7 +233,7 @@ class Trainer:
                 writer.writerow([f"sample outputs:\n {sample_outputs}"])
                 writer.writerow([f"corresponding labels:\n {sample_labels}"])
 
-    def save_model(self, epoch, iteration):
+    def save_model(self, epoch):
         checkpoint_path = os.path.join(self.results_path, f'{self.model_name}_checkpoint.pth')
         torch.save({
             'epoch': epoch,
@@ -265,45 +243,46 @@ class Trainer:
         }, checkpoint_path)
         print(f"Saved checkpoint to {checkpoint_path}")
 
+        # Save model components based on the model type
         if isinstance(self.model, ActionExtractionCNN):
-            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_cnn-{epoch}-{iteration}.pth'))
-            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_cnn-{epoch}.pth'))
+            torch.save(self.model.action_mlp_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
 
         elif isinstance(self.model, ActionExtractionViT):
-            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_cnn-{epoch}-{iteration}.pth'))
-            torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_vit-{epoch}-{iteration}.pth'))
+            torch.save(self.model.frames_convolution_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_cnn-{epoch}.pth'))
+            torch.save(self.model.action_transformer_model.state_dict(), os.path.join(self.results_path, f'{self.model_name}_vit-{epoch}.pth'))
 
         elif isinstance(self.model, ActionExtractionResNet):
-            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
             
         elif isinstance(self.model, ResNet3D):
-            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
             
         elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
-            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
-            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}.pth'))
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}.pth'))
 
         elif isinstance(self.model, LatentDecoderMLP):
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}-{iteration}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
 
         elif isinstance(self.model, LatentDecoderTransformer):
-            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}-{iteration}.pth'))
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}-{epoch}.pth'))
 
         elif isinstance(self.model, LatentDecoderObsConditionedUNetMLP):
-            torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_unet-{epoch}-{iteration}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, f'{self.model_name}_unet-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
 
         elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetTransformer):
-            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
-            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
-            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}_transformer-{epoch}-{iteration}.pth'))
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}.pth'))
+            torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, f'{self.model_name}_transformer-{epoch}.pth'))
 
         elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetMLP):
-            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}-{iteration}.pth'))
-            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}-{iteration}.pth'))
-            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}-{iteration}.pth'))
+            torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fdm-{epoch}.pth'))
+            torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, f'{self.model_name}_idm-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
 
         else:
             print('Model not supported')
