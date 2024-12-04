@@ -1,12 +1,10 @@
 import os
+import shutil
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
-from action_extractor.datasets import BaseDataset
-from einops import rearrange
 from tqdm import tqdm
-import shutil
+from einops import rearrange
 import zarr
 
 from action_extractor.action_identifier import load_action_identifier
@@ -17,6 +15,7 @@ from action_extractor.utils.dataset_utils import frontview_R
 def process_dataset_actions_to_latent_actions(
     dataset_path,
     conv_path,
+    mlp_path,
     stats_path,
     data_modality='cropped_rgbd+color_mask',
     cameras=["frontview_image", "sideview_image"],
@@ -39,8 +38,11 @@ def process_dataset_actions_to_latent_actions(
         print(f"Converting {new_dataset_path} to Zarr format...")
         hdf5_to_zarr_parallel(new_dataset_path, max_workers=8)
 
-    # Open the Zarr dataset
+    # Open the Zarr dataset for reading observations
     root = zarr.open(zarr_path, mode='a')
+
+    # Open the HDF5 dataset for updating actions
+    hdf5_file = h5py.File(new_dataset_path, 'a')
 
     # Preprocess data if necessary
     all_cameras = ['frontview_image', 'sideview_image', 'agentview_image', 'sideagentview_image']
@@ -67,7 +69,7 @@ def process_dataset_actions_to_latent_actions(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     action_identifier = load_action_identifier(
         conv_path=conv_path,
-        mlp_path=None,
+        mlp_path=mlp_path,
         resnet_version='resnet18',
         video_length=video_length,
         in_channels=len(cameras) * 6,  # Adjusted for multiple cameras
@@ -111,32 +113,29 @@ def process_dataset_actions_to_latent_actions(
 
             # Infer action
             with torch.no_grad():
-                action = action_identifier(obs_tensor)
+                action = action_identifier.forward_conv(obs_tensor)
             inferred_actions.append(action.cpu().numpy().squeeze())
 
-        inferred_actions = np.array(inferred_actions)  # Shape: [num_samples - 1, action_dim]
+        inferred_actions.append(inferred_actions[-1]) # Repeat the last action to match the number of samples
+        inferred_actions = np.array(inferred_actions)  # Shape: [num_samples - video_length + 1, action_dim]
 
         # Normalize inferred actions if needed
         # Here you can add your normalization code if required
 
-        # Save inferred actions to the dataset
-        actions_path = root['data'][demo]['actions']
-        original_actions = actions_path[:]
-        # Ensure the inferred actions array matches the original in length
-        if inferred_actions.shape[0] < original_actions.shape[0]:
-            # Pad the inferred actions
-            pad = inferred_actions[-1]
-            inferred_actions = np.vstack([inferred_actions, pad])
-        elif inferred_actions.shape[0] > original_actions.shape[0]:
-            # Trim the inferred actions
-            inferred_actions = inferred_actions[:original_actions.shape[0]]
+        # Save inferred actions to the HDF5 dataset
+        actions_group = hdf5_file['data'][demo]
 
-        # Replace the actions in the dataset with the inferred actions
-        actions_path[:] = inferred_actions
+        # Delete the existing 'actions' dataset
+        if 'actions' in actions_group:
+            del actions_group['actions']
+
+        # Create a new 'actions' dataset with the inferred actions
+        actions_group.create_dataset('actions', data=inferred_actions)
+
         print(f"Updated actions for {demo}")
 
-    # Close the Zarr root
-    root.close()
+    # Close HDF5 datasets
+    hdf5_file.close()
 
     print("Processing complete.")
 
@@ -168,5 +167,6 @@ if __name__ == "__main__":
     process_dataset_actions_to_latent_actions(
         dataset_path=args.dataset_path,
         conv_path=args.encoder_model_path,
+        mlp_path=None,
         stats_path=args.stats_path
     )

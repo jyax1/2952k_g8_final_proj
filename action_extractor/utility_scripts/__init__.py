@@ -8,5 +8,4 @@ __all__ = [
     'process_dataset_actions_to_latent_actions',
     'visualize',
     'copy_n_demos',
-    'validate_and_record'
 ]

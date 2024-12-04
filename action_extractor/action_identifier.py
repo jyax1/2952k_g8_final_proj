@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 from action_extractor.architectures import ActionExtractionResNet
 from action_extractor.utils.utils import load_model, load_trained_model, load_datasets
-from action_extractor.utility_scripts import validate_and_record
-from action_extractor.utils.dataset_utils import frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
 
 class ActionIdentifier(nn.Module):
     def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
@@ -24,6 +22,7 @@ class ActionIdentifier(nn.Module):
         self.camera_name = camera_name
         
         # Select appropriate camera matrix based on camera_name
+        from action_extractor.utils.dataset_utils import frontview_R, sideview_R, agentview_R, sideagentview_R
         if camera_name == 'frontview':
             self.R = frontview_R
         elif camera_name == 'sideview':
@@ -160,6 +159,7 @@ def validate_pose_estimator(args):
         data_modality=data_modality
         )
     
+    from action_extractor.utility_scripts.validation_visualization import validate_and_record
     validate_and_record(trained_model, validation_set, args.trained_model_name[:-4], batch_size, device)
         
 if __name__ == '__main__':
