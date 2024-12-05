@@ -149,8 +149,8 @@ class Trainer:
 
                 # Log training loss to TensorBoard
                 step = epoch * len(self.train_loader) + i
-                self.writer.add_scalar('Training Loss', loss.item(), step)
                 
+                self.writer.add_scalar('Training Loss', loss.item(), step)               
                 self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
                 self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
                 self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
@@ -161,6 +161,8 @@ class Trainer:
 
             # Perform validation after each epoch
             val_loss, outputs, labels, avg_deviations = self.validate()
+            
+            self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
             # Log validation loss to TensorBoard
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
