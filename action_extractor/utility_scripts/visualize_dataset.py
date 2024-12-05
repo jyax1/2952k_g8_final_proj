@@ -12,7 +12,7 @@ from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 import robomimic.utils.obs_utils as ObsUtils
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
-
+from moviepy.editor import VideoFileClip, clips_array
 
 latent_action = True
 
@@ -98,12 +98,8 @@ def visualize_latent_action_dataset_as_video():
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create the environment_camera0
-    env_camera0 = create_env_from_metadata(
-        env_meta=env_meta,
-        render_offscreen=True
-    )
-    # Wrap with VideoRecordingWrapper
+    # Create environments for both cameras
+    env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
@@ -120,13 +116,8 @@ def visualize_latent_action_dataset_as_video():
         mode='rgb_array',
         camera_name=cameras[0].split('_')[0]
     )
-    
-    # Create the environment
-    env_camera1 = create_env_from_metadata(
-        env_meta=env_meta,
-        render_offscreen=True
-    )
-    # Wrap with VideoRecordingWrapper
+
+    env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
         env_camera1,
         video_recoder=VideoRecorder.create_h264(
@@ -160,65 +151,76 @@ def visualize_latent_action_dataset_as_video():
     ).to(device)
     action_identifier.eval()
 
-    # Open the HDF5 file
     with h5py.File(latent_hdf5_file_path, 'r') as root:
-        
         i = 0
-        # Iterate over each demo
         for demo in tqdm(root['data']):
-            if i == 5:
+            if i == 30:
                 break
-            
+
             latent_actions_dataset = root["data"][demo]["actions"][:-1]
-            
-            # Convert latent_actions_dataset to Torch tensor
             latent_actions_dataset = torch.from_numpy(latent_actions_dataset).float().to(device)
-            
             latent_actions_dataset = latent_actions_dataset.unsqueeze(1)
-            
-            # Reset environment to initial state from dataset
+
             initial_state = root["data"][demo]["states"][0]
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
-            
+
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
 
             # Set up video recording
-            env_camera0.file_path = os.path.join(latent_output_dir, f'{demo}_left.mp4')
-            env_camera0.step_count = 0  # Reset the step counter
-            
-            env_camera1.file_path = os.path.join(latent_output_dir, f'{demo}_right.mp4')
-            env_camera1.step_count = 0  # Reset the step counter
-            
+            left_video_path = os.path.join(latent_output_dir, f'{demo}_left.mp4')
+            env_camera0.file_path = left_video_path
+            env_camera0.step_count = 0
+
+            right_video_path = os.path.join(latent_output_dir, f'{demo}_right.mp4')
+            env_camera1.file_path = right_video_path
+            env_camera1.step_count = 0
+
             for j in range(len(latent_actions_dataset)):
                 true_action = action_identifier.forward_mlp(latent_actions_dataset[j])
-                
-                # Convert true_action to NumPy array
                 true_action = true_action.detach().cpu().numpy()
-                
                 true_action = np.insert(true_action, [3, 3, 3], 0.0)
-                
                 true_action_magnitude = np.linalg.norm(true_action[:3])
-                
                 true_action[:3] /= true_action_magnitude
-                
-                # true_action[:3] *= 5
-                
                 true_action[-1] = np.sign(true_action[-1])
-                
+
                 env_camera0.step(true_action)
                 env_camera1.step(true_action)
-                
-            env_camera0.video_recoder.stop()  # Ensure the video recorder stops
+
+            env_camera0.video_recoder.stop()
             env_camera0.file_path = None
-            
-            env_camera1.video_recoder.stop()  # Ensure the video recorder stops
+
+            env_camera1.video_recoder.stop()
             env_camera1.file_path = None
-                
+
+            # Combine the two videos side by side
+            combined_video_path = os.path.join(latent_output_dir, f'{demo}.mp4')
+
+            left_clip = VideoFileClip(left_video_path)
+            right_clip = VideoFileClip(right_video_path)
+
+            # Ensure both clips have the same duration
+            min_duration = min(left_clip.duration, right_clip.duration)
+            left_clip = left_clip.subclip(0, min_duration)
+            right_clip = right_clip.subclip(0, min_duration)
+
+            # Create a side-by-side video
+            combined_clip = clips_array([[left_clip, right_clip]])
+
+            # Write the combined video to file
+            combined_clip.write_videofile(combined_video_path, fps=20)
+
+            # Close the video clips
+            left_clip.close()
+            right_clip.close()
+            combined_clip.close()
+
+            # Remove the original left and right videos
+            os.remove(left_video_path)
+            os.remove(right_video_path)
+
             i += 1
-
-
 
 if __name__ == '__main__':
     

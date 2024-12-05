@@ -118,7 +118,7 @@ def load_model(architecture,
     elif architecture == 'direct_resnet_mlp':
         resnet_version = 'resnet' + str(resnet_layers_num)
         
-        if 'action' in action_type:
+        if 'action' in action_type and 'norot' not in action_type:
             num_classes = 7
         elif action_type == 'position' or action_type == 'delta_position':
             num_classes = 3
@@ -126,7 +126,7 @@ def load_model(architecture,
             num_classes = 9
         elif action_type == 'position+gripper':
             num_classes = 5
-        elif action_type == 'delta_position+gripper':
+        elif action_type == 'delta_position+gripper' or action_type == 'delta_action_norot':
             num_classes = 4
         
         if data_modality == 'voxel' or data_modality == 'rgbd' or data_modality == 'cropped_rgbd':

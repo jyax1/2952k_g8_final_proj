@@ -141,10 +141,19 @@ class Trainer:
                 self.optimizer.step()
 
                 running_loss += loss.item()
+                
+                if i % 5 == 4:  # Update progress bar every 5 iterations
+                    avg_loss = running_loss / 5
+                    epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
+                    running_loss = 0.0
 
                 # Log training loss to TensorBoard
                 step = epoch * len(self.train_loader) + i
                 self.writer.add_scalar('Training Loss', loss.item(), step)
+                
+                self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
+                self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
+                self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
 
                 epoch_progress.update(1)
 
@@ -155,6 +164,9 @@ class Trainer:
 
             # Log validation loss to TensorBoard
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
+            self.writer.add_scalar('Validation Deviation/X', avg_deviations[0].mean().item(), step)
+            self.writer.add_scalar('Validation Deviation/Y', avg_deviations[1].mean().item(), step)
+            self.writer.add_scalar('Validation Deviation/Z', avg_deviations[2].mean().item(), step)
 
             # Learning rate scheduler step based on validation loss
             self.scheduler.step(val_loss)

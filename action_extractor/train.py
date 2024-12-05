@@ -260,7 +260,7 @@ if __name__ == '__main__':
         '--action_type',
         type=str,
         default='absolute_action',
-        choices=['delta_action', 'absolute_action', 'position', 'delta_position', 'position+gripper', 'delta_position+gripper', 'pose', 'delta_pose'],
+        choices=['delta_action', 'delta_action_norot', 'absolute_action', 'position', 'delta_position', 'position+gripper', 'delta_position+gripper', 'pose', 'delta_pose'],
         help='Type of action representation to use'
     )
     parser.add_argument(

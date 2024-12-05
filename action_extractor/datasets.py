@@ -146,7 +146,11 @@ class BaseDataset(Dataset):
 
                             gripper_diff = gripper_qpos_next - gripper_qpos  # Shape: (2,)
                             action = np.concatenate([pos_diff, quat_diff, gripper_diff])
-                            
+                    
+                    elif self.action_type == 'delta_action_norot':
+                        action = data['actions'][i]
+                        action = np.delete(action, [3, 4, 5])
+                    
                     else:
                         action = data['actions'][i]
                     
@@ -315,6 +319,10 @@ class DatasetVideo2Action(BaseDataset):
         if self.action_type == 'delta_action':
             actions = np.concatenate(actions_seq)  # Current logic for delta_action
             
+        if self.action_type == 'delta_action_norot':
+            actions_seq = [np.delete(action, [3, 4, 5]) for action in actions_seq]
+            actions = np.concatenate(actions_seq)
+                
         elif self.action_type == 'absolute_action':
             # One-to-one mapping of actions to each frame (no need to skip the last frame)
             actions_seq = [root['data'][demo]['actions'][index + i * (self.frame_skip + 1)] for i in range(self.video_length)]
@@ -341,10 +349,6 @@ class DatasetVideo2Action(BaseDataset):
             actions_seq_next = [root['data'][demo]['obs'][position][index + (i+1) * (self.frame_skip + 1)] for i in range(self.video_length-1)]
             actions_diff = [actions_seq_next[i] - actions_seq[i] for i in range(len(actions_seq))]
             actions = np.array([np.append(actions_diff[i], gripper_actions[i]) for i in range(len(actions_diff))])
-            
-            if isinstance(self.action_mean, np.ndarray) and isinstance(self.action_std, np.ndarray):
-                self.action_mean[-1] = 0.
-                self.action_std[-1] = 1.
 
         elif self.action_type == 'pose':
             for i in range(self.video_length):
@@ -377,15 +381,18 @@ class DatasetVideo2Action(BaseDataset):
             actions = np.array(actions_seq)
 
         # If video_length == 1, return a flat action vector
-        if self.video_length == 1 or ('delta' in self.action_type and self.video_length == 2):
+        if self.video_length == 1 or ('delta' in self.action_type and self.video_length == 2) and 'delta_action' not in self.action_type:
             actions = actions.squeeze(0)  # Remove the first dimension to make it (7)
 
         # Standardize actions if mean and std are computed
         if self.action_mean is not None and self.action_std is not None:
+            self.action_mean[-1] = 0. ###### Gripper action is always either -1 or 1, no need to standardize
+            self.action_std[-1] = 1.  ###### Gripper action is always either -1 or 1
+            
             actions = (actions - self.action_mean) / self.action_std
         
-        if self.action_type == 'delta_pose':
-            actions[-2:] *= 100
+        # if self.action_type == 'delta_pose':
+        #     actions[-2:] *= 100
 
         if self.data_modality != 'voxel':
             obs_seq = [torch.from_numpy(rearrange(obs, "h w c -> c h w")).float() for obs in obs_seq]

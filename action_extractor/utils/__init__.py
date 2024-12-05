@@ -1,6 +1,6 @@
 # action_extractor/utils/__init__.py
 from action_extractor.utils.dataset_utils import *
-from action_extractor.utils import *
+from action_extractor.utils.utils import *
 
 __all__ = [
     'load_model',

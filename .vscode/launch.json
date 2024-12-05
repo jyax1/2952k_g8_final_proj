@@ -15,7 +15,7 @@
             "name": "train direct_cnn_mlp ADAM",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=frontview_image"]
         },
@@ -23,7 +23,7 @@
             "name": "train direct_cnn_mlp SGD",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "--cameras=sideview_image", "--optimizer=sgd", "--momentum=0.9", "--learning_rate=0.001"]
         },
@@ -31,7 +31,7 @@
             "name": "train direct_cnn_mlp",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_cnn_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2"]
         },
@@ -39,7 +39,7 @@
             "name": "train direct_cnn_vit",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_cnn_vit", "--latent_dim=32", "--epoch=10", "--batch_size=50", "-ipm", "--horizon=2", "-vps=1"]
         },
@@ -47,7 +47,7 @@
             "name": "train direct_resnet_mlp rgbd",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=rgbd", "-dpc=1.0"]
         },
@@ -55,7 +55,7 @@
             "name": "train direct_resnet_mlp rgbd delta",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_pose", "--data_modality=rgbd", "-dpc=1.0"]
         },
@@ -63,7 +63,7 @@
             "name": "train direct_resnet_mlp color_mask_depth",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=color_mask_depth", "-dpc=1.0"]
         },
@@ -71,7 +71,7 @@
             "name": "train direct_resnet_mlp cropped_rgbd",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd", "-dpc=1.0"]
         },
@@ -79,7 +79,7 @@
             "name": "train direct_resnet_mlp cropped_rgbd+color_mask_depth",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=1", "--action_type=pose", "--data_modality=cropped_rgbd+color_mask_depth", "-dpc=1.0"]
         },
@@ -87,7 +87,7 @@
             "name": "train direct_resnet_mlp rgb bi_cameras",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--cameras=frontview_image,sideview_image", "--action_type=delta_position+gripper", "--data_modality=rgb", "-dpc=1.0"]
         },
@@ -95,7 +95,7 @@
             "name": "train direct_resnet_mlp color_mask_depth delta_position",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_position", "--data_modality=color_mask_depth", "-dpc=1.0"]
         },
@@ -103,7 +103,7 @@
             "name": "train direct_resnet_mlp color_mask_depth delta_position+gripper",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_position+gripper", "--data_modality=color_mask_depth", "-dpc=1.0"]
         },
@@ -111,7 +111,7 @@
             "name": "train direct_resnet_mlp color_mask_depth position disentangled",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", 
             "--horizon=1", "--action_type=position", "--standardize_data", "--coordinate_system=disentangled", "--data_modality=color_mask_depth", "-dpc=1.0"]
@@ -120,7 +120,7 @@
             "name": "train direct_resnet_mlp color_mask_depth delta",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=18", "--horizon=2", "--action_type=delta_pose", "--data_modality=color_mask_depth", "-dpc=1.0"]
         },
@@ -128,7 +128,7 @@
             "name": "train flownet2 rgbd",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=flownet2", "--epoch=10", "-fv=FlowNet2", "--horizon=1", "--action_type=pose", "--data_modality=rgbd"]
         },
@@ -136,7 +136,7 @@
             "name": "train direct_resnet_mlp voxel",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--action_type=pose", "--data_modality=voxel"]
         },
@@ -144,7 +144,7 @@
             "name": "train direct_resnet_mlp abs rgb",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=direct_resnet_mlp", "--epoch=10", "-rln=101", "--horizon=1", "--cameras=spaceview_image", "--action_type=absolute_pose", "--data_modality=rgb"]
         },
@@ -152,7 +152,7 @@
             "name": "train latent_encoder_resnet_unet",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_encoder_resnet_unet", "--epoch=10", "--batch_size=50", "-rln=18", "--horizon=2"]
         },
@@ -160,7 +160,7 @@
             "name": "train latent_encoder_cnn_unet",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_encoder_cnn_unet", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2"]
         },
@@ -168,7 +168,7 @@
             "name": "train latent_decoder_mlp cnn",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_cnn_unet_lat32_mFalse_ipmFalse_res50_vps8_fidmFalse_ffdmFalse_idm-3-4000.pth"]
         },
@@ -176,7 +176,7 @@
             "name": "train latent_decoder_mlp resnet",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_mlp", "--latent_dim=32", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
@@ -184,7 +184,7 @@
             "name": "train latent_decoder_vit",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
@@ -192,7 +192,7 @@
             "name": "train latent_decoder_obs_conditioned_unet_mlp",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_obs_conditioned_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=1", "--horizon=2", "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth"]
         },
@@ -200,7 +200,7 @@
             "name": "train latent_decoder_aux_separate_unet_vit",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_separate_unet_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
             "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-4000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res18_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-4000.pth"]
@@ -209,7 +209,7 @@
             "name": "train latent_decoder_aux_separate_unet_mlp",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_separate_unet_mlp", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
             "-idm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__idm-1-6000.pth", "-fdm=latent_encoder_resnet_unet_cam['frontview_image']_emb['']_lat32_res50_vps2_fidmFalse_ffdmFalse_optsgd_lr0.001_mmt0.9__fdm-1-6000.pth"]
@@ -218,7 +218,7 @@
             "name": "train latent_decoder_aux_combined_vit",
             "type": "debugpy",
             "request": "launch",
-            "program": "train.py",
+            "program": "action_extractor/train.py",
             "console": "integratedTerminal",
             "args": ["-a=latent_decoder_aux_combined_vit", "--latent_dim=4", "--epoch=10", "--batch_size=16", "--horizon=2", 
             "-idm=idm_latent_cnn_unet_lat_32_m_False_ipm_False-1-8000.pth", "-fdm=fdm_latent_cnn_unet_lat_32_m_False_ipm_False-1-8000.pth"]
@@ -262,7 +262,7 @@
             "--data_modality=cropped_rgbd+color_mask", "--action_type=delta_position+gripper", "--video_length=2"]
         },
         
-        // python train.py  --epoch 50 --batch_size 1632 -rln 18 --horizon 2 --data_modality cropped_rgbd+color_mask --action_type delta_position+gripper --note iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632 --cameras frontview_image,sideview_image --learning_rate 0.001 --num_mlp_layers 3 --val_demo_percentage 0.9 --demo_percentage 0.9 --standardize_data --coordinate_system global --cosine_similarity_loss
+        // python action_extractor/train.py  --epoch 50 --batch_size 1632 -rln 18 --horizon 2 --data_modality cropped_rgbd+color_mask --action_type delta_position+gripper --note iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632 --cameras frontview_image,sideview_image --learning_rate 0.001 --num_mlp_layers 3 --val_demo_percentage 0.9 --demo_percentage 0.9 --standardize_data --coordinate_system global --cosine_similarity_loss
 
 
         {
@@ -277,7 +277,7 @@
             "-rln=18",
             "--horizon=2",
             "--data_modality=cropped_rgbd+color_mask",
-            "--action_type=delta_position+gripper",
+            "--action_type=delta_action_norot",
             "--note=debug-frontside",
             "--cameras=frontview_image,sideview_image",
             "--learning_rate=0.001",
