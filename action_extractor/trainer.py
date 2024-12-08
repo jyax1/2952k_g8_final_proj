@@ -129,6 +129,7 @@ class Trainer:
         for epoch in range(self.start_epoch, self.epochs):
             self.model.train()
             running_loss = 0.0
+            running_deviation = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
 
             for i, (inputs, labels) in enumerate(self.train_loader):
@@ -141,19 +142,34 @@ class Trainer:
                 self.optimizer.step()
 
                 running_loss += loss.item()
-                
-                if i % 5 == 4:  # Update progress bar every 5 iterations
-                    avg_loss = running_loss / 5
-                    epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}'})
-                    running_loss = 0.0
+                running_deviation += deviations.mean().item()
 
-                # Log training loss to TensorBoard
+                # Log training loss and deviations to TensorBoard every iteration
                 step = epoch * len(self.train_loader) + i
-                
-                self.writer.add_scalar('Training Loss', loss.item(), step)               
+                self.writer.add_scalar('Training Loss', loss.item(), step)
                 self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
                 self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
                 self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
+
+                # Log weights and gradients to TensorBoard every 5 iterations
+                if (i + 1) % 5 == 0:
+                    # Average loss and deviation over the last 5 iterations
+                    avg_loss = running_loss / 5
+                    avg_deviation = running_deviation / 5
+                    running_loss = 0.0  # Reset running loss
+                    running_deviation = 0.0  # Reset running deviation
+
+                    # Update progress bar
+                    epoch_progress.set_postfix({'Loss': f'{avg_loss:.4f}', 'Deviation': f'{avg_deviation:.4f}'})
+
+                    # Log weights and gradients
+                    for name, param in self.model.named_parameters():
+                        if param.requires_grad:
+                            # Log weights
+                            self.writer.add_histogram(f'Weights/{name}', param.data.cpu().numpy(), step)
+                            # Log gradients
+                            if param.grad is not None:
+                                self.writer.add_histogram(f'Gradients/{name}', param.grad.data.cpu().numpy(), step)
 
                 epoch_progress.update(1)
 
@@ -161,14 +177,14 @@ class Trainer:
 
             # Perform validation after each epoch
             val_loss, outputs, labels, avg_deviations = self.validate()
-            
+
             self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
 
-            # Log validation loss to TensorBoard
+            # Log validation loss and deviations to TensorBoard
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
-            self.writer.add_scalar('Validation Deviation/X', avg_deviations[0].mean().item(), step)
-            self.writer.add_scalar('Validation Deviation/Y', avg_deviations[1].mean().item(), step)
-            self.writer.add_scalar('Validation Deviation/Z', avg_deviations[2].mean().item(), step)
+            self.writer.add_scalar('Validation Deviation/X', avg_deviations[0].mean().item(), epoch)
+            self.writer.add_scalar('Validation Deviation/Y', avg_deviations[1].mean().item(), epoch)
+            self.writer.add_scalar('Validation Deviation/Z', avg_deviations[2].mean().item(), epoch)
 
             # Learning rate scheduler step based on validation loss
             self.scheduler.step(val_loss)

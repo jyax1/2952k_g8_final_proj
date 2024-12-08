@@ -18,6 +18,7 @@ latent_action = True
 
 conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
 mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
+mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_action_norot-frontside-bs1632_mlp-24.pth'
 cameras=["frontview_image", "sideview_image"]
 stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz'
 
@@ -27,7 +28,7 @@ output_dir = '/home/yilong/Documents/action_extractor/debug/D_movement_iiwa200'
 output_format = 'mp4'  # Choose 'mp4' or 'webp'
 
 latent_hdf5_file_path = '/home/yilong/Documents/policy_data/lift/obs_policy/lift_panda1000_policy_obs_cropped_rgbd+color_mask.hdf5'
-latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda1000'
+latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda1000_delta_action_model'
 
 def visualize_action_dataset_as_videos():
     # Create the output directory if it doesn't exist

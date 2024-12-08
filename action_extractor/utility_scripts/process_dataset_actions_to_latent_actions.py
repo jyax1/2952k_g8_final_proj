@@ -148,16 +148,16 @@ if __name__ == "__main__":
                         default='/home/yilong/Documents/policy_data/lift/obs_policy/lift_panda1000_policy_obs.hdf5',
                         help='Path to the HDF5 dataset')
     parser.add_argument('--encoder_model_path', type=str,
-                        default='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-53-353.pth',
+                        default='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_action_norot-frontside-bs1632_resnet-46.pth',
                         help='Path to the encoder model')
     parser.add_argument('--data_modality', type=str,
                         default='cropped_rgbd+color_mask', 
                         choices=['cropped_rgbd+color_mask', 'cropped_rgbd+color_mask_depth'],
                         help='Data modality to process')
     parser.add_argument('--stats_path', type=str, 
-                        default='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
+                        default='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz', 
                         help='Path to the statistics file of the training set of the encoder_model')
-    parser.add_argument('--action_type', type=str, default='delta_position+gripper', help='Type of action to process')
+    parser.add_argument('--action_type', type=str, default='delta_action_norot', help='Type of action to process')
     parser.add_argument('--video_length', type=int, default=2, help='Length of video sequence')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for processing')
     parser.add_argument('--cameras', type=str, nargs='+', default=['frontview_image', 'sideview_image'], help='Camera views to process')
