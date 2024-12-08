@@ -50,6 +50,40 @@ class DeltaControlLoss(nn.Module):
         deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
 
         return total_loss, deviations
+    
+class SumMSECosineLoss(nn.Module):
+    def __init__(self, direction_weight=1.0):
+        super(SumMSECosineLoss, self).__init__()
+        self.direction_weight = direction_weight
+
+    def forward(self, predictions, targets):
+        # Split the vectors
+        pred_direction, pred_magnitude = predictions[:, :3], predictions[:, :3].norm(dim=1, keepdim=True)
+        target_direction, target_magnitude = targets[:, :3], targets[:, :3].norm(dim=1, keepdim=True)
+
+        # Normalize to get unit vectors for direction
+        pred_direction_normalized = F.normalize(pred_direction, dim=1)
+        target_direction_normalized = F.normalize(target_direction, dim=1)
+
+        # Compute directional loss (cosine similarity)
+        direction_loss = 1 - F.cosine_similarity(pred_direction_normalized, target_direction_normalized).mean()
+
+        # Compute magnitude loss (MSE for magnitude)
+        magnitude_loss = F.mse_loss(pred_magnitude, target_magnitude)
+
+        # Combine direction and magnitude loss for the first three components
+        vector_loss = direction_loss + magnitude_loss
+
+        # Compute MSE loss for the last two components
+        mse_loss_gripper = F.mse_loss(predictions[:, 3:], targets[:, 3:])
+
+        # Total loss
+        total_loss = vector_loss + mse_loss_gripper
+
+        # Compute absolute deviations in each axis
+        deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
+
+        return total_loss, deviations
 
 class Trainer:
     def __init__(self, 
@@ -63,7 +97,7 @@ class Trainer:
                  epochs=100, 
                  lr=0.001, 
                  momentum=0.9,
-                 cosine_similarity_loss=False):
+                 loss='mse'):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name
@@ -80,7 +114,12 @@ class Trainer:
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
-        self.criterion = DeltaControlLoss() if cosine_similarity_loss else nn.MSELoss()
+        if loss == 'mse':
+            self.criterion = nn.MSELoss()
+        elif loss == 'cosine':
+            self.criterion = DeltaControlLoss()
+        elif loss == 'cosine_mse':
+            self.criterion = SumMSECosineLoss()
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)

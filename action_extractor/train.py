@@ -81,7 +81,7 @@ def train(args):
         batch_size=args.batch_size, 
         epochs=args.epoch,
         lr=args.learning_rate,
-        cosine_similarity_loss=args.cosine_similarity_loss
+        loss=args.loss
     )
 
     # Load checkpoint if provided
@@ -287,8 +287,9 @@ if __name__ == '__main__':
         default='disentangled'
     )
     parser.add_argument(
-        '--cosine_similarity_loss',
-        action='store_true'
+        '--loss',
+        choices=['mse', 'cosine', 'cosine_mse'],
+        default='cosine'
     )
     parser.add_argument(
         '--checkpoint',
