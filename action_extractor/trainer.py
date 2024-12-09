@@ -118,7 +118,7 @@ class Trainer:
             self.criterion = nn.MSELoss()
         elif loss == 'cosine':
             self.criterion = DeltaControlLoss()
-        elif loss == 'cosine_mse':
+        elif loss == 'cosine+mse':
             self.criterion = SumMSECosineLoss()
         
         # Choose optimizer based on the optimizer_name argument

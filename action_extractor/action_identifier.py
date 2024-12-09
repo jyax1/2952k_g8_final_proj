@@ -34,10 +34,10 @@ class ActionIdentifier(nn.Module):
         else:
             raise ValueError(f"Unknown camera name: {camera_name}")
     
-    def forward_conv(self, x):
+    def encode(self, x):
         return self.encoder(x)
     
-    def forward_mlp(self, x):
+    def decode(self, x):
         action = self.decoder(x)
         
         # Unstandardize
@@ -50,9 +50,8 @@ class ActionIdentifier(nn.Module):
         return action
     
     def forward(self, x):
-        x = self.forward_conv(x)
-        x = torch.flatten(x, 1)
-        return self.forward_mlp(x)
+        x = self.encode(x)
+        return self.decode(self.encode(x))
     
     def transform_to_global(self, action):
         # Extract position component (first 3 dimensions) and other components
@@ -77,11 +76,21 @@ class ActionIdentifier(nn.Module):
         return torch.cat([pos_global, other], dim=1)
 
 
-def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in_channels, 
-                         action_length, num_classes, num_mlp_layers, 
-                         stats_path='action_statistics_delta_position+gripper.npz',
-                         coordinate_system='global', camera_name='frontview'):
-    
+def load_action_identifier(
+    conv_path,
+    mlp_path,
+    resnet_version,
+    video_length,
+    in_channels,
+    action_length,
+    num_classes,
+    num_mlp_layers,
+    stats_path='action_statistics_delta_position+gripper.npz',
+    coordinate_system='global',
+    camera_name='frontview',
+    split_layer='avgpool' # The last layer of the encoder
+):
+    # Build the model
     model = ActionExtractionResNet(
         resnet_version=resnet_version,
         video_length=video_length,
@@ -92,25 +101,44 @@ def load_action_identifier(conv_path, mlp_path, resnet_version, video_length, in
     )
 
     # Load the saved conv and mlp parts into the model
-    if conv_path != None:
+    if conv_path is not None:
         model.conv.load_state_dict(torch.load(conv_path))
     else:
         model.conv = None
-        
-    if mlp_path != None:
+
+    if mlp_path is not None:
         model.mlp.load_state_dict(torch.load(mlp_path))
     else:
         model.mlp = None
 
-    # Initialize ActionIdentifier with the loaded ActionExtractionResNet model
+    # Split the conv module into encoder and decoder
+    encoder_layers = nn.Sequential()
+    decoder_layers = nn.Sequential()
+    add_to_decoder = False
+
+    for name, module in model.conv.named_children():
+        if not add_to_decoder:
+            encoder_layers.add_module(name, module)
+            if name == split_layer:
+                add_to_decoder = True  # Start adding to decoder after this layer
+        else:
+            decoder_layers.add_module(name, module)
+
+    # Combine decoder_layers with model.mlp
+    full_decoder = nn.Sequential(decoder_layers, 
+        nn.Flatten(), 
+        model.mlp
+    )
+
+    # Initialize ActionIdentifier with the new encoder and decoder
     action_identifier = ActionIdentifier(
-        encoder=model.conv, 
-        decoder=model.mlp,
+        encoder=encoder_layers,
+        decoder=full_decoder,
         stats_path=stats_path,
         coordinate_system=coordinate_system,
         camera_name=camera_name,
     )
-    
+
     return action_identifier
     
 def validate_pose_estimator(args):

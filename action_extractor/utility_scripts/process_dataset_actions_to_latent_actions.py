@@ -113,7 +113,7 @@ def process_dataset_actions_to_latent_actions(
 
             # Infer action
             with torch.no_grad():
-                action = action_identifier.forward_conv(obs_tensor)
+                action = action_identifier.encode(obs_tensor)
             inferred_actions.append(action.cpu().numpy().squeeze())
 
         inferred_actions.append(inferred_actions[-1]) # Repeat the last action to match the number of samples

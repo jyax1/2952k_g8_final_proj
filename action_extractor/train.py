@@ -288,7 +288,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--loss',
-        choices=['mse', 'cosine', 'cosine_mse'],
+        choices=['mse', 'cosine', 'cosine+mse'],
         default='cosine'
     )
     parser.add_argument(
