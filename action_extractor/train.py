@@ -81,7 +81,8 @@ def train(args):
         batch_size=args.batch_size, 
         epochs=args.epoch,
         lr=args.learning_rate,
-        loss=args.loss
+        loss=args.loss,
+        vae=args.vae
     )
 
     # Load checkpoint if provided
@@ -97,7 +98,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--architecture', '-a', 
         type=str, 
-        default='direct_cnn_mlp', 
+        default='direct_resnet_mlp', 
         choices=ARCHITECTURES,
         help='Model architecture to train'
     )
@@ -296,6 +297,11 @@ if __name__ == '__main__':
         type=str,
         default='',
         help='Path to a checkpoint file to resume training'
+    )
+    parser.add_argument(
+        '--vae',
+        action='store_true',
+        help='Use variational version of the model'
     )
 
     args = parser.parse_args()

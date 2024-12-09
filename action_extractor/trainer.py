@@ -52,9 +52,8 @@ class DeltaControlLoss(nn.Module):
         return total_loss, deviations
     
 class SumMSECosineLoss(nn.Module):
-    def __init__(self, direction_weight=1.0):
+    def __init__(self):
         super(SumMSECosineLoss, self).__init__()
-        self.direction_weight = direction_weight
 
     def forward(self, predictions, targets):
         # Split the vectors
@@ -85,6 +84,34 @@ class SumMSECosineLoss(nn.Module):
 
         return total_loss, deviations
 
+class VAELoss(nn.Module):
+    def __init__(self, reconstruction_loss_fn=None, kld_weight=1.0):
+        super(VAELoss, self).__init__()
+        self.reconstruction_loss_fn = reconstruction_loss_fn if reconstruction_loss_fn is not None else nn.MSELoss()
+        self.kld_weight = kld_weight
+
+    def forward(self, outputs, targets, mu, logvar):
+        # Reconstruction loss
+        recon_loss = self.reconstruction_loss_fn(outputs, targets)
+        # KL divergence
+        kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        # Total loss
+        total_loss = recon_loss + self.kld_weight * kld_loss
+
+        # Compute deviations similar to other loss functions
+        # Assume the first three components are direction vectors
+        pred_direction = outputs[:, :3]
+        target_direction = targets[:, :3]
+
+        # Normalize direction vectors
+        pred_direction_normalized = F.normalize(pred_direction, dim=1)
+        target_direction_normalized = F.normalize(target_direction, dim=1)
+
+        # Calculate deviations
+        deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
+
+        return total_loss, deviations
+
 class Trainer:
     def __init__(self, 
                  model, 
@@ -97,7 +124,8 @@ class Trainer:
                  epochs=100, 
                  lr=0.001, 
                  momentum=0.9,
-                 loss='mse'):
+                 loss='mse',
+                 vae = False):
         self.accelerator = Accelerator()
         self.model = model
         self.model_name = model_name
@@ -114,12 +142,18 @@ class Trainer:
         self.device = self.accelerator.device
         self.train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
-        if loss == 'mse':
+        self.loss_type = loss.lower()
+        
+        if self.loss_type == 'mse':
             self.criterion = nn.MSELoss()
-        elif loss == 'cosine':
+        elif self.loss_type == 'cosine':
             self.criterion = DeltaControlLoss()
-        elif loss == 'cosine+mse':
+        elif self.loss_type == 'cosine+mse':
             self.criterion = SumMSECosineLoss()
+            
+        self.vae = vae
+        if vae:
+            self.criterion = VAELoss(reconstruction_loss_fn=self.criterion)
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
@@ -173,10 +207,15 @@ class Trainer:
 
             for i, (inputs, labels) in enumerate(self.train_loader):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
-
                 self.optimizer.zero_grad()
-                outputs = self.model(inputs)
-                loss, deviations = self.criterion(outputs, labels)
+                
+                if self.vae:
+                    outputs, mu, logvar = self.model(inputs)
+                    loss, deviations = self.criterion(outputs, labels, mu, logvar)
+                else:
+                    outputs = self.model(inputs)
+                    loss, deviations = self.criterion(outputs, labels)
+                    
                 self.accelerator.backward(loss)
                 self.optimizer.step()
 

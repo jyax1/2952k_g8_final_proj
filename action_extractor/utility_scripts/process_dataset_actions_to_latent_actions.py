@@ -84,7 +84,7 @@ def process_dataset_actions_to_latent_actions(
 
     # Process each demo
     demos = list(root["data"].keys())
-    for demo in tqdm(demos, desc="Processing demos"):
+    for demo in tqdm(demos, desc="Updating actions in demos"):
         num_samples = root["data"][demo]["obs"][cameras[0]].shape[0]
 
         # Infer actions using the model
@@ -131,8 +131,6 @@ def process_dataset_actions_to_latent_actions(
 
         # Create a new 'actions' dataset with the inferred actions
         actions_group.create_dataset('actions', data=inferred_actions)
-
-        print(f"Updated actions for {demo}")
 
     # Close HDF5 datasets
     hdf5_file.close()

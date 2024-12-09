@@ -179,7 +179,7 @@ def visualize_latent_action_dataset_as_video():
             env_camera1.step_count = 0
 
             for j in range(len(latent_actions_dataset)):
-                true_action = action_identifier.forward_mlp(latent_actions_dataset[j])
+                true_action = action_identifier.decode(latent_actions_dataset[j])
                 true_action = true_action.detach().cpu().numpy()
                 true_action = np.insert(true_action, [3, 3, 3], 0.0)
                 true_action_magnitude = np.linalg.norm(true_action[:3])

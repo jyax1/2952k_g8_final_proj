@@ -16,6 +16,7 @@ action_extractor/architectures/__init__.py
 action_extractor/architectures/direct_cnn_mlp.py
 action_extractor/architectures/direct_cnn_vit.py
 action_extractor/architectures/direct_resnet_mlp.py
+action_extractor/architectures/direct_variational_resnet.py
 action_extractor/architectures/latent_decoders.py
 action_extractor/architectures/latent_encoders.py
 action_extractor/architectures/resnet.py

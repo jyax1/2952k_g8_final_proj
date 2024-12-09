@@ -3,6 +3,7 @@ from action_extractor.architectures.direct_cnn_mlp import ActionExtractionCNN, P
 from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
 from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from action_extractor.architectures.direct_resnet_mlp import *
+from action_extractor.architectures.direct_variational_resnet import *
 from action_extractor.architectures.latent_decoders import *
 from action_extractor.architectures.resnet import *
 import re
@@ -115,8 +116,14 @@ def load_model(architecture,
                                     motion=motion, 
                                     image_plus_motion=image_plus_motion,
                                     vit_patch_size=vit_patch_size)
-    elif architecture == 'direct_resnet_mlp':
+        
+    elif architecture == 'direct_resnet_mlp' or architecture == 'direct_variational_resnet':
         resnet_version = 'resnet' + str(resnet_layers_num)
+        
+        if architecture == 'direct_resnet_mlp':
+            architecture_class = ActionExtractionResNet
+        elif architecture == 'direct_variational_resnet':
+            architecture_class = VariationalActionExtractionResNet
         
         if 'action' in action_type and 'norot' not in action_type:
             num_classes = 7
@@ -139,13 +146,13 @@ def load_model(architecture,
             input_channels = 7 * horizon * len(cameras)
             
         if data_modality == 'rgb' or data_modality == 'color_mask_depth':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=3*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=3*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'cropped_rgbd+color_mask_depth':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'cropped_rgbd+color_mask':
-            model = ActionExtractionResNet(resnet_version=resnet_version, video_length=horizon, in_channels=6*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=6*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)

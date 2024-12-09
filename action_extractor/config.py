@@ -1,7 +1,8 @@
 ARCHITECTURES = [
     'direct_cnn_mlp', 
     'direct_cnn_vit',
-    'direct_resnet_mlp', 
+    'direct_resnet_mlp',
+    'direct_variational_resnet',
     'latent_encoder_resnet_unet',
     'latent_encoder_cnn_unet', 
     'latent_decoder_mlp', 
