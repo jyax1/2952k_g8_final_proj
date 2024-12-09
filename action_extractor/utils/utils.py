@@ -123,7 +123,7 @@ def load_model(architecture,
         if architecture == 'direct_resnet_mlp':
             architecture_class = ActionExtractionResNet
         elif architecture == 'direct_variational_resnet':
-            architecture_class = VariationalActionExtractionResNet
+            architecture_class = ActionExtractionVariationalResNet
         
         if 'action' in action_type and 'norot' not in action_type:
             num_classes = 7

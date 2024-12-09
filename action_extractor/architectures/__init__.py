@@ -8,4 +8,4 @@ from .latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrain
 from .resnet import *
 
 __all__ = ['ActionExtractionResNet',
-           ActionExtractionVariationalResNet]
+           'ActionExtractionVariationalResNet']
