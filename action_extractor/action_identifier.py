@@ -66,7 +66,6 @@ class ActionIdentifier(nn.Module):
         return action
     
     def forward(self, x):
-        x = self.encode(x)
         return self.decode(self.encode(x))
     
     def transform_to_global(self, action):
