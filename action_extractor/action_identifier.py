@@ -66,8 +66,20 @@ class ActionIdentifier(nn.Module):
         return action
     
     def forward(self, x):
-        return self.decode(self.encode(x))
-    
+        if isinstance(self.encoder, VariationalEncoder):
+            def reparameterize(mu, logvar):
+                std = torch.exp(0.5 * logvar)  # Standard deviation
+                eps = torch.randn_like(std)    # Sample epsilon from standard normal
+                z = mu + eps * std             # Reparameterization trick
+                return z
+            
+            mu, logvar = self.encode(x)
+            z = reparameterize(mu, logvar)
+            return self.decode(z), mu, logvar
+        
+        else:
+            return self.decode(self.encode(x))
+        
     def transform_to_global(self, action):
         # Extract position component (first 3 dimensions) and other components
         pos = action[:, :3]

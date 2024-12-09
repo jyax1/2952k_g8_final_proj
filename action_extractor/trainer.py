@@ -75,7 +75,7 @@ class SumMSECosineLoss(nn.Module):
         vector_loss = direction_loss + magnitude_loss
 
         # Compute MSE loss for the last two components
-        mse_loss_gripper = F.mse_loss(predictions[:, 3:], targets[:, 3:])
+        mse_loss_gripper = 2 * F.mse_loss(predictions[:, 3:], targets[:, 3:])
 
         # Total loss
         total_loss = vector_loss + mse_loss_gripper
