@@ -3,7 +3,23 @@ import numpy as np
 import torch
 import torch.nn as nn
 from action_extractor.architectures import ActionExtractionResNet
+from action_extractor.architectures import ActionExtractionVariationalResNet
 from action_extractor.utils.utils import load_model, load_trained_model, load_datasets
+
+class VariationalEncoder(nn.Module):
+    def __init__(self, conv, fc_mu, fc_logvar):
+        super(VariationalEncoder, self).__init__()
+        self.conv = conv
+        self.flatten = nn.Flatten()
+        self.fc_mu = fc_mu
+        self.fc_logvar = fc_logvar
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.flatten(x)
+        mu = self.fc_mu(x)
+        logvar = self.fc_logvar(x)
+        return mu, logvar
 
 class ActionIdentifier(nn.Module):
     def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
@@ -85,13 +101,20 @@ def load_action_identifier(
     action_length,
     num_classes,
     num_mlp_layers,
+    fc_mu_path=None,
+    fc_logvar_path=None,
     stats_path='action_statistics_delta_position+gripper.npz',
     coordinate_system='global',
     camera_name='frontview',
     split_layer='avgpool' # The last layer of the encoder
 ):
     # Build the model
-    model = ActionExtractionResNet(
+    if fc_mu_path is not None and fc_logvar_path is not None:
+        architecture = ActionExtractionVariationalResNet
+    else:
+        architecture = ActionExtractionResNet
+        
+    model = architecture(
         resnet_version=resnet_version,
         video_length=video_length,
         in_channels=in_channels,
@@ -110,29 +133,59 @@ def load_action_identifier(
         model.mlp.load_state_dict(torch.load(mlp_path))
     else:
         model.mlp = None
+        
+    if fc_mu_path is not None:
+        model.fc_mu.load_state_dict(torch.load(fc_mu_path))
+    else:
+        model.fc_mu = None
+        
+    if fc_logvar_path is not None:
+        model.fc_logvar.load_state_dict(torch.load(fc_logvar_path))
+    else:
+        model.fc_logvar = None
 
     # Split the conv module into encoder and decoder
     encoder_layers = nn.Sequential()
     decoder_layers = nn.Sequential()
     add_to_decoder = False
 
-    for name, module in model.conv.named_children():
-        if not add_to_decoder:
-            encoder_layers.add_module(name, module)
-            if name == split_layer:
-                add_to_decoder = True  # Start adding to decoder after this layer
-        else:
-            decoder_layers.add_module(name, module)
+    if isinstance(model, ActionExtractionResNet):
+        for name, module in model.conv.named_children():
+            if not add_to_decoder:
+                encoder_layers.add_module(name, module)
+                if name == split_layer:
+                    add_to_decoder = True  # Start adding to decoder after this layer
+            else:
+                decoder_layers.add_module(name, module)
 
-    # Combine decoder_layers with model.mlp
-    full_decoder = nn.Sequential(decoder_layers, 
-        nn.Flatten(), 
-        model.mlp
-    )
+        # Combine decoder_layers with model.mlp
+        full_decoder = nn.Sequential(decoder_layers, 
+            nn.Flatten(), 
+            model.mlp
+        )
+    elif isinstance(model, ActionExtractionVariationalResNet):
+        # Initialize variational encoder
+        encoder = VariationalEncoder(
+            conv=model.conv,
+            fc_mu=model.fc_mu,
+            fc_logvar=model.fc_logvar
+        )
+
+        # Initialize decoder as the MLP part of the model
+        decoder = model.mlp
+
+        # Combine decoder_layers as the full_decoder
+        full_decoder = nn.Sequential(
+            decoder,                # MLP head
+            # Add more layers here if necessary
+        )
+        
+    else:
+        raise ValueError(f"Unsupported model type: {type(model)}")
 
     # Initialize ActionIdentifier with the new encoder and decoder
     action_identifier = ActionIdentifier(
-        encoder=encoder_layers,
+        encoder=encoder if isinstance(model, ActionExtractionVariationalResNet) else encoder_layers,
         decoder=full_decoder,
         stats_path=stats_path,
         coordinate_system=coordinate_system,
