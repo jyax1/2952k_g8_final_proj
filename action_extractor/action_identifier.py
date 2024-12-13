@@ -49,9 +49,20 @@ class ActionIdentifier(nn.Module):
             self.R = sideagentview_R
         else:
             raise ValueError(f"Unknown camera name: {camera_name}")
+
+    @staticmethod
+    def reparameterize(mu, logvar):
+        std = torch.exp(0.5 * logvar)  # Standard deviation
+        eps = torch.randn_like(std)    # Sample epsilon from standard normal
+        z = mu + eps * std             # Reparameterization trick
+        return z
     
     def encode(self, x):
-        return self.encoder(x)
+        if isinstance(self.encoder, VariationalEncoder):
+            mu, logvar = self.encoder(x)
+            return self.reparameterize(mu, logvar), mu, logvar
+        else:
+            return self.encoder(x)
     
     def decode(self, x):
         action = self.decoder(x)
@@ -67,16 +78,8 @@ class ActionIdentifier(nn.Module):
     
     def forward(self, x):
         if isinstance(self.encoder, VariationalEncoder):
-            def reparameterize(mu, logvar):
-                std = torch.exp(0.5 * logvar)  # Standard deviation
-                eps = torch.randn_like(std)    # Sample epsilon from standard normal
-                z = mu + eps * std             # Reparameterization trick
-                return z
-            
-            mu, logvar = self.encode(x)
-            z = reparameterize(mu, logvar)
+            z, mu, logvar = self.encode(x)
             return self.decode(z), mu, logvar
-        
         else:
             return self.decode(self.encode(x))
         
