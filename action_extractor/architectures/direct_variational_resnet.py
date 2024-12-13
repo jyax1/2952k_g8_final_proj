@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 from .utils import resnet_builder
+from action_extractor.architectures.direct_resnet_mlp import ResNetMLP
 
 class ActionExtractionVariationalResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, latent_dim=32, num_classes=7, num_mlp_layers=3):
+    def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, latent_dim=32, action_length=1, num_classes=7, num_mlp_layers=3):
         super(ActionExtractionVariationalResNet, self).__init__()
 
         # Build the ResNet backbone
@@ -18,17 +19,25 @@ class ActionExtractionVariationalResNet(nn.Module):
         self.fc_logvar = nn.Linear(resnet_out_dim, latent_dim)
 
         # Decoder (MLP head)
-        mlp_layers = [
-            nn.Linear(latent_dim, 512),
-            nn.LeakyReLU()
-        ]
-        for _ in range(num_mlp_layers):
-            mlp_layers.extend([
-                nn.Linear(512, 512),
-                nn.LeakyReLU()
-            ])
-        mlp_layers.append(nn.Linear(512, num_classes))
-        self.mlp = nn.Sequential(*mlp_layers)
+        # mlp_layers = [
+        #     nn.Linear(latent_dim, 512),
+        #     nn.LeakyReLU()
+        # ]
+        # for _ in range(num_mlp_layers):
+        #     mlp_layers.extend([
+        #         nn.Linear(512, 512),
+        #         nn.LeakyReLU()
+        #     ])
+        # mlp_layers.append(nn.Linear(512, num_classes))
+        # self.mlp = nn.Sequential(*mlp_layers)
+        
+        self.mlp = ResNetMLP(
+            input_size=latent_dim,
+            hidden_size=512,
+            final_size=32,
+            output_size=num_classes * action_length,
+            num_layers=num_mlp_layers
+        )
 
     def encode(self, x):
         x = self.conv(x)

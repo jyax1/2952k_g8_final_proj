@@ -93,7 +93,7 @@ class VAELoss(nn.Module):
 
     def forward(self, outputs, targets, mu, logvar):
         # Reconstruction loss
-        recon_loss = self.reconstruction_loss_fn(outputs, targets)
+        recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
         # KL divergence
         kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
         # Total loss

@@ -82,7 +82,7 @@ def train(args):
         epochs=args.epoch,
         lr=args.learning_rate,
         loss=args.loss,
-        vae=args.vae
+        vae=isinstance(model, ActionExtractionVariationalResNet)
     )
 
     # Load checkpoint if provided
@@ -290,18 +290,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--loss',
         choices=['mse', 'cosine', 'cosine+mse'],
-        default='cosine'
+        default='cosine+mse'
     )
     parser.add_argument(
         '--checkpoint',
         type=str,
         default='',
         help='Path to a checkpoint file to resume training'
-    )
-    parser.add_argument(
-        '--vae',
-        action='store_true',
-        help='Use variational version of the model'
     )
 
     args = parser.parse_args()
