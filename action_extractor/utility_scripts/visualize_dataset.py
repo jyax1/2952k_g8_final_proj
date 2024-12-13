@@ -16,19 +16,18 @@ from moviepy.editor import VideoFileClip, clips_array
 
 latent_action = True
 
-conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
-mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
-mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_action_norot-frontside-bs1632_mlp-24.pth'
+conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-46.pth'
+mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-46.pth'
 cameras=["frontview_image", "sideview_image"]
-stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz'
+stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz'
 
 # Define the path to the HDF5 file and output directory
 hdf5_file_path = '/home/yilong/Documents/ae_data/random_processing/iiwa200/action_extraction_IIWA200.hdf5'
 output_dir = '/home/yilong/Documents/action_extractor/debug/D_movement_iiwa200'
 output_format = 'mp4'  # Choose 'mp4' or 'webp'
 
-latent_hdf5_file_path = '/home/yilong/Documents/policy_data/lift/obs_policy/lift_panda1000_policy_obs_cropped_rgbd+color_mask.hdf5'
-latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda1000_delta_action_model'
+latent_hdf5_file_path = '/home/yilong/Documents/ae_data/random_processing/iiwa16168_test/lift_200_cropped_rgbd+color_mask.hdf5'
+latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda200_delta_pos_cosine+mse_model'
 
 def visualize_action_dataset_as_videos():
     # Create the output directory if it doesn't exist
@@ -152,10 +151,15 @@ def visualize_latent_action_dataset_as_video():
     ).to(device)
     action_identifier.eval()
 
+    # Add tracking variables
+    n_success = 0
+    total_n = 0
+    results = []
+
     with h5py.File(latent_hdf5_file_path, 'r') as root:
         i = 0
         for demo in tqdm(root['data']):
-            if i == 30:
+            if i == 200:
                 break
 
             latent_actions_dataset = root["data"][demo]["actions"][:-1]
@@ -182,10 +186,9 @@ def visualize_latent_action_dataset_as_video():
                 true_action = action_identifier.decode(latent_actions_dataset[j])
                 true_action = true_action.detach().cpu().numpy()
                 true_action = np.insert(true_action, [3, 3, 3], 0.0)
-                true_action_magnitude = np.linalg.norm(true_action[:3])
-                true_action[:3] /= true_action_magnitude
+                # Remove the magnitude normalization
                 true_action[-1] = np.sign(true_action[-1])
-
+                
                 env_camera0.step(true_action)
                 env_camera1.step(true_action)
 
@@ -194,6 +197,13 @@ def visualize_latent_action_dataset_as_video():
 
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
+
+            # Check success after running actions
+            success = env_camera0.is_success()['task'] and env_camera1.is_success()['task']
+            if success:
+                n_success += 1
+            total_n += 1
+            results.append(f"{demo}: {'success' if success else 'failed'}")
 
             # Combine the two videos side by side
             combined_video_path = os.path.join(latent_output_dir, f'{demo}.mp4')
@@ -222,6 +232,16 @@ def visualize_latent_action_dataset_as_video():
             os.remove(right_video_path)
 
             i += 1
+
+        # Calculate and save results
+        success_rate = (n_success/total_n)*100
+        results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
+        
+        results_path = os.path.join(latent_output_dir, "trajectory_results.txt")
+        with open(results_path, "w") as f:
+            f.write("\n".join(results))
+
+        print(f"Success Rate: {success_rate:.2f}% ({n_success}/{total_n})")
 
 if __name__ == '__main__':
     

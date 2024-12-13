@@ -195,7 +195,7 @@ def load_action_identifier(
         )
         
     else:
-        raise ValueError(f"Unsupported model type: {type(model)}")
+        full_decoder = None
 
     # Initialize ActionIdentifier with the new encoder and decoder
     action_identifier = ActionIdentifier(
