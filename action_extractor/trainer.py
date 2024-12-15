@@ -86,7 +86,7 @@ class SumMSECosineLoss(nn.Module):
         return total_loss, deviations
 
 class VAELoss(nn.Module):
-    def __init__(self, reconstruction_loss_fn=None, kld_weight=1.0):
+    def __init__(self, reconstruction_loss_fn=None, kld_weight=0.05):
         super(VAELoss, self).__init__()
         self.reconstruction_loss_fn = reconstruction_loss_fn if reconstruction_loss_fn is not None else nn.MSELoss()
         self.kld_weight = kld_weight
@@ -312,11 +312,15 @@ class Trainer:
         with torch.no_grad():
             for inputs, labels in tqdm(self.validation_loader, desc="Validating", leave=False):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
-                outputs = self.model(inputs)
-                
-                if self.aux:
-                    outputs = self.recover_action_vector(outputs)
-                    labels = self.recover_action_vector(labels)
+                if self.vae:
+                    outputs, mu, logvar = self.model(inputs)
+                    loss, deviations = self.criterion(outputs, labels, mu, logvar)
+                else:
+                    outputs = self.model(inputs)
+                    if self.aux:
+                        outputs = self.recover_action_vector(outputs)
+                        labels = self.recover_action_vector(labels)
+                    loss, deviations = self.criterion(outputs, labels)
                     
                 loss, deviations = self.criterion(outputs, labels)
                 total_val_loss += loss.item()

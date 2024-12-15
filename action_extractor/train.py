@@ -265,20 +265,6 @@ if __name__ == '__main__':
         help='Type of action representation to use'
     )
     parser.add_argument(
-        '--obs_dim', '-od',
-        type=int,
-        default=256,
-        help="Dimension of a side of the input observation, assuming that the observation is square"
-    )
-    parser.add_argument(
-        '--sam2_mask',
-        action='store_true'
-    )
-    parser.add_argument(
-        '--sam2_box',
-        action='store_true'
-    )
-    parser.add_argument(
         '--standardize_data',
         action='store_true'
     )
