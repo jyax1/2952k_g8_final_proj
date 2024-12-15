@@ -87,7 +87,7 @@ class SumMSECosineLoss(nn.Module):
 
 class VAELoss(nn.Module):
     def __init__(self, reconstruction_loss_fn=None, kld_weight=0.05,
-                 schedule_type='constant', total_epochs=100, warmup_epochs=10,
+                 schedule_type='constant', warmup_epochs=10,
                  cycle_length=10, max_weight=0.1, min_weight=0.001):
         super(VAELoss, self).__init__()
         self.reconstruction_loss_fn = reconstruction_loss_fn if reconstruction_loss_fn is not None else nn.MSELoss()
@@ -193,7 +193,7 @@ class Trainer:
         self.vae = vae
         if vae:
             self.criterion = VAELoss(reconstruction_loss_fn=self.criterion,
-                                     schedule_type='cyclical', total_epochs=epochs, warmup_epochs=10)
+                                     schedule_type='cyclical', warmup_epochs=10)
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
