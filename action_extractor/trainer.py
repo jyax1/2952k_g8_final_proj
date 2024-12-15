@@ -193,7 +193,7 @@ class Trainer:
         self.vae = vae
         if vae:
             self.criterion = VAELoss(reconstruction_loss_fn=self.criterion,
-                                     schedule_type='cyclical', warmup_epochs=10)
+                                     schedule_type='warmup', warmup_epochs=10)
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
@@ -244,6 +244,10 @@ class Trainer:
             running_loss = 0.0
             running_deviation = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
+            
+            if self.vae:
+                self.criterion.update_epoch(epoch)
+                self.writer.add_scalar('KLD_Weight', self.criterion.kld_weight, epoch)
 
             for i, (inputs, labels) in enumerate(self.train_loader):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
