@@ -86,18 +86,56 @@ class SumMSECosineLoss(nn.Module):
         return total_loss, deviations
 
 class VAELoss(nn.Module):
-    def __init__(self, reconstruction_loss_fn=None, kld_weight=0.05):
+    def __init__(self, reconstruction_loss_fn=None, kld_weight=0.05,
+                 schedule_type='constant', total_epochs=100, warmup_epochs=10,
+                 cycle_length=10, max_weight=0.1, min_weight=0.001):
         super(VAELoss, self).__init__()
         self.reconstruction_loss_fn = reconstruction_loss_fn if reconstruction_loss_fn is not None else nn.MSELoss()
-        self.kld_weight = kld_weight
+        self.base_kld_weight = kld_weight
+        self.eval_kld_weight = kld_weight
+        self.schedule_type = schedule_type
+        self.current_epoch = 0
+        
+        # Warmup parameters
+        self.warmup_epochs = warmup_epochs
+        
+        # Cyclical parameters
+        self.cycle_length = cycle_length
+        self.max_weight = max_weight
+        self.min_weight = min_weight
+        
+        self.last_recon_loss = None
+        self.last_kld_loss = None
+        
+    def update_epoch(self, epoch):
+        """Update current epoch and kld_weight"""
+        self.current_epoch = epoch
+        
+        if self.schedule_type == 'warmup':
+            # Linear warmup from 0 to base_kld_weight
+            self.kld_weight = min(1.0, self.current_epoch / self.warmup_epochs) * self.base_kld_weight
+            
+        elif self.schedule_type == 'cyclical':
+            # Cosine annealing between min_weight and max_weight
+            cycle_progress = (self.current_epoch % self.cycle_length) / self.cycle_length
+            self.kld_weight = self.min_weight + 0.5 * (self.max_weight - self.min_weight) * \
+                            (1 + np.cos(cycle_progress * 2 * np.pi))
+        else:
+            self.kld_weight = self.base_kld_weight
 
-    def forward(self, outputs, targets, mu, logvar):
+    def forward(self, outputs, targets, mu, logvar, validation=False):
         # Reconstruction loss
         recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
         # KL divergence
         kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        
+        # Save the last reconstruction and KL divergence losses for logging
+        self.last_recon_loss = recon_loss.item()
+        self.last_kld_loss = kld_loss.item()
+
         # Total loss
-        total_loss = recon_loss + self.kld_weight * kld_loss
+        weight = self.eval_kld_weight if validation else self.kld_weight
+        total_loss = recon_loss + weight * kld_loss
 
         # Compute deviations similar to other loss functions
         # Assume the first three components are direction vectors
@@ -154,7 +192,8 @@ class Trainer:
             
         self.vae = vae
         if vae:
-            self.criterion = VAELoss(reconstruction_loss_fn=self.criterion)
+            self.criterion = VAELoss(reconstruction_loss_fn=self.criterion,
+                                     schedule_type='cyclical', total_epochs=epochs, warmup_epochs=10)
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
@@ -229,6 +268,10 @@ class Trainer:
                 self.writer.add_scalar('Deviation/X', deviations[:, 0].mean().item(), step)
                 self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
                 self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
+                
+                if self.vae:
+                    self.writer.add_scalar('VAELoss/Reconstruction', self.criterion.last_recon_loss, step)
+                    self.writer.add_scalar('VAELoss/KLD_Weighted', self.criterion.last_kld_loss * self.criterion.kld_weight, step)
 
                 # Log weights and gradients to TensorBoard every 5 iterations
                 if (i + 1) % 5 == 0:
@@ -314,15 +357,14 @@ class Trainer:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 if self.vae:
                     outputs, mu, logvar = self.model(inputs)
-                    loss, deviations = self.criterion(outputs, labels, mu, logvar)
+                    loss, deviations = self.criterion(outputs, labels, mu, logvar, validation=True)
                 else:
                     outputs = self.model(inputs)
                     if self.aux:
                         outputs = self.recover_action_vector(outputs)
                         labels = self.recover_action_vector(labels)
                     loss, deviations = self.criterion(outputs, labels)
-                    
-                loss, deviations = self.criterion(outputs, labels)
+
                 total_val_loss += loss.item()
                 all_deviations.append(deviations.cpu())
 
