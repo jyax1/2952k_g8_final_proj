@@ -276,6 +276,7 @@ class Trainer:
                 if self.vae:
                     self.writer.add_scalar('VAELoss/Reconstruction', self.criterion.last_recon_loss, step)
                     self.writer.add_scalar('VAELoss/KLD_Weighted', self.criterion.last_kld_loss * self.criterion.kld_weight, step)
+                    self.writer.add_scalar('VAELoss/KLD_Raw', self.criterion.last_kld_loss, step)
 
                 # Log weights and gradients to TensorBoard every 5 iterations
                 if (i + 1) % 5 == 0:

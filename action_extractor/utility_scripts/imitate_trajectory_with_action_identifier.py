@@ -9,7 +9,7 @@ import zarr
 from glob import glob
 from einops import rearrange
 
-from action_extractor.action_identifier import load_action_identifier
+from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
 from action_extractor.utils.dataset_utils import hdf5_to_zarr_parallel, preprocess_data_parallel
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
@@ -24,12 +24,19 @@ dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
 
+# non-variational settings
 conv_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-46.pth'
 mlp_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-46.pth'
 n = None
 save_webp = False
 
-output_dir = "/home/yilong/Documents/action_extractor/debug/imitation_46"
+# variational settings
+conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-12.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-12.pth'
+fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-12.pth'
+fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-12.pth'
+
+output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_12"
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
@@ -66,7 +73,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir=output_dir,
     conv_path=conv_path,
     mlp_path=mlp_path,
-    stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz',
+    stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz',
     n_demos=None,
     data_modality='cropped_rgbd+color_mask',
     cameras=["frontview_image", "sideview_image"],
@@ -119,6 +126,8 @@ def imitate_trajectory_with_action_identifier(
         action_length=1,
         num_classes=4,
         num_mlp_layers=3,
+        fc_mu_path=fc_mu_path,
+        fc_logvar_path=fc_logvar_path,
         stats_path=stats_path,
         coordinate_system='global',
         camera_name=cameras[0].split('_')[0]  # Use the first camera for initialization
@@ -248,7 +257,10 @@ def imitate_trajectory_with_action_identifier(
 
                     # Infer action
                     with torch.no_grad():
-                        action = action_identifier(obs_tensor)
+                        if isinstance(action_identifier.encoder, VariationalEncoder):
+                            action, _, _ = action_identifier(obs_tensor)
+                        else:
+                            action = action_identifier(obs_tensor)
                     inferred_actions.append(action.cpu().numpy().squeeze())
                     
                 # Reset environment to initial state from dataset
@@ -264,6 +276,7 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
+                    action *= 80
                     action[-1] = np.sign(action[-1])
 
                     env_camera0.step(action)
@@ -282,6 +295,7 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
+                    action *= 80
                     action[-1] = np.sign(action[-1])
                     
                     env_camera1.step(action)
