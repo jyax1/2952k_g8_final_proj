@@ -7,7 +7,7 @@ import zarr
 from glob import glob
 from einops import rearrange
 
-from action_extractor.action_identifier import load_action_identifier
+from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
 from action_extractor.utils.dataset_utils import hdf5_to_zarr_parallel, preprocess_data_parallel
 from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R
 
@@ -85,7 +85,8 @@ def process_dataset_actions_to_latent_actions(
             num_samples = obs_group[cameras[0]].shape[0]
 
             # Process each frame pair
-            latent_actions = []
+            latent_actions = [] # In the variational case, this will contain the latent mean
+            latent_variances = []
             for i in range(num_samples - 1):
                 obs_seq = []
                 for j in range(2):  # video_length=2
@@ -109,18 +110,31 @@ def process_dataset_actions_to_latent_actions(
 
                 # Get latent action
                 with torch.no_grad():
-                    latent = action_identifier.encode(obs_tensor)
-                latent_actions.append(latent.cpu().numpy().squeeze())
+                    if isinstance(action_identifier.encoder, VariationalEncoder):
+                        _, latent_mean, latent_variance = action_identifier.encode(obs_tensor, deterministic=True)
+                        latent_actions.append(latent_mean.cpu().numpy().squeeze())
+                        latent_variances.append(latent_variance.cpu().numpy().squeeze())
+                    else:
+                        latent = action_identifier.encode(obs_tensor)
+                        latent_actions.append(latent.cpu().numpy().squeeze())
 
             # Add final latent action (repeat last one)
             latent_actions.append(latent_actions[-1])
             latent_actions = np.array(latent_actions)
-
+            
             # Save to HDF5
             actions_group = hdf5_file['data'][demo]
             if 'actions' in actions_group:
                 del actions_group['actions']
             actions_group.create_dataset('actions', data=latent_actions)
+            
+            if isinstance(action_identifier.encoder, VariationalEncoder):
+                latent_variances.append(latent_variances[-1])
+                latent_variances = np.array(latent_variances)
+                
+                if 'action_variances' in actions_group:
+                    del actions_group['action_variances']
+                actions_group.create_dataset('action_variances', data=latent_variances)
 
     hdf5_file.close()
     print("Processing complete.")
