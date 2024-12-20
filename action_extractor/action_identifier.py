@@ -57,10 +57,13 @@ class ActionIdentifier(nn.Module):
         z = mu + eps * std             # Reparameterization trick
         return z
     
-    def encode(self, x):
+    def encode(self, x, deterministic=False):
         if isinstance(self.encoder, VariationalEncoder):
             mu, logvar = self.encoder(x)
-            return self.reparameterize(mu, logvar), mu, logvar
+            if deterministic:
+                return mu
+            else:
+                return self.reparameterize(mu, logvar), mu, logvar
         else:
             return self.encoder(x)
     

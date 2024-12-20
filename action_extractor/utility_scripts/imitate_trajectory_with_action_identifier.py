@@ -31,12 +31,12 @@ n = None
 save_webp = False
 
 # variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-33.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-33.pth'
-fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-33.pth'
-fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-33.pth'
+conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-50.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-50.pth'
+fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-50.pth'
+fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-50.pth'
 
-output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_33"
+output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_50"
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
