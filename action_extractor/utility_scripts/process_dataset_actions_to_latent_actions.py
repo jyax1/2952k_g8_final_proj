@@ -11,9 +11,16 @@ from action_extractor.action_identifier import load_action_identifier, Variation
 from action_extractor.utils.dataset_utils import hdf5_to_zarr_parallel, preprocess_data_parallel
 from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R
 
+conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-73.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-73.pth'
+fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-73.pth'
+fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-73.pth'
+
 def process_dataset_actions_to_latent_actions(
     dataset_path,
     conv_path,
+    fc_mu_path,
+    fc_logvar_path,
     mlp_path,
     stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz',
     data_modality='cropped_rgbd+color_mask',
@@ -60,6 +67,8 @@ def process_dataset_actions_to_latent_actions(
     action_identifier = load_action_identifier(
         conv_path=conv_path,
         mlp_path=mlp_path,
+        fc_mu_path=fc_mu_path,
+        fc_logvar_path=fc_logvar_path,
         resnet_version='resnet18',
         video_length=2,
         in_channels=len(cameras) * 6,
@@ -68,7 +77,8 @@ def process_dataset_actions_to_latent_actions(
         num_mlp_layers=3,
         stats_path=stats_path,
         coordinate_system='global',
-        camera_name=cameras[0].split('_')[0]
+        camera_name=cameras[0].split('_')[0],
+        deterministic=False
     ).to(device)
     action_identifier.eval()
 
@@ -111,7 +121,7 @@ def process_dataset_actions_to_latent_actions(
                 # Get latent action
                 with torch.no_grad():
                     if isinstance(action_identifier.encoder, VariationalEncoder):
-                        _, latent_mean, latent_variance = action_identifier.encode(obs_tensor, deterministic=True)
+                        _, latent_mean, latent_variance = action_identifier.encode(obs_tensor)
                         latent_actions.append(latent_mean.cpu().numpy().squeeze())
                         latent_variances.append(latent_variance.cpu().numpy().squeeze())
                     else:
@@ -145,10 +155,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, 
                         default='/home/yilong/Documents/ae_data/random_processing/iiwa16168_test/lift_200.hdf5')
-    parser.add_argument('--encoder_model_path', type=str,
-                        default='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-53.pth')
+    parser.add_argument('--conv_model_path', type=str,
+                        default=conv_path)
+    parser.add_argument('--fc_mu_model_path', type=str,
+                        default=fc_mu_path)
+    parser.add_argument('--fc_logvar_model_path', type=str,
+                        default=fc_logvar_path)
     parser.add_argument('--stats_path', type=str, 
-                        default='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz',)
+                        default='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz',)
     parser.add_argument('--data_modality', type=str, default='cropped_rgbd+color_mask')
     parser.add_argument('--cameras', type=str, nargs='+', default=['frontview_image', 'sideview_image'])
 
@@ -156,9 +170,11 @@ if __name__ == "__main__":
 
     process_dataset_actions_to_latent_actions(
         dataset_path=args.dataset_path,
-        conv_path=args.encoder_model_path,
+        conv_path=args.conv_model_path,
+        fc_mu_path=args.fc_mu_model_path,
+        fc_logvar_path=args.fc_logvar_model_path,
         mlp_path=None,
         stats_path=args.stats_path,
         data_modality=args.data_modality,
-        cameras=args.cameras
+        cameras=args.cameras,
     )

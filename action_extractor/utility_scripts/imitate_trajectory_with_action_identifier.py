@@ -19,7 +19,7 @@ from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrap
 
 right_video_mode = 'inferred_actions'
 dataset_path = "/home/yilong/Documents/policy_data/lift/obs_policy_c"
-dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
+dataset_path = "/home/yilong/Documents/policy_data/lift/lift_smaller_2000"
 # dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
@@ -27,16 +27,18 @@ dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
 # non-variational settings
 conv_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-46.pth'
 mlp_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-46.pth'
-n = None
+n = 100
 save_webp = False
 
-# variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-50.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-50.pth'
-fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-50.pth'
-fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-50.pth'
+deterministic=True
 
-output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_50"
+# variational settings
+conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-73.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-73.pth'
+fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-73.pth'
+fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-73.pth'
+
+output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_73_deterministic"
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
@@ -130,7 +132,8 @@ def imitate_trajectory_with_action_identifier(
         fc_logvar_path=fc_logvar_path,
         stats_path=stats_path,
         coordinate_system='global',
-        camera_name=cameras[0].split('_')[0]  # Use the first camera for initialization
+        camera_name=cameras[0].split('_')[0],  # Use the first camera for initialization
+        deterministic=deterministic
     ).to(device)
     action_identifier.eval()
 
@@ -257,10 +260,10 @@ def imitate_trajectory_with_action_identifier(
 
                     # Infer action
                     with torch.no_grad():
-                        if isinstance(action_identifier.encoder, VariationalEncoder):
-                            action, _, _ = action_identifier(obs_tensor)
-                        else:
+                        if deterministic:
                             action = action_identifier(obs_tensor)
+                        else:
+                            action, _, _ = action_identifier(obs_tensor)
                     inferred_actions.append(action.cpu().numpy().squeeze())
                     
                 # Reset environment to initial state from dataset

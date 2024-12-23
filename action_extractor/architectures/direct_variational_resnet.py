@@ -17,19 +17,6 @@ class ActionExtractionVariationalResNet(nn.Module):
         # Encoder outputs for mean and log variance
         self.fc_mu = nn.Linear(resnet_out_dim, latent_dim)
         self.fc_logvar = nn.Linear(resnet_out_dim, latent_dim)
-
-        # Decoder (MLP head)
-        # mlp_layers = [
-        #     nn.Linear(latent_dim, 512),
-        #     nn.LeakyReLU()
-        # ]
-        # for _ in range(num_mlp_layers):
-        #     mlp_layers.extend([
-        #         nn.Linear(512, 512),
-        #         nn.LeakyReLU()
-        #     ])
-        # mlp_layers.append(nn.Linear(512, num_classes))
-        # self.mlp = nn.Sequential(*mlp_layers)
         
         self.mlp = ResNetMLP(
             input_size=latent_dim,

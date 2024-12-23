@@ -23,8 +23,10 @@ class VariationalEncoder(nn.Module):
 
 class ActionIdentifier(nn.Module):
     def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
-                 coordinate_system='global', camera_name='frontview'):
+                 coordinate_system='global', camera_name='frontview', deterministic=True):
         super(ActionIdentifier, self).__init__()
+        self.deterministic = deterministic
+
         self.encoder = encoder
         self.decoder = decoder
         
@@ -57,10 +59,10 @@ class ActionIdentifier(nn.Module):
         z = mu + eps * std             # Reparameterization trick
         return z
     
-    def encode(self, x, deterministic=False):
+    def encode(self, x):
         if isinstance(self.encoder, VariationalEncoder):
             mu, logvar = self.encoder(x)
-            if deterministic:
+            if self.deterministic:
                 return mu
             else:
                 return self.reparameterize(mu, logvar), mu, logvar
@@ -80,11 +82,11 @@ class ActionIdentifier(nn.Module):
         return action
     
     def forward(self, x):
-        if isinstance(self.encoder, VariationalEncoder):
+        if self.deterministic:
+            return self.decode(self.encode(x))
+        else:
             z, mu, logvar = self.encode(x)
             return self.decode(z), mu, logvar
-        else:
-            return self.decode(self.encode(x))
         
     def transform_to_global(self, action):
         # Extract position component (first 3 dimensions) and other components
@@ -123,7 +125,8 @@ def load_action_identifier(
     stats_path='action_statistics_delta_position+gripper.npz',
     coordinate_system='global',
     camera_name='frontview',
-    split_layer='avgpool' # The last layer of the encoder
+    split_layer='avgpool', # The last layer of the encoder
+    deterministic=True
 ):
     # Build the model
     if fc_mu_path is not None and fc_logvar_path is not None:
@@ -207,6 +210,7 @@ def load_action_identifier(
         stats_path=stats_path,
         coordinate_system=coordinate_system,
         camera_name=camera_name,
+        deterministic=deterministic
     )
 
     return action_identifier

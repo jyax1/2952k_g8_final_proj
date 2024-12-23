@@ -18,8 +18,13 @@ latent_action = True
 
 conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-46.pth'
 mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-46.pth'
+conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-73.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-73.pth'
+fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-73.pth'
+fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-73.pth'
+
 cameras=["frontview_image", "sideview_image"]
-stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_action_norot.npz'
+stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz'
 
 # Define the path to the HDF5 file and output directory
 hdf5_file_path = '/home/yilong/Documents/ae_data/random_processing/iiwa200/action_extraction_IIWA200.hdf5'
@@ -27,7 +32,7 @@ output_dir = '/home/yilong/Documents/action_extractor/debug/D_movement_iiwa200'
 output_format = 'mp4'  # Choose 'mp4' or 'webp'
 
 latent_hdf5_file_path = '/home/yilong/Documents/ae_data/random_processing/iiwa16168_test/lift_200_cropped_rgbd+color_mask.hdf5'
-latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda200_delta_pos_cosine+mse_model'
+latent_output_dir = '/home/yilong/Documents/action_extractor/debug/D_demo_latent_panda200_variation_model'
 
 def visualize_action_dataset_as_videos():
     # Create the output directory if it doesn't exist
@@ -139,6 +144,8 @@ def visualize_latent_action_dataset_as_video():
     action_identifier = load_action_identifier(
         conv_path=conv_path,
         mlp_path=mlp_path,
+        fc_mu_path=fc_mu_path,
+        fc_logvar_path=fc_logvar_path,
         resnet_version='resnet18',
         video_length=2,
         in_channels=len(cameras) * 6,
@@ -184,7 +191,7 @@ def visualize_latent_action_dataset_as_video():
 
             for j in range(len(latent_actions_dataset)):
                 true_action = action_identifier.decode(latent_actions_dataset[j])
-                true_action = true_action.detach().cpu().numpy()
+                true_action = true_action.detach().cpu().numpy() * 80
                 true_action = np.insert(true_action, [3, 3, 3], 0.0)
                 # Remove the magnitude normalization
                 true_action[-1] = np.sign(true_action[-1])
