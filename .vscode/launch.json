@@ -271,7 +271,7 @@
             "request": "launch",
             "program": "action_extractor/train.py",
             "console": "integratedTerminal",
-            "args": ["-a=direct_variational_resnet",
+            "args": ["-a=direct_S_variational_resnet",
             "--epoch=50",
             "--batch_size=16",
             "-rln=18",

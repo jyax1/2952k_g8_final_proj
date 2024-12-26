@@ -123,13 +123,14 @@ class VAELoss(nn.Module):
         else:
             self.kld_weight = self.base_kld_weight
 
-    def forward(self, outputs, targets, mu, logvar, validation=False):
+    def forward(self, outputs, targets, mu, distribution_param, validation=False):
         # Reconstruction loss
         recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
-        # KL divergence
-        kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
         
-        # Save the last reconstruction and KL divergence losses for logging
+        # KL divergence using model's implementation
+        kld_loss = self.model.kl_divergence(mu, distribution_param)
+        
+        # Save losses for logging
         self.last_recon_loss = recon_loss.item()
         self.last_kld_loss = kld_loss.item()
 

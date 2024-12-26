@@ -117,13 +117,15 @@ def load_model(architecture,
                                     image_plus_motion=image_plus_motion,
                                     vit_patch_size=vit_patch_size)
         
-    elif architecture == 'direct_resnet_mlp' or architecture == 'direct_variational_resnet':
+    elif architecture == 'direct_resnet_mlp' or 'variational_resnet' in architecture:
         resnet_version = 'resnet' + str(resnet_layers_num)
         
         if architecture == 'direct_resnet_mlp':
             architecture_class = ActionExtractionResNet
-        elif architecture == 'direct_variational_resnet':
+        elif architecture == 'direct_N_variational_resnet':
             architecture_class = ActionExtractionVariationalResNet
+        elif architecture == 'direct_S_variational_resnet':
+            architecture_class = ActionExtractionHypersphericalResNet
         
         if 'action' in action_type and 'norot' not in action_type:
             num_classes = 7
