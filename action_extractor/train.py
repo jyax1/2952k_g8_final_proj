@@ -82,7 +82,7 @@ def train(args):
         epochs=args.epoch,
         lr=args.learning_rate,
         loss=args.loss,
-        vae=isinstance(model, ActionExtractionVariationalResNet)
+        vae=isinstance(model, ActionExtractionVariationalResNet) or isinstance(model, ActionExtractionHypersphericalResNet),
     )
 
     # Load checkpoint if provided

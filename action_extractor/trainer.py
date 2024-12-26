@@ -123,12 +123,12 @@ class VAELoss(nn.Module):
         else:
             self.kld_weight = self.base_kld_weight
 
-    def forward(self, outputs, targets, mu, distribution_param, validation=False):
+    def forward(self, model, outputs, targets, mu, distribution_param, validation=False):
         # Reconstruction loss
         recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
         
         # KL divergence using model's implementation
-        kld_loss = self.model.kl_divergence(mu, distribution_param)
+        kld_loss = model.kl_divergence(mu, distribution_param)
         
         # Save losses for logging
         self.last_recon_loss = recon_loss.item()
@@ -255,8 +255,8 @@ class Trainer:
                 self.optimizer.zero_grad()
                 
                 if self.vae:
-                    outputs, mu, logvar = self.model(inputs)
-                    loss, deviations = self.criterion(outputs, labels, mu, logvar)
+                    outputs, mu, distribution_param = self.model(inputs)
+                    loss, deviations = self.criterion(self.model, outputs, labels, mu, distribution_param)
                 else:
                     outputs = self.model(inputs)
                     loss, deviations = self.criterion(outputs, labels)
@@ -362,8 +362,8 @@ class Trainer:
             for inputs, labels in tqdm(self.validation_loader, desc="Validating", leave=False):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 if self.vae:
-                    outputs, mu, logvar = self.model(inputs)
-                    loss, deviations = self.criterion(outputs, labels, mu, logvar, validation=True)
+                    outputs, mu, distribution_param = self.model(inputs)
+                    loss, deviations = self.criterion(self.model, outputs, labels, mu, distribution_param, validation=True)
                 else:
                     outputs = self.model(inputs)
                     if self.aux:
