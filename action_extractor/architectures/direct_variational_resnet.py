@@ -61,27 +61,101 @@ class ActionExtractionVariationalResNet(BaseVAE):
         return -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
 
 
-class ActionExtractionHypersphericalResNet(BaseVAE):
-    def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, 
-                 latent_dim=32, action_length=1, num_classes=7, num_mlp_layers=3):
-        super(ActionExtractionHypersphericalResNet, self).__init__()
+# --------------------------------------------------------------------------
+# 1) Series-based approximation of log(I_v(x)) in pure PyTorch (GPU-friendly)
+#
+#    I_v(x) = \sum_{k=0}^\infty  \frac{(x/2)^{2k+v}}{k! \Gamma(k+v+1)}
+#
+#  We compute log(I_v(x)) by partial summation + log-sum-exp.
+#  This is typically okay for moderate x, v. For large x or v, consider
+#  scaled Bessel or asymptotic expansions to avoid overflow.
 
+def log_i_v_series(v, x, max_iter=50):
+    """
+    Compute log(I_v(x)) via the series expansion, fully on the GPU.
+
+    Args:
+      v:  [B]  (can be float, e.g. v = d/2 - 1)
+      x:  [B]  (kappa >= 0)
+      max_iter: how many terms in the series expansion
+
+    Returns:
+      log_I_v: [B], log of the Bessel function I_v(x).
+    """
+    # Both v, x are shape [B]. We'll create a [max_iter, B] mesh
+    B = x.shape[0]
+    device = x.device
+    dtype = x.dtype
+
+    # k in [0, 1, 2, ..., max_iter-1]
+    k_arange = torch.arange(max_iter, device=device, dtype=dtype)  # shape [max_iter]
+    # Expand to [max_iter, B]
+    k_mat = k_arange.unsqueeze(1).expand(max_iter, B)       # shape [max_iter, B]
+    v_mat = v.unsqueeze(0).expand(max_iter, B)              # shape [max_iter, B]
+    x_mat = x.unsqueeze(0).expand(max_iter, B)              # shape [max_iter, B]
+
+    # (x/2)^(2k + v) => (2k + v)* log(x/2)
+    # We'll do everything in log space to avoid large exponentials
+    log_x_over_2 = torch.log(x_mat/2 + 1e-40)  # shape [max_iter, B]
+    logTerm_top = (2*k_mat + v_mat) * log_x_over_2  # shape [max_iter, B]
+
+    # Denominator: k! * Gamma(k+v+1)
+    # => log(k!) + logGamma(k+v+1)
+    # k! = Gamma(k+1)
+    lgamma_k_plus_1 = torch.lgamma(k_mat + 1.0)
+    lgamma_k_plus_v_plus_1 = torch.lgamma(k_mat + v_mat + 1.0)
+    logTerm_bot = lgamma_k_plus_1 + lgamma_k_plus_v_plus_1
+
+    # So the log of each term is:
+    #   logTerm = (2k+v)*log(x/2) - [log(k!) + logGamma(k+v+1)]
+    logTerm = logTerm_top - logTerm_bot
+
+    # sum in exp space => log-sum-exp over dimension=0 (the k dimension)
+    lse = torch.logsumexp(logTerm, dim=0)  # shape [B]
+    return lse  # log(I_v(x))
+
+
+def i_v_series(v, x, max_iter=50):
+    """
+    Return I_v(x) by exponentiating log_i_v_series(...).
+    May overflow if x, v are large. In practice, consider scaled versions.
+    """
+    return torch.exp(log_i_v_series(v, x, max_iter=max_iter))
+
+
+# --------------------------------------------------------------------------
+# 2) Final HypersphericalResNet with pure-PyTorch Bessel for large-batch GPU
+
+class ActionExtractionHypersphericalResNet(BaseVAE):
+    def __init__(self, 
+                 resnet_version='resnet18', 
+                 video_length=2, 
+                 in_channels=3, 
+                 latent_dim=32, 
+                 action_length=1, 
+                 num_classes=7, 
+                 num_mlp_layers=3,
+                 bessel_max_iter=50):
+        """
+        bessel_max_iter: how many terms to use for the series expansion of I_v(x).
+                         Increase for more accuracy if x or v can be large.
+        """
+        super(ActionExtractionHypersphericalResNet, self).__init__()
         self.latent_dim = latent_dim
-        # --------------------------------------------------
-        # 1) Build the ResNet backbone
+        self.bessel_max_iter = bessel_max_iter
+
+        # Build the ResNet backbone
         self.conv, resnet_out_dim = resnet_builder(
             resnet_version=resnet_version, 
             video_length=video_length, 
             in_channels=in_channels
         )
 
-        # --------------------------------------------------
-        # 2) Encoder outputs for mean direction (mu) and concentration (kappa)
+        # Encoder outputs for mean direction and concentration
         self.fc_mu = nn.Linear(resnet_out_dim, latent_dim)
         self.fc_kappa = nn.Linear(resnet_out_dim, 1)
         
-        # --------------------------------------------------
-        # 3) MLP to map the latent z -> final action output
+        # MLP to map latent z -> final action output
         self.mlp = ResNetMLP(
             input_size=latent_dim,
             hidden_size=512,
@@ -91,39 +165,31 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
         )
 
     def encode(self, x):
-        """Encode input x -> (mu, kappa) for the vMF distribution."""
         h = self.conv(x)
         h = h.view(h.size(0), -1)
         # mu in R^d, forced to unit vector
         mu = F.normalize(self.fc_mu(h), dim=-1)
-        # kappa >= 1 to avoid kappa=0 corner (vMF becomes uniform). 
-        # You might set + 0, but +1 is also fine for numerical stability.
+        # kappa >= 1 to avoid kappa=0 (vMF ~ uniform). 
+        # +1 helps ensure a stable positivity
         kappa = F.softplus(self.fc_kappa(h)) + 1
         return mu, kappa
 
     def _sample_vMF_radial(self, kappa, dim):
         """
-        Sample the radial component 'w' from the vMF distribution, 
-        using an accept-reject approach. 
-        This is one valid way to handle the 'radius' part in vMF sampling.
-        
-        Args:
-            kappa: [batch_size]
-            dim:   scalar (latent dimension, d)
-        Returns:
-            w: [batch_size], each in [-1, 1], used to scale the random direction.
+        Sample the radial part 'w' from vMF with accept-reject.
+        Vectorizing this accept-reject can be tricky if success rates differ,
+        so we do a python loop. For large batches, consider a vectorized approach
+        or a different sampling method.
         """
-        w = torch.zeros_like(kappa, device=kappa.device)
+        w = torch.zeros_like(kappa)
         for i in range(kappa.shape[0]):
             k = kappa[i]
             done = False
             while not done:
                 z = torch.rand(1, device=k.device)
-                # stable approach
                 z = z * (1 - torch.exp(-2*k)) + torch.exp(-2*k)
-                w_temp = 1 - torch.log(z) / k
+                w_temp = 1.0 - torch.log(z) / k
                 u = torch.rand(1, device=k.device)
-                # accept-reject test
                 if torch.log(u) <= (dim - 3) * torch.log(w_temp) + k * w_temp:
                     w[i] = w_temp
                     done = True
@@ -131,112 +197,99 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
 
     def _householder_rotation(self, v, mu):
         """
-        Householder rotation that reflects v onto mu (assuming v is 
-        orthonormal to mu). 
-        Actually used here to 'rotate' a random direction v so that 
-        its mean direction is mu.
+        Householder reflection to rotate v onto mu.
         """
-        # Reflect v across the plane orthogonal to (v - mu)
-        u = F.normalize(v - mu, dim=-1)  # the reflection axis
+        u = F.normalize(v - mu, dim=-1)  # reflection axis
+        # reflect v across the plane orthogonal to u
         return v - 2.0 * (v * u).sum(-1, keepdim=True) * u
 
     def reparameterize(self, mu, kappa):
         """
-        Reparam trick for vMF: 
-        1) Sample a random direction v uniformly on S^{d-1}.
-        2) Sample radial component w from accept-reject above.
-        3) Reflect the direction so that its mean direction is mu.
-        4) Scale by w.
+        Reparam trick for vMF:
+          1) sample v ~ Uniform(S^{d-1})
+          2) sample radial part w
+          3) reflect v so it has mean direction mu
+          4) scale by w
         """
         batch_size = mu.shape[0]
-        latent_dim = mu.shape[1]
-        
-        # 1) random direction on the unit sphere
-        v = torch.randn(batch_size, latent_dim, device=mu.device)
+        dim = mu.shape[1]
+
+        # 1) random direction on the sphere
+        v = torch.randn(batch_size, dim, device=mu.device)
         v = F.normalize(v, dim=-1)
-        
-        # 2) sample radial part
-        w = self._sample_vMF_radial(kappa.squeeze(-1), latent_dim)  # shape [batch_size]
-        
-        # 3) householder rotate
+
+        # 2) radial part
+        kappa_1d = kappa.squeeze(-1)  # shape [B]
+        w = self._sample_vMF_radial(kappa_1d, dim)
+
+        # 3) rotate
         z = self._householder_rotation(v, mu)
-        
-        # 4) scale by w
+
+        # 4) scale
         z = z * w.unsqueeze(-1)
-        
+
         return z
 
     def forward(self, x):
-        """
-        Full forward pass: 
-        1) encode => (mu, kappa)
-        2) reparameterize => z
-        3) MLP => final output
-        """
         mu, kappa = self.encode(x)
         z = self.reparameterize(mu, kappa)
-        output = self.mlp(z)
-        return output, mu, kappa
+        out = self.mlp(z)
+        return out, mu, kappa
 
     def kl_divergence(self, mu, kappa):
         """
-        Computes KL( vMF(mu, kappa) || Uniform(S^{d-1}) ).
-        
-        The formula (batch-wise) is:
-          KL = [ (d/2 - 1)*log(kappa) - (d/2)*log(2*pi) - log(I_{d/2 - 1}(kappa)) ]
+        KL( vMF(mu, kappa) || Uniform(S^{d-1}) )
+
+        In dimension d = mu.shape[1], the formula is:
+
+          KL = [ (d/2 - 1)*log(kappa) - (d/2)*log(2*pi) - log(I_{(d/2)-1}(kappa)) ]
                 + kappa * m(kappa)
-                + log( surface_area(S^{d-1}) )
-        
-        where:
-          m(kappa) = I_{d/2}(kappa) / I_{d/2 - 1}(kappa)
-          surface_area(S^{d-1}) = 2 pi^{d/2} / Gamma(d/2).
-          
-        We'll return mean over the batch.
+                + log( surface_area(S^{d-1}) ),
+
+          where m(kappa) = I_{d/2}(kappa) / I_{d/2 - 1}(kappa),
+          surface_area(S^{d-1}) = 2 * pi^{d/2} / Gamma(d/2).
+
+        We'll compute I_{(d/2)-1}(kappa) and I_{d/2}(kappa) via i_v_series(...).
         """
-        # 1) dimension: points lie on S^{d-1}, so d = mu.shape[1]
         d = mu.shape[1]
+        kappa = kappa.squeeze(-1)  # [B]
+        kappa = torch.clamp(kappa, min=1e-10)  # avoid log(0)
 
-        # 2) Flatten kappa from [B,1] -> [B]
-        kappa = kappa.squeeze(-1)
-        # clamp to avoid log(0)
-        kappa = torch.clamp(kappa, min=1e-10)
-
-        # 3) Define terms for the log normalizing constant of vMF
-        #    logC_vMF = (d/2 - 1)*log(kappa) - (d/2)*log(2*pi) - log(I_{(d/2)-1}(kappa))
         half_d = d / 2.0
-        nu = half_d - 1.0  # order for the Bessel function
+        nu = half_d - 1.0  # i.e. (d/2) - 1
         log_2pi = math.log(2.0 * math.pi)
 
-        # log(I_{nu}(kappa)) 
-        # NOTE: for large d,kappa, consider scaled bessel or asymptotics
-        log_bessel_nu = torch.log(iv(nu, kappa) + 1e-40)
+        # 1) log(I_{nu}(kappa))
+        log_i_nu = log_i_v_series(
+            v=torch.full_like(kappa, nu), 
+            x=kappa, 
+            max_iter=self.bessel_max_iter
+        )
 
-        logC_vMF = ((half_d - 1.0)*torch.log(kappa)
-                    - half_d*log_2pi
-                    - log_bessel_nu)
+        # -> logC_vMF = (d/2 - 1)*log(kappa) - (d/2)*log(2*pi) - log(I_{nu}(kappa))
+        logC_vMF = ( (half_d - 1.0) * torch.log(kappa)
+                     - half_d * log_2pi
+                     - log_i_nu )
 
-        # 4) The mean resultant length: m(kappa) = I_{d/2}(kappa) / I_{d/2 - 1}(kappa)
-        #    We'll compute log(I_{d/2}(kappa)) - log(I_{d/2 - 1}(kappa)) => log(m(kappa))
-        nu_plus = half_d
-        log_bessel_nu_plus = torch.log(iv(nu_plus, kappa) + 1e-40)
-        log_m_kappa = log_bessel_nu_plus - log_bessel_nu
+        # 2) mean resultant length: m(kappa) = I_{d/2}(kappa) / I_{d/2 - 1}(kappa)
+        #    => log(m(kappa)) = log(I_{d/2}(kappa)) - log(I_{d/2 - 1}(kappa))
+        log_i_nu_plus = log_i_v_series(
+            v=torch.full_like(kappa, half_d), 
+            x=kappa, 
+            max_iter=self.bessel_max_iter
+        )
+        log_m_kappa = log_i_nu_plus - log_i_nu
         m_kappa = torch.exp(log_m_kappa)
 
-        # So the 'expected log-likelihood' part under vMF is => logC_vMF + kappa * E[mu^T z] = logC_vMF + kappa*m_kappa
-
-        # 5) Uniform on S^{d-1} => constant density = 1 / |S^{d-1}|.
-        #    log p_unif = -log(|S^{d-1}|)
-        #    where |S^{d-1}| = 2 pi^{d/2} / Gamma(d/2)
-        #    => log_surface_area = log(2) + (d/2)*log(pi) - lgamma(d/2)
+        # 3) log surface area of S^{d-1}
+        #    = log(2) + (d/2)*log(pi) - logGamma(d/2)
         log_surface_area = (
             math.log(2.0)
             + half_d * math.log(math.pi)
-            - torch.lgamma(torch.tensor(half_d, device=kappa.device))
+            - torch.lgamma(torch.tensor(half_d, device=kappa.device, dtype=kappa.dtype))
         )
 
-        # 6) Full KL => E[log p_vMF(z)] - E[log p_unif(z)]
-        #              = [logC_vMF + kappa*m_kappa] - [- log_surface_area]
-        #              = logC_vMF + kappa*m_kappa + log_surface_area
-        kl_batch = logC_vMF + kappa*m_kappa + log_surface_area
-
-        return kl_batch.mean()
+        # 4) Final KL
+        #    = logC_vMF + kappa*m_kappa + log_surface_area
+        kl_vals = logC_vMF + kappa * m_kappa + log_surface_area
+        return kl_vals.mean()

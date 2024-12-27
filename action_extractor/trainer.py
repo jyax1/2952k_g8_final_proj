@@ -10,7 +10,7 @@ from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
 from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from action_extractor.architectures.latent_decoders import *
 from action_extractor.architectures.direct_resnet_mlp import ActionExtractionResNet
-from action_extractor.architectures.direct_variational_resnet import ActionExtractionVariationalResNet
+from action_extractor.architectures.direct_variational_resnet import ActionExtractionVariationalResNet, ActionExtractionHypersphericalResNet
 from action_extractor.architectures.resnet import ResNet3D
 import csv
 from tqdm import tqdm
@@ -421,6 +421,12 @@ class Trainer:
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}.pth'))
             torch.save(self.model.fc_mu.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fc_mu-{epoch}.pth'))
             torch.save(self.model.fc_logvar.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fc_logvar-{epoch}.pth'))
+            torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
+            
+        elif isinstance(self.model, ActionExtractionHypersphericalResNet):
+            torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, f'{self.model_name}_resnet-{epoch}.pth'))
+            torch.save(self.model.fc_mu.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fc_mu-{epoch}.pth'))
+            torch.save(self.model.fc_kappa.state_dict(), os.path.join(self.results_path, f'{self.model_name}_fc_kappa-{epoch}.pth'))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, f'{self.model_name}_mlp-{epoch}.pth'))
             
         elif isinstance(self.model, ResNet3D):
