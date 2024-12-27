@@ -97,6 +97,7 @@ def load_model(architecture,
                freeze_fdm=None,
                action_type='pose',
                data_modality='rgb', # to be extracted
+               vMF_sample_method='rejection',
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':
@@ -147,14 +148,31 @@ def load_model(architecture,
         elif data_modality == 'cropped_rgbd+color_mask_depth':
             input_channels = 7 * horizon * len(cameras)
             
+        # Common parameters for all model types
+        two_d_resnet_params = {
+            'resnet_version': resnet_version,
+            'video_length': horizon,
+            'action_length': 1,
+            'num_classes': num_classes,
+            'num_mlp_layers': num_mlp_layers
+        }
+        
+         # Add vMF parameter only for HypersphericalResNet
+        if architecture == 'direct_S_variational_resnet':
+            two_d_resnet_params['vMF_sample_method'] = vMF_sample_method
+        
         if data_modality == 'rgb' or data_modality == 'color_mask_depth':
-            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=3*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            two_d_resnet_params['in_channels'] = 3*len(cameras)
+            model = architecture_class(**two_d_resnet_params)
         elif data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
-            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=4*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            two_d_resnet_params['in_channels'] = 4*len(cameras)
+            model = architecture_class(**two_d_resnet_params)
         elif data_modality == 'cropped_rgbd+color_mask_depth':
-            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=7*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            two_d_resnet_params['in_channels'] = 7*len(cameras)
+            model = architecture_class(**two_d_resnet_params)
         elif data_modality == 'cropped_rgbd+color_mask':
-            model = architecture_class(resnet_version=resnet_version, video_length=horizon, in_channels=6*len(cameras), action_length=1, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
+            two_d_resnet_params['in_channels'] = 6*len(cameras)
+            model = architecture_class(**two_d_resnet_params)
         elif data_modality == 'voxel':
             if resnet_layers_num == 18:
                 model = resnet18_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
@@ -168,7 +186,7 @@ def load_model(architecture,
                 model = resnet152_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
             elif resnet_layers_num == 200:
                 model = resnet200_3d(input_channels=input_channels, num_classes=num_classes, num_mlp_layers=num_mlp_layers)
-                
+                   
     # elif architecture == 'flownet2':
     #     if 'action' in action_type:
     #         num_classes = 7

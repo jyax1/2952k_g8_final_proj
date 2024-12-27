@@ -6,7 +6,7 @@ from action_extractor.config import *
 '''
 Temporary
 '''
-oscar = False
+oscar = True
 if oscar:
     dp = "/users/ysong135/scratch/datasets/train"
     vp = "/users/ysong135/scratch/datasets/val"
@@ -48,6 +48,7 @@ def train(args):
         freeze_fdm=args.freeze_fdm,
         action_type=args.action_type,
         data_modality=args.data_modality,
+        vMF_sample_method=args.vMF_sample_method,
         )
 
     # Instandiate datasets
@@ -83,6 +84,7 @@ def train(args):
         lr=args.learning_rate,
         loss=args.loss,
         vae=isinstance(model, ActionExtractionVariationalResNet) or isinstance(model, ActionExtractionHypersphericalResNet),
+        num_gpus=args.num_gpus
     )
 
     # Load checkpoint if provided
@@ -283,6 +285,16 @@ if __name__ == '__main__':
         type=str,
         default='',
         help='Path to a checkpoint file to resume training'
+    )
+    parser.add_argument(
+        '--vMF_sample_method',
+        type=str,
+        default='rejection',
+    )
+    
+    parser.add_argument(
+        '--num_gpus', type=int, default=None,
+        help='Number of GPUs to use (default: use all available)'
     )
 
     args = parser.parse_args()

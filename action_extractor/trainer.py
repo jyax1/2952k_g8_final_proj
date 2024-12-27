@@ -165,8 +165,9 @@ class Trainer:
                  lr=0.001, 
                  momentum=0.9,
                  loss='mse',
-                 vae = False):
-        self.accelerator = Accelerator()
+                 vae = False,
+                 num_gpus=1):
+        self.accelerator = Accelerator(kwargs_handlers=[{'num_processes': num_gpus}] if num_gpus else [])
         self.model = model
         self.model_name = model_name
         self.train_set = train_set
@@ -203,8 +204,8 @@ class Trainer:
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5, verbose=True)
 
         # Prepare the model, optimizer, and dataloaders for distributed training
-        self.model, self.optimizer, self.train_loader, self.validation_loader = self.accelerator.prepare(
-            self.model, self.optimizer, self.train_loader, self.validation_loader
+        self.model, self.optimizer, self.train_loader, self.validation_loader, self.criterion = self.accelerator.prepare(
+            self.model, self.optimizer, self.train_loader, self.validation_loader, self.criterion
         )
 
         if not os.path.exists(results_path):
@@ -376,6 +377,12 @@ class Trainer:
 
         avg_val_loss = total_val_loss / len(self.validation_loader)
         avg_deviations = torch.cat(all_deviations).mean(dim=0)
+        
+        avg_val_loss = self.accelerator.gather(avg_val_loss).mean()
+        outputs = self.accelerator.gather(outputs)
+        labels = self.accelerator.gather(labels)
+        avg_deviations = self.accelerator.gather(avg_deviations)
+        
         return avg_val_loss, outputs, labels, avg_deviations
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):

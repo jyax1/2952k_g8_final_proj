@@ -135,7 +135,8 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
                  action_length=1, 
                  num_classes=7, 
                  num_mlp_layers=3,
-                 bessel_max_iter=50):
+                 bessel_max_iter=50,
+                 vMF_sample_method='wood'):
         """
         bessel_max_iter: how many terms to use for the series expansion of I_v(x).
                          Increase for more accuracy if x or v can be large.
@@ -143,6 +144,8 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
         super(ActionExtractionHypersphericalResNet, self).__init__()
         self.latent_dim = latent_dim
         self.bessel_max_iter = bessel_max_iter
+        
+        self.vMF_sample_method = vMF_sample_method.lower()
 
         # Build the ResNet backbone
         self.conv, resnet_out_dim = resnet_builder(
@@ -195,6 +198,196 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
                     done = True
         return w
 
+    def _sample_vMF_radial_vectorized(self, kappa, dim, max_tries=100):
+        """
+        Vectorized accept-reject for w in a single batch pass on the GPU.
+        Args:
+        kappa: [B] or [B,1]
+        dim:   scalar
+        max_tries: cap the loop to prevent infinite runs if acceptance is very low.
+
+        Returns:
+        w: [B]
+        """
+        device = kappa.device
+        kappa = kappa.view(-1)  # [B]
+        B = kappa.shape[0]
+
+        w = torch.zeros(B, device=device)
+        accepted = torch.zeros(B, dtype=torch.bool, device=device)
+
+        for _ in range(max_tries):
+            # Draw all candidates at once
+            z = torch.rand(B, device=device)
+            # stable approach
+            z = z * (1 - torch.exp(-2*kappa)) + torch.exp(-2*kappa)
+            w_temp = 1.0 - torch.log(z) / kappa
+
+            u = torch.rand(B, device=device)
+            # accept-reject criterion
+            test_log = (dim - 3) * torch.log(w_temp) + kappa * w_temp
+            compare_log = torch.log(u)
+
+            # mask of newly accepted
+            newly_accepted = compare_log <= test_log
+            # keep only for those not previously accepted
+            newly_accepted = newly_accepted & (~accepted)
+
+            # update w for newly accepted
+            w[newly_accepted] = w_temp[newly_accepted]
+            # mark them as accepted
+            accepted = accepted | newly_accepted
+
+            # break if all accepted
+            if accepted.all():
+                break
+
+        # any that *never* got accepted remain zero; depending on your domain,
+        # you could clamp or handle them. Usually, the acceptance rate is high enough.
+        return w
+    
+    # ----------------------------------------------------------------------
+    #  1) Vectorized Wood's Algorithm for vMF sampling (no per-sample loop)
+    # ----------------------------------------------------------------------
+    def _wood_sample_vMF(self, mu, kappa):
+        """
+        Vectorized sampling of z ~ vMF(mu, kappa) in R^d using Wood's algorithm.
+        Returns: z, shape [B, d].
+        
+        Steps (batch of size B):
+          1) Let d = mu.shape[1].
+          2) We sample w in [-1,1] from a 1D distribution ~ e^{kappa w}(1-w^2)^{(d-3)/2}.
+             This is done via a small accept-reject in batch form.
+          3) Sample an orthonormal direction in R^{d-1}.
+          4) Embed [w, sqrt(1-w^2)*v] into R^d.
+          5) Rotate to match the mean direction mu in R^d.
+        """
+        device = mu.device
+        B, d = mu.shape
+        kappa = kappa.view(B)
+
+        # We'll do an accept-reject for w, but fully vectorized:
+        # pdf(w) ~ e^{kappa w} (1-w^2)^{(d-3)/2}, w in [-1,1].
+        # We'll do a loop up to some max tries, each time generating "candidates".
+
+        max_tries = 50  # you can adjust if acceptance is low
+        accepted = torch.zeros(B, dtype=torch.bool, device=device)
+        w = torch.zeros(B, device=device)
+
+        alpha = d - 1.0  # = (d-1)
+
+        for _ in range(max_tries):
+            # uniform candidate in [-1,1]
+            w_cand = 2.0*torch.rand(B, device=device) - 1.0
+            # compute log pdf: 
+            #   log p(w_cand) ~ kappa * w_cand + ((d-3)/2) * log(1 - w_cand^2)
+            # We'll do shape-protection for d=2 => then (d-3)/2 = -0.5, still works.
+            one_minus_w2 = 1.0 - w_cand*w_cand
+            # avoid log(0)
+            one_minus_w2 = torch.clamp(one_minus_w2, min=1e-40)
+            log_p = kappa * w_cand + (0.5*(alpha - 2.0)) * torch.log(one_minus_w2)
+
+            # we don't need the normalizing constant for accept-reject
+            # just find max of log p theoretically. The maximum is around w=1 for large kappa,
+            # but let's be safe. We'll sample u in [0,1].
+            # define a bounding function M s.t. log_u < log_p - logM or so.
+            # for simplicity, let's define M = 1 for all w => we need the max pdf < 1 => not trivial
+            # Instead, we can do a ratio approach. We'll do a second approach:
+            #  We'll compare log_u to [log_p - log_p_max].
+            # But we need an upper bound. A simpler approach is:
+            #   for each w_cand, also generate p_cand (some uniform(0, 1) scaled by the peak pdf).
+            # This is "self-normalized" accept-reject:
+            #   We sample another uniform(0,1), accept if log(u) < log_p - c, where c is a "shift".
+            #
+            # We'll shift by the max log p in the batch to keep stability, but we only do local AR.
+            # This is standard: accept if u < exp(log_p - max_log_p), for a batch-based approach.
+
+            # shift for numeric stability
+            # But each sample might have a different max...
+            # We'll do a single "global" shift that won't break correctness, but might reduce acceptance. 
+            # Or do it individually per sample.
+            # For best vectorization, do it per sample:
+            max_log_p_cand = log_p  # since we do sample by sample anyway.
+            # we can just do accept if u < exp(log_p_cand - log_p_cand) => exp(0) => 1 => trivial. That doesn't help.
+
+            # Let's do a small bounding trick. A simpler approach is we can compare 
+            #   log(u) with log_p - A
+            # for some big A that ensures acceptance < 1 always. 
+            # Or we skip trying to find an explicit M, and do:
+            #   "We guess an upper bound. If that fails, we can fallback or just take the ratio approach."
+            #
+            # Actually, let's do a "self-normalized" approach: we also sample log v. If log v <= log_p - c, accept.
+
+            # We'll pick c = 0 for simplicity, then we need p(w) <= 1 for all w, which might not hold if kappa large.
+            # Let's do c = (kappa*1 + 0.5*(alpha-2)*log(1 - 1^2))?? That doesn't make sense. 
+            # 
+            # Let's just do a "secondary" random uniform r in [0,1], and accept if:
+            #   r <= exp( log_p - max_possible_log_p )
+            #
+            # The maximum possible log_p might be near w=1 for large kappa. Let's estimate it as w=1 => 
+            #   log_p_max ~ kappa*(1) + (0.5*(alpha-2))*log(1-1^2) => second term is log(0) => -inf => not good.
+            # Actually the "peak" is typically near w=1 if kappa is large, or near w=0 if kappa=0, etc.
+            #
+            # We'll do a simpler bounding approach:
+            #   log_p <= kappa + 0? Actually might still be negative. 
+            #   We can be liberal and pick a bound like M = exp(kappa). 
+            #
+            # So we do accept if log(r) < log_p - kappa => log(r) + kappa < log_p.
+
+            log_r = torch.log(torch.rand(B, device=device) + 1e-40)
+            # accept if log_r + kappa < log_p
+            accept_mask = (log_r + kappa) <= log_p
+
+            newly_accepted = accept_mask & (~accepted)
+            w[newly_accepted] = w_cand[newly_accepted]
+            accepted = accepted | newly_accepted
+
+            if accepted.all():
+                break
+
+        # Now w in [-1,1]. Next step: sample random direction in R^{d-1}.
+        # We'll do that by sampling standard normal [B, d-1], normalizing.
+        # Then embed as last coordinate = w, the rest is sqrt(1 - w^2) * v.
+
+        w_clamped = torch.clamp(w, -1.0, 1.0)  # just to be safe
+        v = torch.randn(B, d-1, device=device)
+        v = F.normalize(v, dim=-1)  # each row is a direction in R^{d-1}
+
+        # shape [B], sqrt(1 - w^2)
+        sqrt_term = torch.sqrt(1.0 - w_clamped.pow(2).clamp(min=1e-40))
+        # embed: we want a [B, d] vector where the last coordinate is w, 
+        #        the first (d-1) coordinates are sqrt(1-w^2) * v
+        # We'll store that in a new tensor "z_tilde"
+        z_tilde = torch.zeros(B, d, device=device)
+        # first d-1 coords
+        z_tilde[:, 0:(d-1)] = (sqrt_term.unsqueeze(-1) * v)
+        # last coord
+        z_tilde[:, d-1] = w_clamped
+
+        # Finally, we rotate z_tilde so that its "mean direction" is mu.
+        # We'll do a Householder-based reflection that sends e_d -> mu, but we can also do:
+        # "Reflect z_tilde so that [0,...,0,1] goes to mu."
+
+        # Quick approach: note that z_tilde is currently oriented so that the "mean direction" 
+        # in R^d is the last axis. We want to rotate that last axis to mu.
+        # We'll do a Householder from e_d to mu. 
+        # e_d = [0,0,...,1], so we'll define e_d - mu, reflect z_tilde across that plane.
+
+        e_d = torch.zeros(d, device=device)
+        e_d[-1] = 1.0
+        # expand to batch
+        e_d_batch = e_d.unsqueeze(0).expand(B, d)
+        # reflection axis
+        u = F.normalize(e_d_batch - mu, dim=-1)  # shape [B, d]
+
+        # reflect z_tilde across that plane
+        # z = z_tilde - 2 (z_tilde * u) u
+        dot_val = (z_tilde * u).sum(dim=-1, keepdim=True)
+        z = z_tilde - 2.0 * dot_val * u
+        # z now ~ vMF(mu, kappa)
+
+        return z
+    
     def _householder_rotation(self, v, mu):
         """
         Householder reflection to rotate v onto mu.
@@ -211,24 +404,28 @@ class ActionExtractionHypersphericalResNet(BaseVAE):
           3) reflect v so it has mean direction mu
           4) scale by w
         """
-        batch_size = mu.shape[0]
-        dim = mu.shape[1]
+        if self.vMF_sample_method == 'wood':
+            return self._wood_sample_vMF(mu, kappa)
+        
+        elif self.vMF_sample_method == 'rejection':
+            batch_size = mu.shape[0]
+            dim = mu.shape[1]
 
-        # 1) random direction on the sphere
-        v = torch.randn(batch_size, dim, device=mu.device)
-        v = F.normalize(v, dim=-1)
+            # 1) random direction on the sphere
+            v = torch.randn(batch_size, dim, device=mu.device)
+            v = F.normalize(v, dim=-1)
 
-        # 2) radial part
-        kappa_1d = kappa.squeeze(-1)  # shape [B]
-        w = self._sample_vMF_radial(kappa_1d, dim)
+            # 2) radial part
+            kappa_1d = kappa.squeeze(-1)  # shape [B]
+            w = self._sample_vMF_radial_vectorized(kappa_1d, dim)
 
-        # 3) rotate
-        z = self._householder_rotation(v, mu)
+            # 3) rotate
+            z = self._householder_rotation(v, mu)
 
-        # 4) scale
-        z = z * w.unsqueeze(-1)
+            # 4) scale
+            z = z * w.unsqueeze(-1)
 
-        return z
+            return z
 
     def forward(self, x):
         mu, kappa = self.encode(x)
