@@ -1,10 +1,5 @@
 #!/bin/bash
 
-cosine_similarity_loss_flag=""
-if [ "$cosine_similarity_loss" = true ]; then
-    cosine_similarity_loss_flag="--cosine_similarity_loss"
-fi
-
 run()
 {
     jn=TRAIN_note${note}
@@ -50,7 +45,9 @@ run()
     --demo_percentage=${demo_percentage}
     --coordinate_system=${coordinate_system}
     --standardize_data
-    ${cosine_similarity_loss_flag}
+    --loss=${loss_type}
+    --vMF_sample_method=${vMF_sample_method}
+    --num_gpus=${num_gpus}
     "
     slurm_args=""
 
@@ -68,116 +65,35 @@ date=$(date +%m%d)
 
 # Parameters for the jobs
 demo_percentage=1.0
-epoch=100
+epoch=500  # Changed from 100
 motion=""
 image_plus_motion=""
 idm_model_name=""
 fdm_model_name=""
 freeze_idm=""
 freeze_fdm=""
-architecture="direct_resnet_mlp"
+architecture="direct_S_variational_resnet"  # Changed architecture
 learning_rate=0.001
 val_demo_percentage=0.0
 demo_percentage=1.0
+num_gpus=16  # Added GPU parameter
+vMF_sample_method="rejection"  # Added vMF parameter
 
 resnet_layers_num=18
 num_mlp_layers=3
 
-# delta_position+gripper
+# First run with rejection sampling
 action_type="delta_position+gripper"
 horizon=2
 batch_size=1632
-
-cameras="frontview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|frontview"
-train_only
-
-cameras="frontview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=camera
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|camera|frontview"
-train_only
-
 cameras="frontview_image,sideview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|frontviewsideview"
-train_only
-
-cameras="agentview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|agentview"
-train_only
-
-cameras="agentview_image,sideagentview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|agentviewsideagentview"
-train_only
-
-cosine_similarity_loss_flag="--cosine_similarity_loss"
-
-cameras="frontview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|frontview|cos"
-train_only
-
-cameras="frontview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=camera
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|camera|frontview|cos"
-train_only
-
-cameras="frontview_image,sideview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|frontviewsideview|cos"
-train_only
-
-cameras="agentview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|disentangled|agentview|cos"
-train_only
-
-cameras="agentview_image,sideagentview_image"
-data_modality="cropped_rgbd+color_mask_depth"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask_depth|global|agentviewsideagentview|cos"
-train_only
-
 data_modality="cropped_rgbd+color_mask"
-
-cameras="agentview_image,sideagentview_image"
 coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask|global|agentviewsideagentview|cos"
+note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632-rejection"
+loss_type="cosine+mse"
 train_only
 
-cameras="frontview_image"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask|disentangled|frontview|cos"
-train_only
-
-cameras="frontview_image"
-coordinate_system=camera
-note="delta_position+gripper|cropped_rgbd+color_mask|camera|frontview|cos"
-train_only
-
-cameras="frontview_image,sideview_image"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask|global|frontviewsideview|cos"
-train_only
-
-cameras="agentview_image"
-coordinate_system=disentangled
-note="delta_position+gripper|cropped_rgbd+color_mask|disentangled|agentview|cos"
-train_only
-
-cameras="agentview_image,sideagentview_image"
-coordinate_system=global
-note="delta_position+gripper|cropped_rgbd+color_mask|global|agentviewsideagentview|cos"
+# Second run with Wood's method
+vMF_sample_method="wood"
+note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632-wood"
 train_only

@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -n 2
+#SBATCH -n 16
 #SBATCH --time=200:00:00
-#SBATCH -p 3090-gcondo --gres=gpu:1 --gres-flags=enforce-binding
-#SBATCH --mem=32Gb
+#SBATCH -p 3090-gcondo --gres=gpu:16 --gres-flags=enforce-binding
+#SBATCH --mem=64Gb
 
 # Use '%A' for array-job ID, '%J' for job ID and '%a' for task ID
 #SBATCH -e outputs/%J.err
@@ -19,5 +19,5 @@ conda activate fc
 
 export HYDRA_FULL_ERROR=1
 
-export AE_DIR=/users/ysong135/Documents/action_extractor
+export AE_DIR=/users/ysong135/Documents/action_extractor/action_extractor
 python ${AE_DIR}/train.py ${train_args}

@@ -285,7 +285,8 @@
             "--val_demo_percentage=0.9",
             "--demo_percentage=0.9",
             "--coordinate_system=global",
-            "--loss=cosine+mse"
+            "--loss=cosine+mse",
+            "--vMF_sample_method=rejection"
         ]
         }
     ]
