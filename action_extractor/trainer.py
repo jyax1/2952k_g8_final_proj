@@ -165,9 +165,13 @@ class Trainer:
                  lr=0.001, 
                  momentum=0.9,
                  loss='mse',
-                 vae = False,
+                 vae=False,
                  num_gpus=1):
-        self.accelerator = Accelerator(kwargs_handlers=[{'num_processes': num_gpus}] if num_gpus else [])
+        # Initialize accelerator with correct device configuration
+        self.accelerator = Accelerator(
+            n_processes=num_gpus if num_gpus else None,
+            mixed_precision='no'
+        )
         self.model = model
         self.model_name = model_name
         self.train_set = train_set

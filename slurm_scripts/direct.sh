@@ -33,7 +33,7 @@ run()
     export train_args="
     --architecture=${architecture}
     --epoch=${epoch}
-    --batch_size=${batch_size}
+    --batch_size=${total_batch_size}
     --resnet_layers_num=${resnet_layers_num}
     --horizon=${horizon}
     --data_modality=${data_modality}
@@ -85,7 +85,8 @@ num_mlp_layers=3
 # First run with rejection sampling
 action_type="delta_position+gripper"
 horizon=2
-batch_size=13056 # 1632 * 8
+batch_size=1632 # 1632 * 8
+total_batch_size=$((batch_size * num_gpus))  # Total batch size across all GPUs
 cameras="frontview_image,sideview_image"
 data_modality="cropped_rgbd+color_mask"
 coordinate_system=global
