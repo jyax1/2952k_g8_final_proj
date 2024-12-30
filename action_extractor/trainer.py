@@ -126,9 +126,11 @@ class VAELoss(nn.Module):
     def forward(self, model, outputs, targets, mu, distribution_param, validation=False):
         # Reconstruction loss
         recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
-        
-        # KL divergence using model's implementation
-        kld_loss = model.kl_divergence(mu, distribution_param)
+
+        if hasattr(model, 'module'):
+            kld_loss = model.module.kl_divergence(mu, distribution_param)
+        else:
+            kld_loss = model.kl_divergence(mu, distribution_param)
         
         # Save losses for logging
         self.last_recon_loss = recon_loss.item()
@@ -168,7 +170,7 @@ class Trainer:
                  vae=False,
                  num_gpus=1):
         # Initialize accelerator with correct device configuration
-        self.accelerator = Accelerator(mixed_precision='no')
+        self.accelerator = Accelerator(mixed_precision='fp16')
         self.model = model
         self.model_name = model_name
         self.train_set = train_set

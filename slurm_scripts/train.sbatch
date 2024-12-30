@@ -27,7 +27,7 @@ export AE_DIR=/users/ysong135/Documents/action_extractor/action_extractor
 # Start GPU monitoring in the background with unique log file
 (
     while true; do
-        echo "Timestamp: $(date)" > outputs/gpu_monitor_${SLURM_JOB_ID}.log
+        echo "Timestamp: $(date)" >> outputs/gpu_monitor_${SLURM_JOB_ID}.log
         nvidia-smi >> outputs/gpu_monitor_${SLURM_JOB_ID}.log
         echo "-----------------------------------------" >> outputs/gpu_monitor_${SLURM_JOB_ID}.log
         sleep 1

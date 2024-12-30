@@ -35,7 +35,7 @@ run()
     export train_args="
     --architecture=${architecture}
     --epoch=${epoch}
-    --batch_size=${total_batch_size}
+    --batch_size=${batch_size}
     --resnet_layers_num=${resnet_layers_num}
     --horizon=${horizon}
     --data_modality=${data_modality}
@@ -73,7 +73,6 @@ date=$(date +%m%d)
 # Define your parameters in one place
 num_gpus=8
 batch_size=1632  # Per GPU batch size
-total_batch_size=$((batch_size * num_gpus))  # Total batch size across all GPUs
 
 architecture="direct_S_variational_resnet"
 epoch=500
