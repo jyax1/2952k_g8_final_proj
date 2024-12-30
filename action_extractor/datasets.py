@@ -1,13 +1,14 @@
 import os
 import numpy as np
 import torch
-from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
+from action_extractor.utils.dataset_utils import pose_inv, camera_extrinsics, frontview_R
 from action_extractor.utils.dataset_utils import *
 
 from torch.utils.data import Dataset
 from glob import glob
 from einops import rearrange
 import zarr
+from zarr import ZipStore
 from torchvideotransforms import video_transforms, volume_transforms
 import numpy as np
 from tqdm import tqdm
@@ -64,22 +65,20 @@ class BaseDataset(Dataset):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
-            zarr_path = seq_dir.replace('.hdf5', '.zarr')
+            zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')
             if not os.path.exists(zarr_path):
                 # Convert HDF5 to Zarr if it doesn't exist
-                hdf5_to_zarr_parallel(seq_dir, max_workers=64)
+                hdf5_to_zarr_zip_parallel(seq_dir, max_workers=64)
 
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
-            root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
+            store = ZipStore(zarr_path, mode='a')
+            root = zarr.group(store)
             
             for i in range(len(all_cameras)):
                 camera_name = all_cameras[i].split('_')[0]
-                camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
-                # eef_pos_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}'
-                # eef_pos_disentangled_path = f'data/demo_0/obs/robot0_eef_pos_{camera_name}_disentangled'
-
-                # If any of the required data paths are missing, preprocess them
-                if camera_maskdepth_path not in root:
+                obs_group = root['data']['demo_0']['obs']
+                mask_key = f"{camera_name}_maskdepth"
+                if mask_key not in obs_group:
                     # Call the preprocessing function if any data is missing
                     preprocess_data_parallel(root, camera_name, frontview_R)
                     
@@ -88,11 +87,13 @@ class BaseDataset(Dataset):
                     cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
                 elif 'cropped_rgbd' in self.data_modality:
                     cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
-        
+
+            store.close()
+            
         # Collect all Zarr files
-        self.zarr_files = glob(f"{path}/**/*.zarr", recursive=True)
-        self.stores = [zarr.DirectoryStore(zarr_file) for zarr_file in self.zarr_files]
-        self.roots = [zarr.open(store, mode='r') for store in self.stores]
+        self.zarr_files = glob(f"{path}/**/*.zarr.zip", recursive=True)
+        self.stores = [ZipStore(zarr_file, mode='r') for zarr_file in self.zarr_files]
+        self.roots = [zarr.group(store) for store in self.stores]
 
         # Process each demo within each Zarr file
         def process_demo(demo, data, task, camera=None):

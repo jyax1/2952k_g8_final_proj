@@ -4,11 +4,13 @@ Helper functions for loading datasets
 
 import h5py
 import zarr
+from zarr import ZipStore
 import torch
 import os
 from PIL import Image
 import numpy as np
 import concurrent.futures
+from tqdm import tqdm
 import importlib.resources
 
 
@@ -83,22 +85,128 @@ def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
     
-def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
+def hdf5_to_zarr_zip_parallel(hdf5_path, max_workers=64):
+    """
+    Converts an existing HDF5 file to a single-file .zarr.zip store in parallel.
+    - First shows a gather-items progress bar (so you see progress while scanning).
+    - Then shows a single global progress bar for copying all datasets in parallel.
+    """
+    print(f'Converting {hdf5_path} to zarr file in parallel')
+
+    # 1) Set up source/target
+    hdf5_file = h5py.File(hdf5_path, 'r')
+    zarr_path = hdf5_path.replace('.hdf5', '.zarr.zip')
+    store = ZipStore(zarr_path, mode='w')
+    root = zarr.group(store, overwrite=True)
+
+    # ----------------------------------------------------------
+    # (A) FIRST: SCAN the entire HDF5 to count how many keys we have
+    # ----------------------------------------------------------
+    def gather_items_count(hdf5_node):
+        """
+        Recursively count the total number of keys (both groups & datasets)
+        under this node in HDF5. Returns an integer count.
+        """
+        count = 0
+        for key in hdf5_node.keys():
+            count += 1  # this key is a group or dataset
+            item = hdf5_node[key]
+            if isinstance(item, h5py.Group):
+                count += gather_items_count(item)  # Recursively count children
+        return count
+
+    total_keys = gather_items_count(hdf5_file)
+    print(f"Total keys (groups + datasets) in HDF5: {total_keys}")
+
+    # ----------------------------------------------------------
+    # (B) GATHER: Recursively gather all HDF5 datasets, updating a TQDM bar
+    # ----------------------------------------------------------
+    items_to_copy = []
+
+    def gather_items(hdf5_node, zarr_node, pbar):
+        """
+        Recursively walk HDF5 node, collecting dataset copy tasks in items_to_copy,
+        while updating the progress bar for each key encountered.
+        """
+        for key in hdf5_node.keys():
+            item = hdf5_node[key]
+            pbar.update(1)  # One more key visited
+            if isinstance(item, h5py.Group):
+                # Create matching group in Zarr
+                sub_group = zarr_node.require_group(key)
+                gather_items(item, sub_group, pbar)
+            elif isinstance(item, h5py.Dataset):
+                items_to_copy.append((item, zarr_node, key))
+
+    # Create a bar for the gather phase
+    with tqdm(total=total_keys, desc="Gathering keys", ncols=100) as gather_pbar:
+        gather_items(hdf5_file, root, gather_pbar)
+
+    # 2) A function to copy a single dataset
+    def copy_dataset(item, zarr_node, key):
+        """Copy HDF5 dataset -> Zarr dataset."""
+        compression = item.compression
+        compression_opts = item.compression_opts
+        chunks = item.chunks if item.chunks else (1000,)
+        zarr_node.create_dataset(
+            key,
+            data=item[:],
+            chunks=chunks,
+            dtype=item.dtype,
+            compression=compression,
+            compression_opts=compression_opts,
+        )
+
+    # ----------------------------------------------------------
+    # (C) COPY: Now we copy them in parallel, showing a second TQDM bar
+    # ----------------------------------------------------------
+    with tqdm(total=len(items_to_copy), desc="Copying datasets", ncols=100) as copy_pbar:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(copy_dataset, dataset_item, zarr_node, key)
+                for (dataset_item, zarr_node, key) in items_to_copy
+            ]
+            for _ in concurrent.futures.as_completed(futures):
+                copy_pbar.update(1)
+
+    # 5) Clean up
+    hdf5_file.close()
+    store.close()
+
+    print(f'Duplicated {hdf5_path} as zarr.zip file {zarr_path}')
+    
+def preprocess_data_parallel(root, camera, R, max_workers=64, batch_size=500):
+    """
+    Process demos in parallel, converting {camera}_image + {camera}_depth into
+    {camera}_maskdepth, plus related camera-space transformations. Includes a
+    TQDM progress bar indicating how many demos have finished processing.
+    """
+
     def process_demo(demo_key):
-        # print(f"Processing {demo_key} into {camera}_maskdepth and related data")
+        """
+        Returns a tuple of (demo_key, maskdepth_array, camera_positions,
+                            disentangled_positions, rgbd_cropped) for each demo.
+        Or returns None if the dataset already exists.
+        """
+        obs_group = root['data'][demo_key]['obs']
 
-        # Step 1: Process maskdepth data
-        images = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 3)
-        depth_images = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
-        depth_images = depth_images.squeeze(-1)
+        # If {camera}_maskdepth already exists, skip this demo
+        maskdepth_key = f'{camera}_maskdepth'
+        if maskdepth_key in obs_group:
+            # We can either return None or a sentinel to indicate "already processed"
+            return None
 
+        images = obs_group[f'{camera}_image'][:]  # (trajectory_length, 128, 128, 3)
+        depth_images = obs_group[f'{camera}_depth'][:]  # (trajectory_length, 128, 128, 1)
+        depth_images = depth_images.squeeze(-1)  # (trajectory_length, 128, 128)
+
+        # Convert images to HSV and create the mask/depth
         hsv_images = np.stack([cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images])
         green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
         cyan_lower, cyan_upper = np.array([80, 40, 100]), np.array([100, 255, 255])
 
         green_mask = ((hsv_images >= green_lower) & (hsv_images <= green_upper)).all(axis=-1).astype(np.uint8) * 255
         cyan_mask = ((hsv_images >= cyan_lower) & (hsv_images <= cyan_upper)).all(axis=-1).astype(np.uint8) * 255
-
         combined_mask = np.bitwise_or(green_mask, cyan_mask)
 
         maskdepth_array = np.zeros((images.shape[0], images.shape[1], images.shape[2], 3), dtype=np.uint8)
@@ -106,101 +214,97 @@ def preprocess_data_parallel(root, camera, R, max_workers=8, batch_size=500):
         maskdepth_array[..., 1] = cyan_mask
         maskdepth_array[..., 2] = np.where(combined_mask, depth_images, 0)
 
-        # Step 2: Process robot0_eef_pos_{camera_name}
-        global_positions = root['data'][demo_key]['obs']['robot0_eef_pos'][:]  # Shape: (trajectory_length, 3)
+        # robot0_eef_pos in global coords
+        global_positions = obs_group['robot0_eef_pos'][:]  # (trajectory_length, 3)
         trajectory_length = global_positions.shape[0]
-        
-        # Convert global positions to homogeneous coordinates
+
+        # Convert to homogeneous coords
         homogeneous_positions = np.hstack((global_positions, np.ones((trajectory_length, 1))))
 
         # Apply extrinsic matrix R to get positions in the camera frame
         camera_positions_homogeneous = (R @ homogeneous_positions.T).T
-        camera_positions = camera_positions_homogeneous[:, :3]  # Take only the first 3 components
+        camera_positions = camera_positions_homogeneous[:, :3]
 
-        # Step 3: Process robot0_eef_pos_{camera_name}_disentangled
-        # Compute (x/z, y/z, log(z)) for each point in camera_positions
+        # Disentangled positions: (x/z, y/z, log(z))
         x, y, z = camera_positions[:, 0], camera_positions[:, 1], camera_positions[:, 2]
         disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
-        
+
         # Step 4: Process {camera}_rgbdcrop
-        # rgb_image = root['data'][demo_key]['obs'][f'{camera}_image'][:]  # Shape: (trajectory_length, 128, 128, 4)
-        # depth = root['data'][demo_key]['obs'][f'{camera}_depth'][:]  # Shape: (trajectory_length, 128, 128, 1)
-        # rgbd_image = np.concatenate((rgb_image, depth), axis=3)  # Shape: (trajectory_length, 128, 128, 4)
-        
-        rgbd_image = root['data'][demo_key]['obs'][f'{camera}_rgbd'][:]  # Shape: (trajectory_length, 128, 128, 4)
+        rgbd_image = obs_group[f'{camera}_rgbd'][:]  # (trajectory_length, 128, 128, 4)
+        height, width = rgbd_image.shape[1], rgbd_image.shape[2]
 
-        trajectory_length, height, width, _ = rgbd_image.shape
-
-        # Calculate bounding boxes for each frame in parallel
+        # Calculate bounding boxes
         bbox_coords = np.array([cv2.boundingRect(combined_mask[i]) for i in range(trajectory_length)])
-
-        # Create a bounding box mask for each frame
         bbox_masks = np.zeros((trajectory_length, height, width), dtype=np.uint8)
-        for i, (x, y, w, h) in enumerate(bbox_coords):
-            bbox_masks[i, y:y+h, x:x+w] = 1
+        for i, (x_, y_, w_, h_) in enumerate(bbox_coords):
+            bbox_masks[i, y_:y_+h_, x_:x_+w_] = 1
 
-        # Expand bbox_masks to match the RGB-D image shape
-        bbox_masks_expanded = bbox_masks[..., np.newaxis]  # Shape: (trajectory_length, height, width, 1)
-
-        # Mask the RGB-D image with the bounding box mask, setting regions outside the bounding box to zero
+        # Expand bbox_masks, mask the RGB-D
+        bbox_masks_expanded = bbox_masks[..., np.newaxis]
         rgbd_cropped = rgbd_image * bbox_masks_expanded
 
+        return (demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped)
 
-        return demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped
-
-    # Process demos in parallel and write results in batches
+    # Gather all demo keys
     demo_keys = list(root['data'].keys())
+
+    results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = []
-        for demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped in executor.map(process_demo, demo_keys):
-            results.append((demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped))
+        with tqdm(total=len(demo_keys), desc=f"Preprocessing {camera}", ncols=100) as pbar:
+            for demo_output in executor.map(process_demo, demo_keys):
+                pbar.update(1)
+                # If None was returned, that means we skip writing
+                if demo_output is not None:
+                    results.append(demo_output)
 
-            # Write to Zarr every batch_size demos to prevent memory overflow
-            if len(results) >= batch_size:
-                _write_batch_to_zarr(root, camera, results)
-                results.clear()  # Clear the results list after writing to free up memory
+                if len(results) >= batch_size:
+                    _write_batch_to_zarr(root, camera, results)
+                    results.clear()
 
-        # Write any remaining results after processing all demos
         if results:
             _write_batch_to_zarr(root, camera, results)
 
+
 def _write_batch_to_zarr(root, camera, batch_results):
-    """Helper function to write a batch of results to Zarr."""
+    """
+    Writes a batch of results to Zarr. 
+    This version avoids "deleting" the dataset if it exists.
+    We simply create it if it's missing (which the logic above ensures).
+    """
     for demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped in batch_results:
-        # Save maskdepth data
+        obs_group = root['data'][demo_key]['obs']
+
+        # Create maskdepth dataset if it doesn't exist
         maskdepth_key = f'{camera}_maskdepth'
-        if maskdepth_key in root['data'][demo_key]['obs']:
-            del root['data'][demo_key]['obs'][maskdepth_key]
-        root['data'][demo_key]['obs'].create_dataset(
-            maskdepth_key, data=maskdepth_array, shape=maskdepth_array.shape, dtype=maskdepth_array.dtype, overwrite=True
-        )
-        # print(f"Saved {maskdepth_key} for {demo_key}")
+        if maskdepth_key not in obs_group:
+            obs_group.create_dataset(
+                maskdepth_key, data=maskdepth_array,
+                shape=maskdepth_array.shape, dtype=maskdepth_array.dtype
+            )
 
-        # Save camera-space end-effector positions
+        # EEF pos in camera coordinates
         eef_pos_key = f'robot0_eef_pos_{camera}'
-        if eef_pos_key in root['data'][demo_key]['obs']:
-            del root['data'][demo_key]['obs'][eef_pos_key]
-        root['data'][demo_key]['obs'].create_dataset(
-            eef_pos_key, data=camera_positions, shape=camera_positions.shape, dtype=camera_positions.dtype, overwrite=True
-        )
-        # print(f"Saved {eef_pos_key} for {demo_key}")
+        if eef_pos_key not in obs_group:
+            obs_group.create_dataset(
+                eef_pos_key, data=camera_positions,
+                shape=camera_positions.shape, dtype=camera_positions.dtype
+            )
 
-        # Save disentangled end-effector positions
+        # EEF pos disentangled
         eef_pos_disentangled_key = f'robot0_eef_pos_{camera}_disentangled'
-        if eef_pos_disentangled_key in root['data'][demo_key]['obs']:
-            del root['data'][demo_key]['obs'][eef_pos_disentangled_key]
-        root['data'][demo_key]['obs'].create_dataset(
-            eef_pos_disentangled_key, data=disentangled_positions, shape=disentangled_positions.shape, dtype=disentangled_positions.dtype, overwrite=True
-        )
-        # print(f"Saved {eef_pos_disentangled_key} for {demo_key}")
-        
-        rgbdcrop_key = f'{camera}_rgbdcrop'
-        if rgbdcrop_key in root['data'][demo_key]['obs']:
-            del root['data'][demo_key]['obs'][rgbdcrop_key]
-        root['data'][demo_key]['obs'].create_dataset(
-            rgbdcrop_key, data=rgbd_cropped, shape=rgbd_cropped.shape, dtype=rgbd_cropped.dtype, overwrite=True
-        )
+        if eef_pos_disentangled_key not in obs_group:
+            obs_group.create_dataset(
+                eef_pos_disentangled_key, data=disentangled_positions,
+                shape=disentangled_positions.shape, dtype=disentangled_positions.dtype
+            )
 
+        # {camera}_rgbdcrop
+        rgbdcrop_key = f'{camera}_rgbdcrop'
+        if rgbdcrop_key not in obs_group:
+            obs_group.create_dataset(
+                rgbdcrop_key, data=rgbd_cropped,
+                shape=rgbd_cropped.shape, dtype=rgbd_cropped.dtype
+            )
 
 def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=500):
     def process_demo(demo_key):
@@ -642,6 +746,13 @@ with importlib.resources.path('action_extractor.utils', 'sideagentview_matrices.
     sideagentview_matrices = np.load(sideagentview_path)
     sideagentview_K = sideagentview_matrices['K']
     sideagentview_R = pose_inv(sideagentview_matrices['R'])
+    
+camera_extrinsics = {
+    'frontview': frontview_R,
+    'sideview': sideview_R,
+    'agentview': agentview_R,
+    'sideagentview': sideagentview_R
+}
 
 
 def save_image_to_debug(image, filename="image.png"):
