@@ -168,10 +168,7 @@ class Trainer:
                  vae=False,
                  num_gpus=1):
         # Initialize accelerator with correct device configuration
-        self.accelerator = Accelerator(
-            n_processes=num_gpus if num_gpus else None,
-            mixed_precision='no'
-        )
+        self.accelerator = Accelerator(mixed_precision='no')
         self.model = model
         self.model_name = model_name
         self.train_set = train_set
