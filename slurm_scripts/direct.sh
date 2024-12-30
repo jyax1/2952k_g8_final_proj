@@ -4,6 +4,7 @@ run()
 {
     jn=TRAIN_note${note}
 
+    # Append additional identifiers based on conditions
     if [ -n "$motion" ]; then
         jn="${jn}_motion"
     fi
@@ -30,6 +31,7 @@ run()
 
     jn="${jn}_${date}"
 
+    # Define training arguments
     export train_args="
     --architecture=${architecture}
     --epoch=${epoch}
@@ -49,10 +51,15 @@ run()
     --vMF_sample_method=${vMF_sample_method}
     --num_gpus=${num_gpus}
     "
-    slurm_args=""
 
+    # Define Slurm arguments for GPU allocation and task count
+    slurm_args="--gres=gpu:${num_gpus} --ntasks=${num_gpus}"
+
+    # Define job name
     jn1=${jn}_train
-    jobID_1=$(sbatch ${slurm_args} --job-name=${jn1} --export=ALL ${train_script} | cut -f 4 -d' ')
+
+    # Submit the job to Slurm
+    jobID_1=$(sbatch ${slurm_args} --job-name=${jn1} --export=ALL,NUM_GPUS=${num_gpus} slurm_scripts/train.sbatch | cut -f 4 -d' ')
 }
 
 train_only()
@@ -63,35 +70,27 @@ train_only()
 
 date=$(date +%m%d)
 
-# Parameters for the jobs
-demo_percentage=1.0
-epoch=500  # Changed from 100
-motion=""
-image_plus_motion=""
-idm_model_name=""
-fdm_model_name=""
-freeze_idm=""
-freeze_fdm=""
-architecture="direct_S_variational_resnet"  # Changed architecture
+# Define your parameters in one place
+num_gpus=8
+batch_size=1632  # Per GPU batch size
+total_batch_size=$((batch_size * num_gpus))  # Total batch size across all GPUs
+
+architecture="direct_S_variational_resnet"
+epoch=500
+resnet_layers_num=18
+horizon=2
+cameras="frontview_image,sideview_image"
+data_modality="cropped_rgbd+color_mask"
+coordinate_system="global"
+note="S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection"
+loss_type="cosine+mse"
 learning_rate=0.001
 val_demo_percentage=0.0
 demo_percentage=1.0
-num_gpus=8  # Added GPU parameter
-vMF_sample_method="rejection"  # Added vMF parameter
-
-resnet_layers_num=18
-num_mlp_layers=3
+vMF_sample_method="rejection"
 
 # First run with rejection sampling
 action_type="delta_position+gripper"
-horizon=2
-batch_size=1632 # 1632 * 8
-total_batch_size=$((batch_size * num_gpus))  # Total batch size across all GPUs
-cameras="frontview_image,sideview_image"
-data_modality="cropped_rgbd+color_mask"
-coordinate_system=global
-note="S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection"
-loss_type="cosine+mse"
 train_only
 
 # Second run with Wood's method
@@ -99,6 +98,7 @@ vMF_sample_method="wood"
 note="S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-wood"
 train_only
 
-architecture="direct_S_variational_resnet"
+# Third run (if needed)
+architecture="direct_N_variational_resnet"
 note="N_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8"
 train_only
