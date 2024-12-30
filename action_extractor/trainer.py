@@ -381,7 +381,14 @@ class Trainer:
         avg_val_loss = total_val_loss / len(self.validation_loader)
         avg_deviations = torch.cat(all_deviations).mean(dim=0)
         
-        avg_val_loss = self.accelerator.gather(avg_val_loss).mean()
+        # Convert scalar to a tensor:
+        avg_val_loss_tensor = torch.tensor(avg_val_loss, device=self.device)
+
+        # Now gather it properly:
+        avg_val_loss_tensor = self.accelerator.gather(avg_val_loss_tensor)
+        # Then compute the mean over processes:
+        avg_val_loss = avg_val_loss_tensor.mean().item()
+        
         outputs = self.accelerator.gather(outputs)
         labels = self.accelerator.gather(labels)
         avg_deviations = self.accelerator.gather(avg_deviations)

@@ -72,7 +72,7 @@ date=$(date +%m%d)
 
 # Define your parameters in one place
 num_gpus=8
-batch_size=1632  # Per GPU batch size
+batch_size=3000  # Per GPU batch size
 
 architecture="direct_S_variational_resnet"
 epoch=500
