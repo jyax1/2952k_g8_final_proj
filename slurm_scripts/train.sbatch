@@ -2,7 +2,7 @@
 #SBATCH -N 1
 #SBATCH --time=200:00:00
 #SBATCH -p 3090-gcondo --gres-flags=enforce-binding
-#SBATCH --mem=64Gb
+#SBATCH --mem=512Gb
 
 # Use '%J' for job ID
 #SBATCH -e outputs/%J.err
@@ -24,4 +24,4 @@ export HYDRA_FULL_ERROR=1
 export AE_DIR=/users/ysong135/Documents/action_extractor/action_extractor
 
 # Launch training with Accelerate using the specified number of GPUs
-accelerate launch --num_processes=${NUM_GPUS} ${AE_DIR}/train.py ${train_args}
+accelerate launch --num_processes=8 ${AE_DIR}/train.py ${train_args}
