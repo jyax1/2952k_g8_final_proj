@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -n 16
+#SBATCH -n 8
 #SBATCH --time=200:00:00
-#SBATCH -p 3090-gcondo --gres=gpu:16 --gres-flags=enforce-binding
+#SBATCH -p 3090-gcondo --gres=gpu:8 --gres-flags=enforce-binding
 #SBATCH --mem=64Gb
 
 # Use '%A' for array-job ID, '%J' for job ID and '%a' for task ID

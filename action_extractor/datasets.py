@@ -67,7 +67,7 @@ class BaseDataset(Dataset):
             zarr_path = seq_dir.replace('.hdf5', '.zarr')
             if not os.path.exists(zarr_path):
                 # Convert HDF5 to Zarr if it doesn't exist
-                hdf5_to_zarr_parallel(seq_dir, max_workers=8)
+                hdf5_to_zarr_parallel(seq_dir, max_workers=64)
 
             # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
             root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
