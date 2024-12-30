@@ -72,7 +72,7 @@ date=$(date +%m%d)
 
 # Define your parameters in one place
 num_gpus=8
-batch_size=1632  # Per GPU batch size
+batch_size=1500  # Per GPU batch size
 total_batch_size=$((batch_size * num_gpus))  # Total batch size across all GPUs
 
 architecture="direct_S_variational_resnet"
