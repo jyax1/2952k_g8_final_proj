@@ -376,7 +376,7 @@ class Trainer:
                     loss, deviations = self.criterion(outputs, labels)
 
                 total_val_loss += loss.item()
-                all_deviations.append(deviations.cpu())
+                all_deviations.append(deviations)
 
         avg_val_loss = total_val_loss / len(self.validation_loader)
         avg_deviations = torch.cat(all_deviations).mean(dim=0)
