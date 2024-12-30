@@ -85,15 +85,15 @@ num_mlp_layers=3
 # First run with rejection sampling
 action_type="delta_position+gripper"
 horizon=2
-batch_size=1632
+batch_size=26112
 cameras="frontview_image,sideview_image"
 data_modality="cropped_rgbd+color_mask"
 coordinate_system=global
-note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632-rejection"
+note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*16-rejection"
 loss_type="cosine+mse"
 train_only
 
 # Second run with Wood's method
 vMF_sample_method="wood"
-note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632-wood"
+note="S-variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*16-wood"
 train_only
