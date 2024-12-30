@@ -100,7 +100,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--architecture', '-a', 
         type=str, 
-        default='direct_resnet_mlp', 
+        default='direct_S_resnet_mlp', 
         choices=ARCHITECTURES,
         help='Model architecture to train'
     )
