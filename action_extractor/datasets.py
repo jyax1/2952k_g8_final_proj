@@ -70,31 +70,31 @@ class BaseDataset(Dataset):
             ds_dir = seq_dir.replace('.hdf5', '.zarr')        # e.g. /path/to/file.zarr
             zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')
             # 1) Convert HDF5 -> DirectoryStore if needed
-            if not os.path.exists(ds_dir):
+            if not os.path.exists(zarr_path):
                 hdf5_to_zarr_parallel_with_progress(seq_dir)
             
-            # 2) Preprocess data in the DirectoryStore 
-            store = DirectoryStore(ds_dir)
-            root = zarr.group(store, overwrite=False)  # or mode='r+' in older Zarr versions
-            # run your preprocess_data_parallel on the directory store
-            # but you must adapt: currently it expects a "ZipStore"? 
-            # Actually it just needs a 'root' with shape/dtype. 
-            # So it should be the same code, just pass root, not ZipStore
-            for i in range(len(all_cameras)):
-                camera_name = all_cameras[i].split('_')[0]
-                obs_group = root['data']['demo_0']['obs']
-                mask_key = f"{camera_name}_maskdepth"
-                if mask_key not in obs_group:
-                    # Call the preprocessing function if any data is missing
-                    preprocess_data_parallel(root, camera_name, frontview_R)
+                # 2) Preprocess data in the DirectoryStore 
+                store = DirectoryStore(ds_dir)
+                root = zarr.group(store, overwrite=False)  # or mode='r+' in older Zarr versions
+                # run your preprocess_data_parallel on the directory store
+                # but you must adapt: currently it expects a "ZipStore"? 
+                # Actually it just needs a 'root' with shape/dtype. 
+                # So it should be the same code, just pass root, not ZipStore
+                for i in range(len(all_cameras)):
+                    camera_name = all_cameras[i].split('_')[0]
+                    obs_group = root['data']['demo_0']['obs']
+                    mask_key = f"{camera_name}_maskdepth"
+                    if mask_key not in obs_group:
+                        # Call the preprocessing function if any data is missing
+                        preprocess_data_parallel(root, camera_name, frontview_R)
 
-            store.close()
+                store.close()
 
-            # 3) Now convert DirectoryStore -> .zarr.zip
-            directorystore_to_zarr_zip(ds_dir, zarr_path)
+                # 3) Now convert DirectoryStore -> .zarr.zip
+                directorystore_to_zarr_zip(ds_dir, zarr_path)
 
-            # 4) Clean up the .zarr directory if you only want the final .zarr.zip
-            shutil.rmtree(ds_dir)
+                # 4) Clean up the .zarr directory if you only want the final .zarr.zip
+                shutil.rmtree(ds_dir)
                     
             for i in range(len(cameras)):
                 if self.data_modality == 'color_mask_depth':
