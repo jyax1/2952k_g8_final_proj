@@ -85,66 +85,36 @@ def hdf5_to_zarr_parallel(hdf5_path, max_workers=64):
 
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
     
-def hdf5_to_zarr_zip_parallel(hdf5_path, max_workers=64):
+def hdf5_to_zarr_parallel_with_progress(hdf5_path, max_workers=64):
     """
-    Converts an existing HDF5 file to a single-file .zarr.zip store in parallel.
-    - First shows a gather-items progress bar (so you see progress while scanning).
-    - Then shows a single global progress bar for copying all datasets in parallel.
+    Function for duplicating an existing hdf5 file without a duplicate zarr file
+    and saving it as a zarr file. Parallelized with configurable number of workers,
+    while showing a single tqdm progress bar. 
     """
     print(f'Converting {hdf5_path} to zarr file in parallel')
-
-    # 1) Set up source/target
+    
+    # 1) Open source HDF5
     hdf5_file = h5py.File(hdf5_path, 'r')
-    zarr_path = hdf5_path.replace('.hdf5', '.zarr.zip')
-    store = ZipStore(zarr_path, mode='w')
-    root = zarr.group(store, overwrite=True)
+    
+    # 2) Prepare Zarr output path
+    zarr_path = hdf5_path.replace('.hdf5', '.zarr')
+    root = zarr.open(zarr_path, mode='w')
 
-    # ----------------------------------------------------------
-    # (A) FIRST: SCAN the entire HDF5 to count how many keys we have
-    # ----------------------------------------------------------
-    def gather_items_count(hdf5_node):
-        """
-        Recursively count the total number of keys (both groups & datasets)
-        under this node in HDF5. Returns an integer count.
-        """
-        count = 0
-        for key in hdf5_node.keys():
-            count += 1  # this key is a group or dataset
-            item = hdf5_node[key]
+    # --A-- Count how many total keys we have (groups + datasets) to size the progress bar
+    def count_keys(hdf_node):
+        total = 0
+        for _, item in hdf_node.items():
+            total += 1
             if isinstance(item, h5py.Group):
-                count += gather_items_count(item)  # Recursively count children
-        return count
+                total += count_keys(item)
+        return total
 
-    total_keys = gather_items_count(hdf5_file)
-    print(f"Total keys (groups + datasets) in HDF5: {total_keys}")
+    total_keys = count_keys(hdf5_file)
+    print(f"[INFO] Found {total_keys} total keys in {hdf5_path}")
 
-    # ----------------------------------------------------------
-    # (B) GATHER: Recursively gather all HDF5 datasets, updating a TQDM bar
-    # ----------------------------------------------------------
-    items_to_copy = []
-
-    def gather_items(hdf5_node, zarr_node, pbar):
-        """
-        Recursively walk HDF5 node, collecting dataset copy tasks in items_to_copy,
-        while updating the progress bar for each key encountered.
-        """
-        for key in hdf5_node.keys():
-            item = hdf5_node[key]
-            pbar.update(1)  # One more key visited
-            if isinstance(item, h5py.Group):
-                # Create matching group in Zarr
-                sub_group = zarr_node.require_group(key)
-                gather_items(item, sub_group, pbar)
-            elif isinstance(item, h5py.Dataset):
-                items_to_copy.append((item, zarr_node, key))
-
-    # Create a bar for the gather phase
-    with tqdm(total=total_keys, desc="Gathering keys", ncols=100) as gather_pbar:
-        gather_items(hdf5_file, root, gather_pbar)
-
-    # 2) A function to copy a single dataset
+    # --B-- We'll define the dataset copy function
     def copy_dataset(item, zarr_node, key):
-        """Copy HDF5 dataset -> Zarr dataset."""
+        """ Copy HDF5 dataset to Zarr, reading everything in one go. """
         compression = item.compression
         compression_opts = item.compression_opts
         chunks = item.chunks if item.chunks else (1000,)
@@ -154,106 +124,275 @@ def hdf5_to_zarr_zip_parallel(hdf5_path, max_workers=64):
             chunks=chunks,
             dtype=item.dtype,
             compression=compression,
+            compression_opts=compression_opts
+        )
+    
+    # We'll capture the progress bar as an external variable
+    pbar = None
+
+    # --C-- Recursive function that processes groups/datasets in parallel
+    def copy_node(hdf5_node, zarr_node):
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for key, item in hdf5_node.items():
+                # Each key we encounter (whether group or dataset), we update progress by 1
+                pbar.update(1)
+
+                if isinstance(item, h5py.Group):
+                    zarr_group = zarr_node.require_group(key)
+                    # Recursively copy subgroups
+                    futures.append(executor.submit(copy_node, item, zarr_group))
+                elif isinstance(item, h5py.Dataset):
+                    # Copy dataset in parallel
+                    futures.append(executor.submit(copy_dataset, item, zarr_node, key))
+            
+            # Wait for all parallel tasks in this node
+            concurrent.futures.wait(futures)
+
+    # --D-- Create the single progress bar
+    with tqdm(total=total_keys, desc="Copying Keys", ncols=100) as progress:
+        pbar = progress  # let copy_node reference it
+        copy_node(hdf5_file, root)
+
+    # --E-- Done
+    hdf5_file.close()
+    print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
+    
+def hdf5_to_zarr_zip_parallel(hdf5_path, max_workers=64, chunk_len=100):
+    """
+    Converts an existing HDF5 file to a single-file .zarr.zip store, in parallel,
+    but in a chunk-based manner to reduce memory usage. 
+    
+    1) We gather all dataset references.
+    2) We copy each dataset chunk by chunk rather than item[:] 
+       to avoid reading big arrays into memory all at once.
+    3) We keep parallelism moderate (max_workers=4 by default).
+    """
+
+    print(f'Converting {hdf5_path} to zarr file in parallel')
+
+    # 1) Open HDF5 source
+    hdf5_file = h5py.File(hdf5_path, 'r')
+    zarr_path = hdf5_path.replace('.hdf5', '.zarr.zip')
+
+    # 2) Open/create the ZipStore
+    store = ZipStore(zarr_path, mode='w')
+    root = zarr.group(store, overwrite=True)
+
+    # ----------------------------------------------------------
+    # A) FIRST: SCAN the entire HDF5 to count how many keys we have
+    # ----------------------------------------------------------
+    def gather_items_count(hdf5_node):
+        count = 0
+        for key in hdf5_node.keys():
+            count += 1
+            item = hdf5_node[key]
+            if isinstance(item, h5py.Group):
+                count += gather_items_count(item)
+        return count
+
+    total_keys = gather_items_count(hdf5_file)
+    print(f"Total keys (groups + datasets) in HDF5: {total_keys}")
+
+    # ----------------------------------------------------------
+    # B) GATHER: Recursively gather all HDF5 datasets, updating a TQDM bar
+    # ----------------------------------------------------------
+    items_to_copy = []
+
+    def gather_items(hdf5_node, zarr_node, pbar):
+        """
+        Recursively walk HDF5 node, collecting references to datasets
+        in `items_to_copy` while updating the progress bar.
+        """
+        for key in hdf5_node.keys():
+            item = hdf5_node[key]
+            pbar.update(1)
+            if isinstance(item, h5py.Group):
+                sub_group = zarr_node.require_group(key)
+                gather_items(item, sub_group, pbar)
+            elif isinstance(item, h5py.Dataset):
+                items_to_copy.append((item, zarr_node, key))
+
+    with tqdm(total=total_keys, desc="Gathering keys", ncols=100) as gather_pbar:
+        gather_items(hdf5_file, root, gather_pbar)
+
+    # ----------------------------------------------------------
+    # C) COPY: chunk-based approach to reduce memory usage
+    # ----------------------------------------------------------
+    def copy_dataset_in_chunks(h5_dataset, zarr_node, key):
+        """
+        Copy an HDF5 dataset to Zarr chunk by chunk to avoid large memory usage.
+        """
+        shape = h5_dataset.shape
+        dtype = h5_dataset.dtype
+        # If user-specified compression is available, use it
+        compression = h5_dataset.compression
+        compression_opts = h5_dataset.compression_opts
+
+        # Use existing chunk info or fallback
+        chunks = h5_dataset.chunks if h5_dataset.chunks else (chunk_len,)
+
+        # Create the Zarr dataset first (empty)
+        # We do not do `data=item[:]`; instead we initialize an empty dataset.
+        z = zarr_node.create_dataset(
+            name=key,
+            shape=shape,
+            dtype=dtype,
+            chunks=chunks,
+            compression=compression,
             compression_opts=compression_opts,
         )
 
-    # ----------------------------------------------------------
-    # (C) COPY: Now we copy them in parallel, showing a second TQDM bar
-    # ----------------------------------------------------------
+        # We copy in slices along the first dimension (or you can adapt).
+        if len(shape) == 0:
+            # scalar dataset
+            z[...] = h5_dataset[...]
+            return
+        elif shape[0] == 0:
+            # empty dataset
+            return
+
+        # chunk copy
+        chunk_size = chunk_len  
+        total_len = shape[0]
+        # For example, if shape = (10000, 128, 128, 3),
+        # we iterate over dimension 0 in increments of chunk_size
+        start = 0
+        while start < total_len:
+            end = min(start + chunk_size, total_len)
+            # read only that slice from HDF5
+            data_slice = h5_dataset[start:end]
+            # write it to Zarr
+            z[start:end] = data_slice
+            start = end
+
+    # Now we do the parallel copy
     with tqdm(total=len(items_to_copy), desc="Copying datasets", ncols=100) as copy_pbar:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(copy_dataset, dataset_item, zarr_node, key)
-                for (dataset_item, zarr_node, key) in items_to_copy
-            ]
+            futures = []
+            for (h5_ds, zarr_node, key) in items_to_copy:
+                fut = executor.submit(copy_dataset_in_chunks, h5_ds, zarr_node, key)
+                futures.append(fut)
+
             for _ in concurrent.futures.as_completed(futures):
                 copy_pbar.update(1)
 
-    # 5) Clean up
+    # Close everything
     hdf5_file.close()
     store.close()
-
     print(f'Duplicated {hdf5_path} as zarr.zip file {zarr_path}')
     
-def preprocess_data_parallel(root, camera, R, max_workers=64, batch_size=500):
+def preprocess_data_parallel(root, camera, R, max_workers=4, batch_size=500, chunk_size=100):
     """
     Process demos in parallel, converting {camera}_image + {camera}_depth into
-    {camera}_maskdepth, plus related camera-space transformations. Includes a
-    TQDM progress bar indicating how many demos have finished processing.
+    {camera}_maskdepth, plus related camera-space transformations.
+    Includes a TQDM progress bar. We now do chunk-based reading to reduce memory usage.
     """
 
     def process_demo(demo_key):
-        """
-        Returns a tuple of (demo_key, maskdepth_array, camera_positions,
-                            disentangled_positions, rgbd_cropped) for each demo.
-        Or returns None if the dataset already exists.
-        """
         obs_group = root['data'][demo_key]['obs']
 
         # If {camera}_maskdepth already exists, skip this demo
         maskdepth_key = f'{camera}_maskdepth'
         if maskdepth_key in obs_group:
-            # We can either return None or a sentinel to indicate "already processed"
+            # Return None to indicate "already processed"
             return None
 
-        images = obs_group[f'{camera}_image'][:]  # (trajectory_length, 128, 128, 3)
-        depth_images = obs_group[f'{camera}_depth'][:]  # (trajectory_length, 128, 128, 1)
-        depth_images = depth_images.squeeze(-1)  # (trajectory_length, 128, 128)
+        # Access HDF5/Zarr arrays (but do NOT read them fully via [:])
+        images_dset = obs_group[f'{camera}_image']      # shape ~ (trajectory_length, 128, 128, 3)
+        depth_dset = obs_group[f'{camera}_depth']       # shape ~ (trajectory_length, 128, 128, 1)
+        rgbd_dset  = obs_group[f'{camera}_rgbd']        # shape ~ (trajectory_length, 128, 128, 4)
 
-        # Convert images to HSV and create the mask/depth
-        hsv_images = np.stack([cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images])
-        green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
-        cyan_lower, cyan_upper = np.array([80, 40, 100]), np.array([100, 255, 255])
+        length = images_dset.shape[0]   # e.g. trajectory_length
 
-        green_mask = ((hsv_images >= green_lower) & (hsv_images <= green_upper)).all(axis=-1).astype(np.uint8) * 255
-        cyan_mask = ((hsv_images >= cyan_lower) & (hsv_images <= cyan_upper)).all(axis=-1).astype(np.uint8) * 255
-        combined_mask = np.bitwise_or(green_mask, cyan_mask)
+        # Also read eef positions in smaller slices
+        global_eef_dset = obs_group['robot0_eef_pos']   # shape ~ (trajectory_length, 3)
 
-        maskdepth_array = np.zeros((images.shape[0], images.shape[1], images.shape[2], 3), dtype=np.uint8)
-        maskdepth_array[..., 0] = green_mask
-        maskdepth_array[..., 1] = cyan_mask
-        maskdepth_array[..., 2] = np.where(combined_mask, depth_images, 0)
+        # We'll accumulate final results across all chunks:
+        #   maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped
+        # But we won't store them at full size in memory. Instead, we store them
+        # incrementally. For demonstration, I'll store them as lists, then np.concatenate.
+        # Another approach: directly write to a new dataset chunk by chunk.
 
-        # robot0_eef_pos in global coords
-        global_positions = obs_group['robot0_eef_pos'][:]  # (trajectory_length, 3)
-        trajectory_length = global_positions.shape[0]
+        mask_list    = []
+        campos_list  = []
+        disent_list  = []
+        rgbdcrop_list= []
 
-        # Convert to homogeneous coords
-        homogeneous_positions = np.hstack((global_positions, np.ones((trajectory_length, 1))))
+        # For each chunk of frames
+        for start in range(0, length, chunk_size):
+            end = min(start + chunk_size, length)
 
-        # Apply extrinsic matrix R to get positions in the camera frame
-        camera_positions_homogeneous = (R @ homogeneous_positions.T).T
-        camera_positions = camera_positions_homogeneous[:, :3]
+            # 1) Read chunk of images
+            images_chunk = images_dset[start:end]        # shape ~ (chunk, 128, 128, 3)
+            depth_chunk  = depth_dset[start:end].squeeze(-1)  # shape ~ (chunk, 128, 128)
+            rgbd_chunk   = rgbd_dset[start:end]          # shape ~ (chunk, 128, 128, 4)
 
-        # Disentangled positions: (x/z, y/z, log(z))
-        x, y, z = camera_positions[:, 0], camera_positions[:, 1], camera_positions[:, 2]
-        disentangled_positions = np.vstack((x / z, y / z, np.log(z))).T
+            # 2) Convert chunk to HSV + create mask
+            hsv_chunk = np.stack([
+                cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images_chunk
+            ])
+            green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
+            cyan_lower,  cyan_upper  = np.array([80, 40, 100]), np.array([100, 255, 255])
 
-        # Step 4: Process {camera}_rgbdcrop
-        rgbd_image = obs_group[f'{camera}_rgbd'][:]  # (trajectory_length, 128, 128, 4)
-        height, width = rgbd_image.shape[1], rgbd_image.shape[2]
+            green_mask = ((hsv_chunk >= green_lower) & (hsv_chunk <= green_upper)).all(axis=-1).astype(np.uint8)*255
+            cyan_mask  = ((hsv_chunk >= cyan_lower)  & (hsv_chunk <= cyan_upper)).all(axis=-1).astype(np.uint8)*255
+            combined_mask = np.bitwise_or(green_mask, cyan_mask)
 
-        # Calculate bounding boxes
-        bbox_coords = np.array([cv2.boundingRect(combined_mask[i]) for i in range(trajectory_length)])
-        bbox_masks = np.zeros((trajectory_length, height, width), dtype=np.uint8)
-        for i, (x_, y_, w_, h_) in enumerate(bbox_coords):
-            bbox_masks[i, y_:y_+h_, x_:x_+w_] = 1
+            # 3) Build maskdepth for this chunk
+            chunk_len = images_chunk.shape[0]
+            h, w = images_chunk.shape[1], images_chunk.shape[2]
 
-        # Expand bbox_masks, mask the RGB-D
-        bbox_masks_expanded = bbox_masks[..., np.newaxis]
-        rgbd_cropped = rgbd_image * bbox_masks_expanded
+            maskdepth_chunk = np.zeros((chunk_len, h, w, 3), dtype=np.uint8)
+            maskdepth_chunk[..., 0] = green_mask
+            maskdepth_chunk[..., 1] = cyan_mask
+            maskdepth_chunk[..., 2] = np.where(combined_mask, depth_chunk, 0)
+
+            # 4) EEF positions chunk
+            global_eef_chunk = global_eef_dset[start:end]  # shape ~ (chunk, 3)
+            # Convert to homogeneous
+            ones = np.ones((global_eef_chunk.shape[0], 1), dtype=global_eef_chunk.dtype)
+            hom_pos = np.hstack((global_eef_chunk, ones))       # (chunk, 4)
+            # Apply extrinsic
+            cam_pos_hom = (R @ hom_pos.T).T                     # (chunk, 4)
+            cam_pos     = cam_pos_hom[:, :3]
+            # Disentangled
+            x, y, z = cam_pos[:, 0], cam_pos[:, 1], cam_pos[:, 2]
+            disent_chunk = np.vstack((x/z, y/z, np.log(z))).T
+
+            # 5) boundingRect for each frame in chunk
+            bbox_coords = np.array([
+                cv2.boundingRect(combined_mask[i]) for i in range(chunk_len)
+            ])
+            bbox_masks = np.zeros((chunk_len, h, w), dtype=np.uint8)
+            for i, (x_, y_, w_, h_) in enumerate(bbox_coords):
+                bbox_masks[i, y_:y_+h_, x_:x_+w_] = 1
+
+            # expand + mask the rgbd chunk
+            bbox_masks_expanded = bbox_masks[..., np.newaxis]
+            rgbd_cropped_chunk  = rgbd_chunk * bbox_masks_expanded
+
+            # Accumulate partial results in lists
+            mask_list.append(maskdepth_chunk)
+            campos_list.append(cam_pos)
+            disent_list.append(disent_chunk)
+            rgbdcrop_list.append(rgbd_cropped_chunk)
+
+        # After finishing all chunks, we can concat
+        maskdepth_array       = np.concatenate(mask_list, axis=0)
+        camera_positions      = np.concatenate(campos_list, axis=0)
+        disentangled_positions= np.concatenate(disent_list, axis=0)
+        rgbd_cropped          = np.concatenate(rgbdcrop_list, axis=0)
 
         return (demo_key, maskdepth_array, camera_positions, disentangled_positions, rgbd_cropped)
 
-    # Gather all demo keys
     demo_keys = list(root['data'].keys())
-
     results = []
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         with tqdm(total=len(demo_keys), desc=f"Preprocessing {camera}", ncols=100) as pbar:
             for demo_output in executor.map(process_demo, demo_keys):
                 pbar.update(1)
-                # If None was returned, that means we skip writing
                 if demo_output is not None:
                     results.append(demo_output)
 
@@ -305,6 +444,117 @@ def _write_batch_to_zarr(root, camera, batch_results):
                 rgbdcrop_key, data=rgbd_cropped,
                 shape=rgbd_cropped.shape, dtype=rgbd_cropped.dtype
             )
+            
+########################
+# 1) HDF5 -> DirectoryStore
+########################
+def hdf5_to_directorystore_chunked(hdf5_path, out_dir, max_workers=64, chunk_len=1000):
+    """
+    Reads a large HDF5 file and writes it as a Zarr DirectoryStore in a chunk-based,
+    minimal-memory manner.
+    
+    :param hdf5_path: path to source .hdf5 file
+    :param out_dir: directory for the resulting .zarr (DirectoryStore)
+    :param max_workers: concurrency (set to 1 or 2 if memory is very tight)
+    :param chunk_len: how many slices along dimension 0 to copy at once
+    """
+    import h5py
+    import zarr
+    from zarr import DirectoryStore
+    import concurrent.futures
+    from tqdm import tqdm
+    import os
+
+    print(f"[INFO] Converting HDF5 -> DirectoryStore:\n  {hdf5_path} -> {out_dir}")
+
+    # Open source HDF5
+    hdf5_file = h5py.File(hdf5_path, 'r')
+    # Create or overwrite DirectoryStore
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    store = DirectoryStore(out_dir)
+    root = zarr.group(store, overwrite=True)
+
+    # Step A: Gather all datasets
+    items_to_copy = []
+
+    def gather_items(hdf5_node, zarr_node):
+        for key, item in hdf5_node.items():
+            if isinstance(item, h5py.Group):
+                sub_group = zarr_node.require_group(key)
+                gather_items(item, sub_group)
+            elif isinstance(item, h5py.Dataset):
+                items_to_copy.append((item, zarr_node, key))
+
+    gather_items(hdf5_file, root)
+    print(f"[INFO] Found {len(items_to_copy)} datasets to copy from HDF5.")
+
+    # Step B: chunk-based copy for one dataset
+    def copy_dataset_in_chunks(h5_dset, zarr_node, key):
+        shape = h5_dset.shape
+        dtype = h5_dset.dtype
+        comp = h5_dset.compression
+        comp_opts = h5_dset.compression_opts
+        chunks = h5_dset.chunks or (chunk_len,)
+
+        z = zarr_node.create_dataset(
+            name=key,
+            shape=shape,
+            dtype=dtype,
+            chunks=chunks,
+            compression=comp,
+            compression_opts=comp_opts
+        )
+
+        if not shape or len(shape) == 0:
+            # scalar
+            z[...] = h5_dset[...]
+            return
+        if shape[0] == 0:
+            return
+
+        total_len = shape[0]
+        start = 0
+        while start < total_len:
+            end = min(start + chunk_len, total_len)
+            data_slice = h5_dset[start:end]
+            z[start:end] = data_slice
+            start = end
+
+    # Step C: Parallel (or single-thread) copying
+    with tqdm(total=len(items_to_copy), desc="Copying HDF5->DirStore") as pbar:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for (h5_dset, znode, key) in items_to_copy:
+                f = executor.submit(copy_dataset_in_chunks, h5_dset, znode, key)
+                futures.append(f)
+
+            for _ in concurrent.futures.as_completed(futures):
+                pbar.update(1)
+
+    hdf5_file.close()
+    store.close()
+    print(f"[INFO] Done writing to {out_dir}")
+
+
+########################
+# 2) DirectoryStore -> .zarr.zip
+########################
+def directorystore_to_zarr_zip(src_dir, out_zip):
+    """
+    After you've preprocessed the data in the DirectoryStore,
+    convert it to a single .zarr.zip file for final distribution.
+    """
+    import zarr
+    from zarr import ZipStore, DirectoryStore
+    import os
+
+    print(f"[INFO] Converting DirStore -> .zarr.zip:\n  {src_dir} -> {out_zip}")
+    src = DirectoryStore(src_dir)
+    dst = ZipStore(out_zip, mode='w')
+    zarr.copy_store(src, dst)
+    dst.close()
+    print(f"[INFO] Created {out_zip} from {src_dir}")
 
 def preprocess_maskdepth_data_parallel(root, camera, max_workers=8, batch_size=500):
     def process_demo(demo_key):

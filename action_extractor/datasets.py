@@ -8,7 +8,9 @@ from torch.utils.data import Dataset
 from glob import glob
 from einops import rearrange
 import zarr
+from zarr import DirectoryStore
 from zarr import ZipStore
+import shutil
 from torchvideotransforms import video_transforms, volume_transforms
 import numpy as np
 from tqdm import tqdm
@@ -65,15 +67,19 @@ class BaseDataset(Dataset):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
         for seq_dir in sequence_dirs:
+            ds_dir = seq_dir.replace('.hdf5', '.zarr')        # e.g. /path/to/file.zarr
             zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')
-            if not os.path.exists(zarr_path):
-                # Convert HDF5 to Zarr if it doesn't exist
-                hdf5_to_zarr_zip_parallel(seq_dir, max_workers=64)
-
-            # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
-            store = ZipStore(zarr_path, mode='a')
-            root = zarr.group(store)
+            # 1) Convert HDF5 -> DirectoryStore if needed
+            if not os.path.exists(ds_dir):
+                hdf5_to_zarr_parallel_with_progress(seq_dir)
             
+            # 2) Preprocess data in the DirectoryStore 
+            store = DirectoryStore(ds_dir)
+            root = zarr.group(store, overwrite=False)  # or mode='r+' in older Zarr versions
+            # run your preprocess_data_parallel on the directory store
+            # but you must adapt: currently it expects a "ZipStore"? 
+            # Actually it just needs a 'root' with shape/dtype. 
+            # So it should be the same code, just pass root, not ZipStore
             for i in range(len(all_cameras)):
                 camera_name = all_cameras[i].split('_')[0]
                 obs_group = root['data']['demo_0']['obs']
@@ -81,14 +87,20 @@ class BaseDataset(Dataset):
                 if mask_key not in obs_group:
                     # Call the preprocessing function if any data is missing
                     preprocess_data_parallel(root, camera_name, frontview_R)
+
+            store.close()
+
+            # 3) Now convert DirectoryStore -> .zarr.zip
+            directorystore_to_zarr_zip(ds_dir, zarr_path)
+
+            # 4) Clean up the .zarr directory if you only want the final .zarr.zip
+            shutil.rmtree(ds_dir)
                     
             for i in range(len(cameras)):
                 if self.data_modality == 'color_mask_depth':
                     cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
                 elif 'cropped_rgbd' in self.data_modality:
                     cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
-
-            store.close()
             
         # Collect all Zarr files
         self.zarr_files = glob(f"{path}/**/*.zarr.zip", recursive=True)

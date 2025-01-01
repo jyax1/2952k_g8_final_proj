@@ -13,8 +13,7 @@ if oscar:
     b = 16
     rp = '/users/ysong135/Documents/action_extractor/results'
 else:
-    # dp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
-    dp = '/home/yilong/Documents/ae_data/random_processing/zarr_zip_test'
+    dp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
