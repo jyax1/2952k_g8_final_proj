@@ -10,7 +10,7 @@ from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
 from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
 from action_extractor.architectures.latent_decoders import *
 from action_extractor.architectures.direct_resnet_mlp import ActionExtractionResNet
-from action_extractor.architectures.direct_variational_resnet import ActionExtractionVariationalResNet, ActionExtractionHypersphericalResNet
+from action_extractor.architectures.direct_variational_resnet import *
 from action_extractor.architectures.resnet import ResNet3D
 import csv
 from tqdm import tqdm
@@ -86,20 +86,24 @@ class SumMSECosineLoss(nn.Module):
         return total_loss, deviations
 
 class VAELoss(nn.Module):
+    """
+    A generic 'variational' style loss that also does warmup/cyclical weighting
+    for the KLD. We'll adapt it so it can handle different model latents.
+    """
     def __init__(self, reconstruction_loss_fn=None, kld_weight=0.05,
-                 schedule_type='constant', warmup_epochs=10,
+                 schedule_type='warmup', warmup_epochs=10,
                  cycle_length=10, max_weight=0.1, min_weight=0.001):
         super(VAELoss, self).__init__()
-        self.reconstruction_loss_fn = reconstruction_loss_fn if reconstruction_loss_fn is not None else nn.MSELoss()
+        self.reconstruction_loss_fn = (
+            reconstruction_loss_fn if reconstruction_loss_fn is not None 
+            else nn.MSELoss()
+        )
         self.base_kld_weight = kld_weight
         self.eval_kld_weight = kld_weight
         self.schedule_type = schedule_type
         self.current_epoch = 0
-        
-        # Warmup parameters
+
         self.warmup_epochs = warmup_epochs
-        
-        # Cyclical parameters
         self.cycle_length = cycle_length
         self.max_weight = max_weight
         self.min_weight = min_weight
@@ -108,48 +112,55 @@ class VAELoss(nn.Module):
         self.last_kld_loss = None
         
     def update_epoch(self, epoch):
-        """Update current epoch and kld_weight"""
         self.current_epoch = epoch
-        
         if self.schedule_type == 'warmup':
             # Linear warmup from 0 to base_kld_weight
             self.kld_weight = min(1.0, self.current_epoch / self.warmup_epochs) * self.base_kld_weight
-            
         elif self.schedule_type == 'cyclical':
             # Cosine annealing between min_weight and max_weight
             cycle_progress = (self.current_epoch % self.cycle_length) / self.cycle_length
             self.kld_weight = self.min_weight + 0.5 * (self.max_weight - self.min_weight) * \
-                            (1 + np.cos(cycle_progress * 2 * np.pi))
+                              (1 + np.cos(cycle_progress * 2 * np.pi))
         else:
             self.kld_weight = self.base_kld_weight
 
-    def forward(self, model, outputs, targets, mu, distribution_param, validation=False):
-        # Reconstruction loss
+    def forward(
+        self, 
+        model,         # The actual model
+        outputs,       # Predicted actions
+        targets,       # Target actions
+        latents_dict,  # A dictionary of latents we parse
+        validation=False
+    ):
+        """
+        latents_dict can store e.g. {'mu':..., 'logvar':...} or {'mu':..., 'kappa':...} etc.
+        We'll figure out how to pass them to model's kl_divergence.
+        """
+        # 1) Reconstruction loss
         recon_loss, _ = self.reconstruction_loss_fn(outputs, targets)
 
+        # 2) Depending on the model, compute KL
+        # We'll rely on the model to define kl_divergence with matching signature.
+        #   e.g. kl_divergence(*args)
         if hasattr(model, 'module'):
-            kld_loss = model.module.kl_divergence(mu, distribution_param)
+            # distributed
+            kld_loss = model.module.kl_divergence(**latents_dict)
         else:
-            kld_loss = model.kl_divergence(mu, distribution_param)
+            kld_loss = model.kl_divergence(**latents_dict)
         
-        # Save losses for logging
+        # Save for logging
         self.last_recon_loss = recon_loss.item()
         self.last_kld_loss = kld_loss.item()
 
-        # Total loss
+        # Weighted total
         weight = self.eval_kld_weight if validation else self.kld_weight
         total_loss = recon_loss + weight * kld_loss
 
-        # Compute deviations similar to other loss functions
-        # Assume the first three components are direction vectors
+        # For devations, assume first 3 channels are direction
         pred_direction = outputs[:, :3]
         target_direction = targets[:, :3]
-
-        # Normalize direction vectors
         pred_direction_normalized = F.normalize(pred_direction, dim=1)
         target_direction_normalized = F.normalize(target_direction, dim=1)
-
-        # Calculate deviations
         deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
 
         return total_loss, deviations
@@ -190,17 +201,33 @@ class Trainer:
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
         self.loss_type = loss.lower()
         
-        if self.loss_type == 'mse':
-            self.criterion = nn.MSELoss()
-        elif self.loss_type == 'cosine':
-            self.criterion = DeltaControlLoss()
-        elif self.loss_type == 'cosine+mse':
-            self.criterion = SumMSECosineLoss()
+        if isinstance(model, ActionExtractionVariationalResNet):
+            self.variational_model_type = 'normal'  # mu, logvar
+        elif isinstance(model, ActionExtractionHypersphericalResNet):
+            self.variational_model_type = 'vmf'    # mu, kappa
+        elif isinstance(model, ActionExtractionSLAResNet):
+            self.variational_model_type = 'vmf+gaussian' # mu,kappa,c_mu,c_logvar
+        else:
+            self.variational_model_type = None
             
-        self.vae = vae
-        if vae:
-            self.criterion = VAELoss(reconstruction_loss_fn=self.criterion,
-                                     schedule_type='warmup', warmup_epochs=10)
+        if self.loss_type == 'mse':
+            base_recon_loss = nn.MSELoss()
+        elif self.loss_type == 'cosine':
+            base_recon_loss = DeltaControlLoss()
+        elif self.loss_type == 'cosine+mse':
+            base_recon_loss = SumMSECosineLoss()
+        else:
+            raise ValueError(f"Unknown loss_type {self.loss_type}")
+        
+        if self.variational_model_type is not None:
+            self.criterion = VAELoss(
+                reconstruction_loss_fn=base_recon_loss,
+                schedule_type='warmup', 
+                warmup_epochs=10
+            )
+        else:
+            # else standard MSE or DeltaControl, etc.
+            self.criterion = base_recon_loss
         
         # Choose optimizer based on the optimizer_name argument
         self.optimizer = self.get_optimizer(optimizer_name)
@@ -259,12 +286,46 @@ class Trainer:
             for i, (inputs, labels) in enumerate(self.train_loader):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 self.optimizer.zero_grad()
-                
-                if self.vae:
-                    outputs, mu, distribution_param = self.model(inputs)
-                    loss, deviations = self.criterion(self.model, outputs, labels, mu, distribution_param)
+                    
+                # 1) Forward pass
+                model_out = self.model(inputs)
+
+                # 2) Parse the model_out depending on self.variational_model_type
+                if self.variational_model_type == 'normal':
+                    # ActionExtractionVariationalResNet => returns (outputs, mu, logvar)
+                    outputs, mu, logvar = model_out
+                    latents_dict = {'mu': mu, 'logvar': logvar}
+
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict
+                    )
+
+                elif self.variational_model_type == 'vmf':
+                    # ActionExtractionHypersphericalResNet => returns (outputs, mu, kappa)
+                    outputs, mu, kappa = model_out
+                    latents_dict = {'mu': mu, 'kappa': kappa}
+
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict
+                    )
+
+                elif self.variational_model_type == 'vmf+gaussian':
+                    # Suppose your SLAResNet => returns (outputs, mu, kappa, c_mu, c_logvar, c)
+                    outputs, mu, kappa, c_mu, c_logvar, c = model_out
+                    latents_dict = {
+                        'mu': mu, 
+                        'kappa': kappa, 
+                        'c_mu': c_mu, 
+                        'c_logvar': c_logvar
+                    }
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict
+                    )
+
                 else:
-                    outputs = self.model(inputs)
+                    # Non-variational model => just a single "outputs"
+                    outputs = model_out
+                    # typical (loss_fn, e.g. MSE) returns (loss, devs)
                     loss, deviations = self.criterion(outputs, labels)
                     
                 self.accelerator.backward(loss)
@@ -280,7 +341,7 @@ class Trainer:
                 self.writer.add_scalar('Deviation/Y', deviations[:, 1].mean().item(), step)
                 self.writer.add_scalar('Deviation/Z', deviations[:, 2].mean().item(), step)
                 
-                if self.vae:
+                if hasattr(self.criterion, 'last_recon_loss'):
                     self.writer.add_scalar('VAELoss/Reconstruction', self.criterion.last_recon_loss, step)
                     self.writer.add_scalar('VAELoss/KLD_Weighted', self.criterion.last_kld_loss * self.criterion.kld_weight, step)
                     self.writer.add_scalar('VAELoss/KLD_Raw', self.criterion.last_kld_loss, step)
@@ -368,11 +429,28 @@ class Trainer:
         with torch.no_grad():
             for inputs, labels in tqdm(self.validation_loader, desc="Validating", leave=False):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
-                if self.vae:
-                    outputs, mu, distribution_param = self.model(inputs)
-                    loss, deviations = self.criterion(self.model, outputs, labels, mu, distribution_param, validation=True)
+                model_out = self.model(inputs)
+
+                if self.variational_model_type == 'normal':
+                    outputs, mu, logvar = model_out
+                    latents_dict = {'mu': mu, 'logvar': logvar}
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict, validation=True
+                    )
+                elif self.variational_model_type == 'vmf':
+                    outputs, mu, kappa = model_out
+                    latents_dict = {'mu': mu, 'kappa': kappa}
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict, validation=True
+                    )
+                elif self.variational_model_type == 'vmf+gaussian':
+                    outputs, mu, kappa, c_mu, c_logvar, c = model_out
+                    latents_dict = {'mu': mu, 'kappa': kappa, 'c_mu': c_mu, 'c_logvar': c_logvar}
+                    loss, deviations = self.criterion(
+                        self.model, outputs, labels, latents_dict, validation=True
+                    )
                 else:
-                    outputs = self.model(inputs)
+                    outputs = model_out
                     if self.aux:
                         outputs = self.recover_action_vector(outputs)
                         labels = self.recover_action_vector(labels)
