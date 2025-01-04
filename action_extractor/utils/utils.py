@@ -127,6 +127,8 @@ def load_model(architecture,
             architecture_class = ActionExtractionVariationalResNet
         elif architecture == 'direct_S_variational_resnet':
             architecture_class = ActionExtractionHypersphericalResNet
+        elif architecture == 'direct_SLA_variational_resnet':
+            architecture_class = ActionExtractionSLAResNet
         
         if 'action' in action_type and 'norot' not in action_type:
             num_classes = 7
@@ -158,7 +160,7 @@ def load_model(architecture,
         }
         
          # Add vMF parameter only for HypersphericalResNet
-        if architecture == 'direct_S_variational_resnet':
+        if architecture == 'direct_S_variational_resnet' or architecture == 'direct_SLA_variational_resnet':
             two_d_resnet_params['vMF_sample_method'] = vMF_sample_method
         
         if data_modality == 'rgb' or data_modality == 'color_mask_depth':

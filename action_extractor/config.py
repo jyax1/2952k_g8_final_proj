@@ -4,6 +4,7 @@ ARCHITECTURES = [
     'direct_resnet_mlp',
     'direct_N_variational_resnet',
     'direct_S_variational_resnet',
+    'direct_SLA_variational_resnet',
     'latent_encoder_resnet_unet',
     'latent_encoder_cnn_unet', 
     'latent_decoder_mlp', 

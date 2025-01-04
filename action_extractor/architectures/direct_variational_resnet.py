@@ -100,7 +100,7 @@ def log_i_v_series_optimized(v, x, max_iter=20):
 
         # results = logsumexp(results, log_term), do a stable in-place:
         max_val = torch.max(results, log_term)
-        results = max_val + torch.log1p(
+        results = max_val + torch.log(
             torch.exp(results - max_val) + torch.exp(log_term - max_val)
         )
 
@@ -305,7 +305,7 @@ class ActionExtractionHypersphericalResNet(nn.Module):
         out = self.mlp(z)
         return out, mu, kappa
 
-    def kl_divergence(self, mu, kappa):
+    def kl_divergence(self, mu, kappa, debug=False):
         """
         KL( vMF(mu, kappa) || Uniform(S^{d-1}) ).
         dimension d = mu.shape[1].
@@ -342,9 +342,145 @@ class ActionExtractionHypersphericalResNet(nn.Module):
 
         # surface area of S^{d-1}, log
         # = log(2) + (d/2)*log(pi) - logGamma(d/2)
-        log_surface = (math.log(2.0)
+        log_area = (math.log(2.0)
                        + half_d*math.log(math.pi)
                        - torch.lgamma(torch.tensor(half_d, device=kappa.device, dtype=kappa.dtype)))
 
-        kl_vals = logC_vMF + kappa*m_kappa + log_surface
-        return kl_vals.mean()
+        kl_vals = logC_vMF + kappa*m_kappa - log_area
+        
+        kl_mean = kl_vals.mean()
+        
+        debug_info = {
+        'dimension_d': d,
+        'logC_vMF_mean': logC_vMF.mean().detach().cpu().item(),
+        'kappa_mkappa_mean': (kappa*m_kappa).mean().detach().cpu().item(),
+        'log_area': log_area.detach().cpu().item(),
+        'kl_mean': kl_mean.detach().cpu().item(),
+        }
+        
+        if debug:
+            return kl_mean, debug_info
+        else:
+            return kl_mean
+        
+class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
+    """
+    Extends ActionExtractionHypersphericalResNet by adding a Gaussian-distributed
+    scalar c, which scales the reparameterized vMF direction.
+
+    - c ~ N(mu_c, sigma_c^2)
+    - final latent = c * z_vmf
+    """
+
+    def __init__(self, 
+                 resnet_version='resnet18',
+                 video_length=2,
+                 in_channels=3,
+                 latent_dim=32,
+                 action_length=1,
+                 num_classes=7,
+                 num_mlp_layers=3,
+                 bessel_max_iter=20,
+                 vMF_sample_method='wood',
+                 max_tries_sampling=10,
+                 approximate_bessel=True,
+                 kappa_thresh=50.0):
+        """
+        Same arguments as parent's constructor. 
+        We'll add two extra linear layers to produce c_mu, c_logvar.
+        """
+        super().__init__(
+            resnet_version=resnet_version,
+            video_length=video_length,
+            in_channels=in_channels,
+            latent_dim=latent_dim,
+            action_length=action_length,
+            num_classes=num_classes,
+            num_mlp_layers=num_mlp_layers,
+            bessel_max_iter=bessel_max_iter,
+            vMF_sample_method=vMF_sample_method,
+            max_tries_sampling=max_tries_sampling,
+            approximate_bessel=approximate_bessel,
+            kappa_thresh=kappa_thresh
+        )
+        # We can glean the "resnet_out_dim" from parent's self.fc_mu.in_features
+        resnet_out_dim = self.fc_mu.in_features
+
+        # Extra heads for c:
+        self.fc_c_mu = nn.Linear(resnet_out_dim, 1)
+        self.fc_c_logvar = nn.Linear(resnet_out_dim, 1)
+
+    def encode(self, x):
+        """
+        Override parent's encode to also produce c_mu, c_logvar.
+        Reuses parent's backbone code to get h, then parent's code 
+        to produce mu, kappa. 
+        """
+        # Use parent's encode logic to get mu, kappa
+        # But we can do it in two steps to avoid code duplication:
+        # 1) run the parent's conv
+        # 2) flatten
+        # 3) produce parent's mu, kappa
+        # 4) produce c_mu, c_logvar
+        # 
+        # We'll replicate parent's internal lines:
+        h = self.conv(x)         # shape [B, resnet_out_dim, 1, 1]
+        h = h.view(h.size(0), -1)  # shape [B, resnet_out_dim]
+
+        mu = F.normalize(self.fc_mu(h), dim=-1)
+        kappa = F.softplus(self.fc_kappa(h)) + 1.0
+
+        c_mu = self.fc_c_mu(h)        # shape [B, 1]
+        c_logvar = self.fc_c_logvar(h)# shape [B, 1]
+
+        return mu, kappa, c_mu, c_logvar
+
+    def reparameterize_c(self, c_mu, c_logvar):
+        """
+        Reparameterize c from normal distribution.
+        c ~ N(c_mu, exp(c_logvar)).
+        """
+        std = torch.exp(0.5 * c_logvar)
+        eps = torch.randn_like(std)  # shape [B,1]
+        return c_mu + std * eps
+
+    def forward(self, x):
+        """
+        1) encode -> (mu, kappa, c_mu, c_logvar)
+        2) reparam -> z_vmf, c
+        3) scale -> z_scaled = c * z_vmf
+        4) decode -> out
+        """
+        mu, kappa, c_mu, c_logvar = self.encode(x)
+
+        # parent's method for vMF
+        z_vmf = self.reparameterize(mu, kappa)
+
+        # our new reparam for c
+        c = self.reparameterize_c(c_mu, c_logvar)
+
+        # final scaled latent
+        z_scaled = z_vmf * c  # broadcast multiply: [B, latent_dim] * [B,1]
+
+        out = self.mlp(z_scaled)
+        return out, mu, kappa, c_mu, c_logvar, c
+
+    def kl_divergence(self, mu, kappa, c_mu, c_logvar, debug=False):
+        """
+        We override parent's KL to add c's KL vs standard normal.
+        We'll call parent's kl_divergence(mu, kappa, debug=debug) 
+        for the vMF portion, then add c's standard normal KL.
+        """
+        # 1) parent's vMF KL
+        vmf_kl = super().kl_divergence(mu, kappa, debug=debug)
+
+        # 2) c's KL (assuming standard normal prior):
+        #   KL( N(c_mu, exp(c_logvar)) || N(0,1) )
+        # = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
+        # but we only have 1 dimension => sum is just the single dimension
+        # shape [B,1] => do .view(-1) so it's [B]
+        c_logvar_1d = c_logvar.view(-1)
+        c_mu_1d = c_mu.view(-1)
+        c_kl = -0.5 * torch.mean(1 + c_logvar_1d - c_mu_1d.pow(2) - c_logvar_1d.exp())
+
+        return vmf_kl + c_kl

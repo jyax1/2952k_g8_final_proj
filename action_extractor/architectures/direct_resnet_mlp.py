@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class ResNetMLP(nn.Module):
@@ -101,24 +102,30 @@ class Bottleneck(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, video_length=2, in_channels=3):
+    def __init__(self, block, layers, video_length=2, in_channels=3, use_spatial_softmax=True):
         super(ResNet, self).__init__()
+        self.use_spatial_softmax = use_spatial_softmax  # <--- NEW parameter
+
         self.in_channels = 64
         self.conv1 = nn.Conv2d(in_channels * video_length, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
+
+        self.layer1 = self._make_layer(block, 64,  layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+
+        # We'll keep AdaptiveAvgPool2d for the case of global average pooling
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        
+
     def _make_layer(self, block, out_channels, blocks, stride=1):
         downsample = None
         if stride != 1 or self.in_channels != out_channels * block.expansion:
             downsample = nn.Sequential(
-                nn.Conv2d(self.in_channels, out_channels * block.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(self.in_channels, out_channels * block.expansion,
+                          kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(out_channels * block.expansion),
             )
 
@@ -131,19 +138,35 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        # [b, 6, 128, 128]
-        # Same in this section for both 18 and 50
-        x = self.conv1(x) # [b, 64, 64, 64]
-        x = self.bn1(x) # [b, 64, 64, 64], 
+        # x shape typically [B, 6, H, W] if video_length=2 and in_channels=3
+
+        x = self.conv1(x)  # [B, 64, H/2, W/2]
+        x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x) # [b, 64, 32, 32]
+        x = self.maxpool(x)  # [B, 64, H/4, W/4]
 
-        x = self.layer1(x) # [b, 64, 32, 32], [b, 256, 32, 32]
-        x = self.layer2(x) # [b, 128, 16, 16], [b, 512, 16, 16]
-        x = self.layer3(x) # [b, 256, 8, 8], [b, 1024, 8, 8]
-        x = self.layer4(x) # [b, 512, 4, 4], [b, 2048, 4, 4]
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)  # e.g. [B, 512, H/32, W/32] if ResNet18
 
-        x = self.avgpool(x) # [b, 512, 1, 1], [b, 2048, 1, 1]
+        if self.use_spatial_softmax:
+            # ----------- Spatial Softmax Approach -----------
+            # 1) Flatten the spatial dims to do a softmax across them
+            B, C, H, W = x.shape
+            # flatten to [B, C, H*W]
+            x_2d = x.view(B, C, -1)            
+            # softmax across the last dimension (the spatial dimension)
+            softmax_map = F.softmax(x_2d, dim=2)  # [B, C, H*W]
+            # reshape back to [B, C, H, W]
+            softmax_map = softmax_map.view(B, C, H, W)
+            # Weighted sum of the original x by the softmax => shape [B, C]
+            x = (softmax_map * x).sum(dim=[2, 3])  # [B, C]
+        else:
+            # ----------- Global Average Pooling Approach -----------
+            x = self.avgpool(x)  # [B, 512, 1, 1]
+            x = x.view(x.size(0), -1)  # flatten to [B, C]
+
         return x
 
 from .utils import resnet_builder
