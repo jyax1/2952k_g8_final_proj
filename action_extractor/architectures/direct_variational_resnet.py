@@ -384,7 +384,8 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
                  vMF_sample_method='wood',
                  max_tries_sampling=10,
                  approximate_bessel=True,
-                 kappa_thresh=50.0):
+                 kappa_thresh=50.0,
+                 use_distribution_for_c=True):
         """
         Same arguments as parent's constructor. 
         We'll add two extra linear layers to produce c_mu, c_logvar.
@@ -406,9 +407,18 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
         # We can glean the "resnet_out_dim" from parent's self.fc_mu.in_features
         resnet_out_dim = self.fc_mu.in_features
 
-        # Extra heads for c:
-        self.fc_c_mu = nn.Linear(resnet_out_dim, 1)
-        self.fc_c_logvar = nn.Linear(resnet_out_dim, 1)
+        # Head for c
+        if self.use_distribution_for_c:
+            # Same as the old approach: c_mu and c_logvar
+            self.fc_c_mu = nn.Linear(resnet_out_dim, 1)
+            self.fc_c_logvar = nn.Linear(resnet_out_dim, 1)
+        else:
+            # Deterministic c: a single linear layer mapping h -> c
+            self.fc_c = nn.Linear(resnet_out_dim, 1)
+            # no logvar, no KL cost for c
+        
+        # Head for gripper action
+        self.fc_gripper = nn.Linear(resnet_out_dim, 1)
 
     def encode(self, x):
         """
@@ -432,8 +442,17 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
 
         c_mu = self.fc_c_mu(h)        # shape [B, 1]
         c_logvar = self.fc_c_logvar(h)# shape [B, 1]
+        
+        raw_gripper = self.fc_gripper(h)
 
-        return mu, kappa, c_mu, c_logvar
+        if self.use_distribution_for_c:
+            c_mu = self.fc_c_mu(h)
+            c_logvar = self.fc_c_logvar(h)
+            return mu, kappa, c_mu, c_logvar, raw_gripper
+        else:
+            # Deterministic c
+            c_det = self.fc_c(h)  # shape [B, 1]
+            return mu, kappa, c_det, raw_gripper
 
     def reparameterize_c(self, c_mu, c_logvar):
         """
@@ -451,36 +470,47 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
         3) scale -> z_scaled = c * z_vmf
         4) decode -> out
         """
-        mu, kappa, c_mu, c_logvar = self.encode(x)
-
-        # parent's method for vMF
-        z_vmf = self.reparameterize(mu, kappa)
-
-        # our new reparam for c
-        c = self.reparameterize_c(c_mu, c_logvar)
+        if self.use_distribution_for_c:
+            mu, kappa, c_mu, c_logvar, raw_gripper = self.encode(x)
+            z_vmf = self.reparameterize(mu, kappa)
+            c = self.reparameterize_c(c_mu, c_logvar)
+        else:
+            # Deterministic c
+            mu, kappa, c_det, raw_gripper = self.encode(x)
+            z_vmf = self.reparameterize(mu, kappa)
+            c = c_det  # shape [B,1]
 
         # final scaled latent
-        z_scaled = z_vmf * c  # broadcast multiply: [B, latent_dim] * [B,1]
+        z_scaled = z_vmf * c  # broadcast multiply
 
         out = self.mlp(z_scaled)
-        return out, mu, kappa, c_mu, c_logvar, c
 
-    def kl_divergence(self, mu, kappa, c_mu, c_logvar, debug=False):
+        # Binarize the gripper sign
+        scalar_gripper = torch.sign(raw_gripper)
+        # Merge the sign dimension as the last dimension
+        out = torch.cat([out, scalar_gripper], dim=-1)
+
+        if self.use_distribution_for_c:
+            return out, mu, kappa, c_mu, c_logvar, c
+        else:
+            return out, mu, kappa, c
+
+    def kl_divergence(self, mu, kappa, *args, debug=False):
         """
         We override parent's KL to add c's KL vs standard normal.
         We'll call parent's kl_divergence(mu, kappa, debug=debug) 
         for the vMF portion, then add c's standard normal KL.
         """
-        # 1) parent's vMF KL
         vmf_kl = super().kl_divergence(mu, kappa, debug=debug)
 
-        # 2) c's KL (assuming standard normal prior):
-        #   KL( N(c_mu, exp(c_logvar)) || N(0,1) )
-        # = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
-        # but we only have 1 dimension => sum is just the single dimension
-        # shape [B,1] => do .view(-1) so it's [B]
-        c_logvar_1d = c_logvar.view(-1)
-        c_mu_1d = c_mu.view(-1)
-        c_kl = -0.5 * torch.mean(1 + c_logvar_1d - c_mu_1d.pow(2) - c_logvar_1d.exp())
-
-        return vmf_kl + c_kl
+        if self.use_distribution_for_c:
+            c_mu, c_logvar = args  # parse the leftover args
+            c_logvar_1d = c_logvar.view(-1)
+            c_mu_1d = c_mu.view(-1)
+            c_kl = -0.5 * torch.mean(
+                1 + c_logvar_1d - c_mu_1d.pow(2) - c_logvar_1d.exp()
+            )
+            return vmf_kl + c_kl
+        else:
+            # No distribution => no KL cost for c
+            return vmf_kl

@@ -75,7 +75,7 @@ class SumMSECosineLoss(nn.Module):
         vector_loss = direction_loss + magnitude_loss
 
         # Compute MSE loss for the last two components
-        mse_loss_gripper = 2 * F.mse_loss(predictions[:, 3:], targets[:, 3:])
+        mse_loss_gripper = F.mse_loss(predictions[:, 3:], targets[:, 3:])
 
         # Total loss
         total_loss = vector_loss + mse_loss_gripper
@@ -201,12 +201,12 @@ class Trainer:
         self.validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=False)
         self.loss_type = loss.lower()
         
-        if isinstance(model, ActionExtractionVariationalResNet):
-            self.variational_model_type = 'normal'  # mu, logvar
+        if isinstance(model, ActionExtractionSLAResNet):
+            self.variational_model_type = 'vmf+gaussian'
         elif isinstance(model, ActionExtractionHypersphericalResNet):
-            self.variational_model_type = 'vmf'    # mu, kappa
-        elif isinstance(model, ActionExtractionSLAResNet):
-            self.variational_model_type = 'vmf+gaussian' # mu,kappa,c_mu,c_logvar
+            self.variational_model_type = 'vmf'
+        elif isinstance(model, ActionExtractionVariationalResNet):
+            self.variational_model_type = 'normal'
         else:
             self.variational_model_type = None
             
@@ -279,7 +279,7 @@ class Trainer:
             running_deviation = 0.0
             epoch_progress = tqdm(total=len(self.train_loader), desc=f"Epoch [{epoch + 1}/{self.epochs}]", position=0, leave=True)
             
-            if self.vae:
+            if hasattr(self.criterion, 'update_epoch'):
                 self.criterion.update_epoch(epoch)
                 self.writer.add_scalar('KLD_Weight', self.criterion.kld_weight, epoch)
 

@@ -140,6 +140,9 @@ def load_model(architecture,
             num_classes = 5
         elif action_type == 'delta_position+gripper' or action_type == 'delta_action_norot':
             num_classes = 4
+            
+            if architecture == 'direct_SLA_variational_resnet':
+                num_classes = 3
         
         if data_modality == 'voxel' or data_modality == 'rgbd' or data_modality == 'cropped_rgbd':
             input_channels = 4 * horizon * len(cameras)
