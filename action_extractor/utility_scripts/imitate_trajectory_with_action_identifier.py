@@ -8,37 +8,53 @@ import cv2
 import zarr
 from glob import glob
 from einops import rearrange
+from zarr import DirectoryStore, ZipStore
+import shutil
 
 from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
-from action_extractor.utils.dataset_utils import hdf5_to_zarr_parallel, preprocess_data_parallel
+from action_extractor.utils.dataset_utils import hdf5_to_zarr_parallel_with_progress, preprocess_data_parallel, directorystore_to_zarr_zip
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 from action_extractor.utils.dataset_utils import pose_inv, frontview_K, frontview_R, sideview_K, sideview_R, agentview_K, agentview_R, sideagentview_K, sideagentview_R
 import robomimic.utils.obs_utils as ObsUtils
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 
+
+variational = False
+
 right_video_mode = 'inferred_actions'
 dataset_path = "/home/yilong/Documents/policy_data/lift/obs_policy_c"
 dataset_path = "/home/yilong/Documents/policy_data/lift/lift_smaller_2000"
+dataset_path = "/home/yilong/Documents/ae_data/random_processing/lift_1000"
 # dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
 
 # non-variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-46.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-46.pth'
+conv_path = '/home/yilong/Documents/action_extractor/results/resnet_spatial_softmax-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-45.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/resnet_spatial_softmax-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-45.pth'
+
 n = 100
 save_webp = False
 
 deterministic=True
 
 # variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-73.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-73.pth'
-fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-73.pth'
-fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-73.pth'
+# conv_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-73.pth'
+# mlp_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-73.pth'
+if variational:
+    fc_mu_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_mu-73.pth'
+    fc_logvar_path = '/home/yilong/Documents/action_extractor/results/variational-iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_fc_logvar-73.pth'
+else:
+    fc_mu_path = None
+    fc_logvar_path = None
+    
+output_dir = "/home/yilong/Documents/action_extractor/debug/resnet_45_lift_1000"
 
-output_dir = "/home/yilong/Documents/action_extractor/debug/variational_imitation_73_deterministic"
+# checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
+# arch_type = 'hyperspherical'
+checkpoint_path = None
+arch_type = 'resnet'
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
@@ -75,7 +91,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir=output_dir,
     conv_path=conv_path,
     mlp_path=mlp_path,
-    stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz',
+    stats_path='/home/yilong/Documents/ae_data/random_processing/lift_1000/action_statistics_delta_position+gripper.npz',
     n_demos=None,
     data_modality='cropped_rgbd+color_mask',
     cameras=["frontview_image", "sideview_image"],
@@ -88,38 +104,51 @@ def imitate_trajectory_with_action_identifier(
     # Preprocess dataset
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
-        zarr_path = seq_dir.replace('.hdf5', '.zarr')
+        ds_dir = seq_dir.replace('.hdf5', '.zarr')        # e.g. /path/to/file.zarr
+        zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')
+        # 1) Convert HDF5 -> DirectoryStore if needed
         if not os.path.exists(zarr_path):
-            # Convert HDF5 to Zarr if it doesn't exist
-            hdf5_to_zarr_parallel(seq_dir, max_workers=8)
-
-        # Check for the '{camera}_maskdepth' subdirectory in the Zarr dataset
-        root = zarr.open(zarr_path, mode='a')  # Open in append mode to modify if needed
+            hdf5_to_zarr_parallel_with_progress(seq_dir)
         
-        all_cameras = ['frontview_image', 'sideview_image', 'agentview_image', 'sideagentview_image']
-        
-        for i in range(len(all_cameras)):
-            camera_name = all_cameras[i].split('_')[0]
-            camera_maskdepth_path = f'data/demo_0/obs/{camera_name}_maskdepth'
+            # 2) Preprocess data in the DirectoryStore 
+            store = DirectoryStore(ds_dir)
+            root = zarr.group(store, overwrite=False)  # or mode='r+' in older Zarr versions
+            # run your preprocess_data_parallel on the directory store
+            # but you must adapt: currently it expects a "ZipStore"? 
+            # Actually it just needs a 'root' with shape/dtype. 
+            # So it should be the same code, just pass root, not ZipStore
+            all_cameras = ['frontview_image', 'sideview_image', 'agentview_image', 'sideagentview_image']
+            for i in range(len(all_cameras)):
+                camera_name = all_cameras[i].split('_')[0]
+                obs_group = root['data']['demo_0']['obs']
+                mask_key = f"{camera_name}_maskdepth"
+                if mask_key not in obs_group:
+                    # Call the preprocessing function if any data is missing
+                    preprocess_data_parallel(root, camera_name, frontview_R)
 
-            # If any of the required data paths are missing, preprocess them
-            if camera_maskdepth_path not in root:
-                # Call the preprocessing function if any data is missing
-                preprocess_data_parallel(root, camera_name, frontview_R)
+            store.close()
+
+            # 3) Now convert DirectoryStore -> .zarr.zip
+            directorystore_to_zarr_zip(ds_dir, zarr_path)
+
+            # 4) Clean up the .zarr directory if you only want the final .zarr.zip
+            shutil.rmtree(ds_dir)
                 
         for i in range(len(cameras)):
             if data_modality == 'color_mask_depth':
                 cameras[i] = cameras[i].split('_')[0] + '_maskdepth'
             elif 'cropped_rgbd' in data_modality:
                 cameras[i] = cameras[i].split('_')[0] + '_rgbdcrop'
-                
-    zarr_files = glob(f"{dataset_path}/**/*.zarr", recursive=True)
-    stores = [zarr.DirectoryStore(zarr_file) for zarr_file in zarr_files]
-    roots = [zarr.open(store, mode='r') for store in stores]
+            
+    # Collect all Zarr files
+    zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
+    stores = [ZipStore(zarr_file, mode='r') for zarr_file in zarr_files]
+    roots = [zarr.group(store) for store in stores]
 
     # Initialize the ActionIdentifier model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     action_identifier = load_action_identifier(
+        checkpoint_path=checkpoint_path,
         conv_path=conv_path,
         mlp_path=mlp_path,
         resnet_version='resnet18',
@@ -133,7 +162,8 @@ def imitate_trajectory_with_action_identifier(
         stats_path=stats_path,
         coordinate_system='global',
         camera_name=cameras[0].split('_')[0],  # Use the first camera for initialization
-        deterministic=deterministic
+        deterministic=deterministic,
+        arch_type=arch_type
     ).to(device)
     action_identifier.eval()
 
@@ -279,9 +309,10 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
-                    action *= 80
+                    action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
+                    # action *= 
                     action[-1] = np.sign(action[-1])
-
+                    
                     env_camera0.step(action)
 
                 # Stop recording and reset the file path
@@ -298,9 +329,10 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
-                    action *= 80
+                    action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
+                    # action *= 60
                     action[-1] = np.sign(action[-1])
-                    
+
                     env_camera1.step(action)
                     
                 env_camera1.video_recoder.stop()

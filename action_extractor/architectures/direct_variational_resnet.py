@@ -385,7 +385,7 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
                  max_tries_sampling=10,
                  approximate_bessel=True,
                  kappa_thresh=50.0,
-                 use_distribution_for_c=True):
+                 use_distribution_for_c=False):
         """
         Same arguments as parent's constructor. 
         We'll add two extra linear layers to produce c_mu, c_logvar.
@@ -406,6 +406,8 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
         )
         # We can glean the "resnet_out_dim" from parent's self.fc_mu.in_features
         resnet_out_dim = self.fc_mu.in_features
+        
+        self.use_distribution_for_c = use_distribution_for_c
 
         # Head for c
         if self.use_distribution_for_c:
@@ -439,9 +441,6 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
 
         mu = F.normalize(self.fc_mu(h), dim=-1)
         kappa = F.softplus(self.fc_kappa(h)) + 1.0
-
-        c_mu = self.fc_c_mu(h)        # shape [B, 1]
-        c_logvar = self.fc_c_logvar(h)# shape [B, 1]
         
         raw_gripper = self.fc_gripper(h)
 
@@ -478,7 +477,7 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
             # Deterministic c
             mu, kappa, c_det, raw_gripper = self.encode(x)
             z_vmf = self.reparameterize(mu, kappa)
-            c = c_det  # shape [B,1]
+            c = torch.sigmoid(c_det)  # shape [B,1]
 
         # final scaled latent
         z_scaled = z_vmf * c  # broadcast multiply

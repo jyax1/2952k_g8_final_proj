@@ -311,13 +311,15 @@ class Trainer:
 
                 elif self.variational_model_type == 'vmf+gaussian':
                     # Suppose your SLAResNet => returns (outputs, mu, kappa, c_mu, c_logvar, c)
-                    outputs, mu, kappa, c_mu, c_logvar, c = model_out
-                    latents_dict = {
-                        'mu': mu, 
-                        'kappa': kappa, 
-                        'c_mu': c_mu, 
-                        'c_logvar': c_logvar
-                    }
+                    if len(model_out) == 6:
+                        # c is distribution => we have c_mu, c_logvar
+                        outputs, mu, kappa, c_mu, c_logvar, c = model_out
+                        latents_dict = {'mu': mu, 'kappa': kappa, 'c_mu': c_mu, 'c_logvar': c_logvar}
+                    else:
+                        # c is deterministic => no c_mu or c_logvar
+                        outputs, mu, kappa, c = model_out
+                        latents_dict = {'mu': mu, 'kappa': kappa}
+                        
                     loss, deviations = self.criterion(
                         self.model, outputs, labels, latents_dict
                     )
@@ -444,8 +446,14 @@ class Trainer:
                         self.model, outputs, labels, latents_dict, validation=True
                     )
                 elif self.variational_model_type == 'vmf+gaussian':
-                    outputs, mu, kappa, c_mu, c_logvar, c = model_out
-                    latents_dict = {'mu': mu, 'kappa': kappa, 'c_mu': c_mu, 'c_logvar': c_logvar}
+                    if len(model_out) == 6:
+                        # distribution
+                        outputs, mu, kappa, c_mu, c_logvar, c = model_out
+                        latents_dict = {'mu': mu, 'kappa': kappa, 'c_mu': c_mu, 'c_logvar': c_logvar}
+                    else:
+                        # deterministic
+                        outputs, mu, kappa, c = model_out
+                        latents_dict = {'mu': mu, 'kappa': kappa}
                     loss, deviations = self.criterion(
                         self.model, outputs, labels, latents_dict, validation=True
                     )

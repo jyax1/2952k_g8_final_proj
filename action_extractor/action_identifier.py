@@ -2,11 +2,22 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from action_extractor.architectures import ActionExtractionResNet
-from action_extractor.architectures import ActionExtractionVariationalResNet
+from action_extractor.architectures.direct_resnet_mlp import ResNetMLP, ActionExtractionResNet
+from action_extractor.architectures.direct_variational_resnet import (
+    ActionExtractionVariationalResNet,
+    ActionExtractionHypersphericalResNet,
+    ActionExtractionSLAResNet
+)
 from action_extractor.utils.utils import load_model, load_trained_model, load_datasets
 
+# --------------------------------------------------------------------------
+# Example encoder classes
+# --------------------------------------------------------------------------
 class VariationalEncoder(nn.Module):
+    """
+    Simple example for a normal (mu, logvar) encoder in a 2-part model 
+    (encoder, decoder).
+    """
     def __init__(self, conv, fc_mu, fc_logvar):
         super(VariationalEncoder, self).__init__()
         self.conv = conv
@@ -21,9 +32,77 @@ class VariationalEncoder(nn.Module):
         logvar = self.fc_logvar(x)
         return mu, logvar
 
+
+class VMFEncoder(nn.Module):
+    """
+    Example for a vMF-based encoder:
+      conv -> flatten -> (fc_mu, fc_kappa).
+    We'll handle c if it’s SLA (use_distribution_for_c or not).
+    """
+    def __init__(self, 
+                 conv, 
+                 fc_mu, 
+                 fc_kappa, 
+                 fc_c=None, 
+                 fc_c_mu=None, 
+                 fc_c_logvar=None, 
+                 fc_gripper=None,
+                 use_distribution_for_c=False):
+        super(VMFEncoder, self).__init__()
+        self.conv = conv
+        self.flatten = nn.Flatten()
+        self.fc_mu = fc_mu
+        self.fc_kappa = fc_kappa
+        # For SLA
+        self.fc_c = fc_c
+        self.fc_c_mu = fc_c_mu
+        self.fc_c_logvar = fc_c_logvar
+        self.fc_gripper = fc_gripper
+        self.use_distribution_for_c = use_distribution_for_c
+
+    def forward(self, x):
+        """
+        We'll return different shapes depending on if we have c, c_mu, etc.
+        """
+        h = self.conv(x)
+        h = self.flatten(h)
+
+        mu = nn.functional.normalize(self.fc_mu(h), dim=-1)
+        kappa = nn.functional.softplus(self.fc_kappa(h)) + 1.0
+
+        # If we're an SLA model, also produce gripper + c
+        if self.fc_gripper is not None:
+            raw_gripper = self.fc_gripper(h)
+        else:
+            raw_gripper = None
+
+        if self.fc_c_mu is not None and self.fc_c_logvar is not None:
+            # distribution for c
+            c_mu = self.fc_c_mu(h)
+            c_logvar = self.fc_c_logvar(h)
+            return mu, kappa, c_mu, c_logvar, raw_gripper
+        elif self.fc_c is not None:
+            # deterministic c
+            c_det = self.fc_c(h)
+            return mu, kappa, c_det, raw_gripper
+        else:
+            # normal vMF (no c)
+            return mu, kappa
+
+
+# --------------------------------------------------------------------------
+# The ActionIdentifier that can handle all
+# --------------------------------------------------------------------------
 class ActionIdentifier(nn.Module):
-    def __init__(self, encoder, decoder, stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper.npz', 
-                 coordinate_system='global', camera_name='frontview', deterministic=True):
+    def __init__(
+        self, 
+        encoder, 
+        decoder, 
+        stats_path='action_statistics_delta_position+gripper.npz', 
+        coordinate_system='global', 
+        camera_name='frontview', 
+        deterministic=True
+    ):
         super(ActionIdentifier, self).__init__()
         self.deterministic = deterministic
 
@@ -54,167 +133,371 @@ class ActionIdentifier(nn.Module):
 
     @staticmethod
     def reparameterize(mu, logvar):
-        std = torch.exp(0.5 * logvar)  # Standard deviation
-        eps = torch.randn_like(std)    # Sample epsilon from standard normal
-        z = mu + eps * std             # Reparameterization trick
+        """For normal distribution (mu, logvar)."""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        z = mu + eps * std
         return z
     
     def encode(self, x):
-        if isinstance(self.encoder, VariationalEncoder):
-            mu, logvar = self.encoder(x)
-            if self.deterministic:
-                return mu
-            else:
-                return self.reparameterize(mu, logvar), mu, logvar
+        """
+        We'll detect whether our encoder returns:
+          - (mu, logvar)
+          - (mu, kappa)
+          - (mu, kappa, c, [gripper?]) or (mu, kappa, c_mu, c_logvar, [gripper?])
+          - or is just a standard non-variational conv stack.
+
+        We'll pass it forward and see what shape it has, 
+        or use 'isinstance(encoder, ...)' approach. 
+        But let's do a simpler approach: we actually just call the encoder 
+        and see how many items are returned.
+        """
+        result = self.encoder(x)
+
+        if not isinstance(result, tuple):
+            # non-variational => just a feature map
+            return result
         else:
-            return self.encoder(x)
-    
+            # We have some form of variational or hyperspherical output
+            # We'll handle each based on length
+            if len(result) == 2:
+                # (mu, logvar) => normal
+                mu, logvar = result
+                if self.deterministic:
+                    # no reparam
+                    return mu
+                else:
+                    z = self.reparameterize(mu, logvar)
+                    return z, mu, logvar
+            elif len(result) == 3:
+                # (mu, kappa) or (mu, kappa, c_det)
+                # We can't directly reparam a c_det. 
+                # Let's see if c_det is a single dimension or not. 
+                # For non-SLA Hyperspherical: (mu, kappa)
+                # We'll do a simpler approach: we treat them as "non-deterministic" if we want?
+                # Typically, vMF is reparam done in the decoder or model forward. 
+                # So if we just have (mu, kappa), we'll treat it as a "latent" that doesn't do normal reparam.
+                # We'll just return them as is for the user to decode?
+                mu, kappa, maybe_c = result
+                # We'll guess if maybe_c is None => we do (mu, kappa).
+                # We'll check shape. If maybe_c is a single dim => it's probably c_det. 
+                # For now, let's just return the triple.
+                return result  # We pass forward as is.
+            elif len(result) == 4:
+                # (mu, kappa, c_det, raw_gripper) or something else
+                return result
+            elif len(result) == 5:
+                # (mu, kappa, c_mu, c_logvar, raw_gripper)
+                return result
+            else:
+                return result  # fallback
+
     def decode(self, x):
-        action = self.decoder(x)
-        
+        """
+        x here might be the "features" or the "latent" from the reparam step.
+        Then we pass it into the decoder if it's an nn.Module. 
+        For vMF-based models, the "forward" might already do the reparam & decode 
+        in one pass, so we might only need standardization, etc.
+        """
+        if callable(self.decoder):
+            action = self.decoder(x)
+        else:
+            # If there's no decoder, just assume x is the final output
+            action = x
+
         # Unstandardize
-        action = action * self.action_std.to(action.device) + self.action_mean.to(action.device)
-        
-        # Convert to global coordinates if needed
-        if self.coordinate_system in ['camera', 'disentangled']:
-            action = self.transform_to_global(action)
-        
+        if isinstance(action, torch.Tensor):
+            action = action * self.action_std.to(action.device) + self.action_mean.to(action.device)
+            
+            # Convert to global coordinates if needed
+            if self.coordinate_system in ['camera', 'disentangled']:
+                action = self.transform_to_global(action)
+                
         return action
     
     def forward(self, x):
-        if self.deterministic:
-            return self.decode(self.encode(x))
+        # We'll do a standard approach: 
+        #  1) encode => might get multiple items
+        #  2) decode if needed
+        # 
+        # But for your vMF-based classes, the entire forward pass might produce 
+        # final actions already, so we have to detect that too.
+        # If self.encoder + self.decoder is truly separated, we do the standard approach.
+        # If the model lumps it all in "forward," then our encoder might actually produce final actions.
+        # We'll do a check if the encoder returns a single Tensor of shape [B, something].
+        # We'll do a naive approach: if the encoder returns shape (B, ...), we decode. 
+        # Otherwise, if it's a tuple with shape (B, ...) as the first item, we decode that. 
+        # But for vMF-based classes, the reparam is done in the "model forward" not here. 
+        # So maybe we bypass decode? 
+        # 
+        # A simpler approach: if "decoder" is None, we assume the "encoder" is actually the entire model.
+        # If the decoder is not None, we do the old approach.
+
+        encoded = self.encode(x)
+
+        if self.decoder is None:
+            # Then "encode" is the entire model forward => final output
+            # see if we got a single or tuple
+            if isinstance(encoded, tuple):
+                # typically final output is encoded[0]
+                out = encoded[0]
+                return out
+            else:
+                return encoded
         else:
-            z, mu, logvar = self.encode(x)
-            return self.decode(z), mu, logvar
-        
+            # We have a separate decoder => do the old flow
+            if not isinstance(encoded, tuple):
+                # Non-variational => final step
+                return self.decode(encoded)
+            else:
+                # We might have (z, mu, logvar) for normal
+                # or (mu, kappa, c, ...) for vMF
+                if len(encoded) == 2:
+                    # (mu, logvar) => the user didn't want reparam? 
+                    # We'll do decode on mu? Not typical. 
+                    # This is tricky. 
+                    # Possibly we do self.decode(mu).
+                    # But let’s keep consistent with the standard reparam approach 
+                    # from our "encode" method => if deterministic => returned mu, else returned (z, mu, logvar).
+                    mu, logvar = encoded
+                    return self.decode(mu)
+                elif len(encoded) == 3:
+                    # Possibly (z, mu, logvar) from normal 
+                    # or (mu, kappa, c_det)
+                    # If it's (z, mu, logvar), we decode z:
+                    z, mu, logvar = encoded
+                    return self.decode(z)
+                elif len(encoded) == 5:
+                    # (out, mu, kappa, c_mu, c_logvar) from an SLA forward? 
+                    # Actually might see we do "model forward" in training. 
+                    # But if using the "encoder/decoder" approach, we didn't do model's forward. 
+                    # We just parted out the submodules. 
+                    # So let's assume it's the actual latents => we'd decode the first. 
+                    # We'll do something minimal.
+                    return self.decode(encoded[0])
+                else:
+                    return self.decode(encoded[0])
+
     def transform_to_global(self, action):
-        # Extract position component (first 3 dimensions) and other components
+        # same from your original code
         pos = action[:, :3]
         other = action[:, 3:]
-        
+
         if self.coordinate_system == 'camera':
-            # Convert from camera frame to global frame
             pos_homog = torch.cat([pos, torch.ones(pos.shape[0], 1).to(pos.device)], dim=1)
             R_inv = torch.inverse(torch.from_numpy(self.R).float().to(pos.device))
             pos_global = (R_inv @ pos_homog.unsqueeze(-1)).squeeze(-1)[:, :3]
-            
         elif self.coordinate_system == 'disentangled':
-            # Convert from (x/z, y/z, log(z)) back to (x, y, z)
             x_over_z, y_over_z, log_z = pos[:, 0], pos[:, 1], pos[:, 2]
             z = torch.exp(log_z)
             x = x_over_z * z
             y = y_over_z * z
             pos_global = torch.stack([x, y, z], dim=1)
-            
-        # Combine transformed position with other components
         return torch.cat([pos_global, other], dim=1)
 
-
+# --------------------------------------------------------------------------
+# Updated load_action_identifier
+# --------------------------------------------------------------------------
 def load_action_identifier(
-    conv_path,
-    mlp_path,
-    resnet_version,
-    video_length,
-    in_channels,
-    action_length,
-    num_classes,
-    num_mlp_layers,
+    checkpoint_path=None,
+    # separate param paths
+    conv_path=None,
+    mlp_path=None,
     fc_mu_path=None,
     fc_logvar_path=None,
+    fc_kappa_path=None,
+    fc_c_path=None,         # optionally if we store deterministic c
+    fc_c_mu_path=None,      # if we store c mu
+    fc_c_logvar_path=None,  # if we store c logvar
+    fc_gripper_path=None,   # if we store a separate gripper head
+    # model config
+    resnet_version='resnet18',
+    video_length=2,
+    in_channels=3,
+    action_length=1,
+    num_classes=7,
+    num_mlp_layers=3,
+    # additional options
     stats_path='action_statistics_delta_position+gripper.npz',
     coordinate_system='global',
     camera_name='frontview',
-    split_layer='avgpool', # The last layer of the encoder
-    deterministic=True
+    split_layer='avgpool',  # The last layer of the encoder
+    deterministic=True,
+    # new param to pick which architecture we want:
+    arch_type='resnet',   # or 'variational', 'hyperspherical', 'sla'
+    use_distribution_for_c=False
 ):
-    # Build the model
-    if fc_mu_path is not None and fc_logvar_path is not None:
-        architecture = ActionExtractionVariationalResNet
+    """
+    Load an action identifier that can handle different architectures. 
+    If checkpoint_path is provided, we load the entire model from it.
+      (Ignoring the separate param paths.)
+    Otherwise, if no checkpoint, we do partial param loading as before.
+    """
+    # 1) Construct the model
+    if arch_type == 'variational':
+        model_class = ActionExtractionVariationalResNet
+    elif arch_type == 'hyperspherical':
+        model_class = ActionExtractionHypersphericalResNet
+    elif arch_type == 'sla':
+        model_class = ActionExtractionSLAResNet
     else:
-        architecture = ActionExtractionResNet
-        
-    model = architecture(
+        # default non-variational
+        model_class = ActionExtractionResNet
+
+    model = model_class(
         resnet_version=resnet_version,
         video_length=video_length,
         in_channels=in_channels,
         action_length=action_length,
         num_classes=num_classes,
-        num_mlp_layers=num_mlp_layers
+        num_mlp_layers=num_mlp_layers,
+        # use_distribution_for_c=use_distribution_for_c  # only relevant if SLA
     )
 
-    # Load the saved conv and mlp parts into the model
+    # 2) If checkpoint_path is provided, load entire model state
+    if checkpoint_path is not None:
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        state_dict = checkpoint["model_state_dict"]
+
+        # 1) Create a new OrderedDict without "module." prefix
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("module."):
+                new_key = k[len("module."):]  # strip the "module." 
+            else:
+                new_key = k
+            new_state_dict[new_key] = v
+
+        # 2) Load it into your (non-DataParallel) model
+        model.load_state_dict(new_state_dict, strict=True)
+
+        # Build a trivial 'encoder' + 'decoder' that basically calls the model as a whole
+        # because these architectures do their own forward logic
+        # So we can just do: 
+        return ActionIdentifier(
+            encoder=model,  # we treat 'model' as the entire forward
+            decoder=None,
+            stats_path=stats_path,
+            coordinate_system=coordinate_system,
+            camera_name=camera_name,
+            deterministic=deterministic
+        )
+
+    # 3) Otherwise, do partial param loading
+    #    We'll assume user might pass conv_path, mlp_path, etc.
+    #    We'll load them if not None.
+    #    This is basically your old approach, but extended for new variants.
+
     if conv_path is not None:
-        model.conv.load_state_dict(torch.load(conv_path))
-    else:
-        model.conv = None
+        model.conv.load_state_dict(torch.load(conv_path, map_location='cpu'))
+    if mlp_path is not None and hasattr(model, 'mlp'):
+        model.mlp.load_state_dict(torch.load(mlp_path, map_location='cpu'))
 
-    if mlp_path is not None:
-        model.mlp.load_state_dict(torch.load(mlp_path))
-    else:
-        model.mlp = None
-        
-    if fc_mu_path is not None:
-        model.fc_mu.load_state_dict(torch.load(fc_mu_path))
-    else:
-        model.fc_mu = None
-        
-    if fc_logvar_path is not None:
-        model.fc_logvar.load_state_dict(torch.load(fc_logvar_path))
-    else:
-        model.fc_logvar = None
+    if hasattr(model, 'fc_mu') and fc_mu_path is not None:
+        model.fc_mu.load_state_dict(torch.load(fc_mu_path, map_location='cpu'))
+    if hasattr(model, 'fc_logvar') and fc_logvar_path is not None:
+        model.fc_logvar.load_state_dict(torch.load(fc_logvar_path, map_location='cpu'))
+    if hasattr(model, 'fc_kappa') and fc_kappa_path is not None:
+        model.fc_kappa.load_state_dict(torch.load(fc_kappa_path, map_location='cpu'))
 
-    # Split the conv module into encoder and decoder
-    encoder_layers = nn.Sequential()
-    decoder_layers = nn.Sequential()
-    add_to_decoder = False
+    # If SLA and not distribution => might have fc_c or else fc_c_mu/logvar
+    if arch_type == 'sla':
+        if use_distribution_for_c:
+            if hasattr(model, 'fc_c_mu') and fc_c_mu_path is not None:
+                model.fc_c_mu.load_state_dict(torch.load(fc_c_mu_path, map_location='cpu'))
+            if hasattr(model, 'fc_c_logvar') and fc_c_logvar_path is not None:
+                model.fc_c_logvar.load_state_dict(torch.load(fc_c_logvar_path, map_location='cpu'))
+        else:
+            if hasattr(model, 'fc_c') and fc_c_path is not None:
+                model.fc_c.load_state_dict(torch.load(fc_c_path, map_location='cpu'))
+        if hasattr(model, 'fc_gripper') and fc_gripper_path is not None:
+            model.fc_gripper.load_state_dict(torch.load(fc_gripper_path, map_location='cpu'))
+
+    # 4) Split the model into "encoder" and "decoder" only if it's a non-variational approach 
+    #    or standard variational approach that we want to dissect. 
+    #    For Hyperspherical or SLA, you might want to treat 'model' as a single forward pass
+    #    that does the reparam. But let's keep logic consistent:
 
     if isinstance(model, ActionExtractionResNet):
+        # non-variational => we do the old sequential split
+        encoder_layers = nn.Sequential()
+        decoder_layers = nn.Sequential()
+        add_to_decoder = False
         for name, module in model.conv.named_children():
             if not add_to_decoder:
                 encoder_layers.add_module(name, module)
                 if name == split_layer:
-                    add_to_decoder = True  # Start adding to decoder after this layer
+                    add_to_decoder = True
             else:
                 decoder_layers.add_module(name, module)
-
-        # Combine decoder_layers with model.mlp
-        full_decoder = nn.Sequential(decoder_layers, 
-            nn.Flatten(), 
-            model.mlp
+        # Combine
+        full_decoder = nn.Sequential(decoder_layers, nn.Flatten(), model.mlp)
+        return ActionIdentifier(
+            encoder=encoder_layers,
+            decoder=full_decoder,
+            stats_path=stats_path,
+            coordinate_system=coordinate_system,
+            camera_name=camera_name,
+            deterministic=deterministic
         )
     elif isinstance(model, ActionExtractionVariationalResNet):
-        # Initialize variational encoder
+        # We build a VariationalEncoder + MLP decoder
         encoder = VariationalEncoder(
             conv=model.conv,
             fc_mu=model.fc_mu,
             fc_logvar=model.fc_logvar
         )
-
-        # Initialize decoder as the MLP part of the model
         decoder = model.mlp
-
-        # Combine decoder_layers as the full_decoder
-        full_decoder = nn.Sequential(
-            decoder,                # MLP head
-            # Add more layers here if necessary
+        return ActionIdentifier(
+            encoder=encoder,
+            decoder=decoder,
+            stats_path=stats_path,
+            coordinate_system=coordinate_system,
+            camera_name=camera_name,
+            deterministic=deterministic
         )
-        
+    elif isinstance(model, ActionExtractionHypersphericalResNet):
+        # or SLA. 
+        # We'll do a single 'encoder' that returns (mu, kappa, [c, c_logvar, ...]) 
+        # if SLA, then we also have c, c_logvar, etc. 
+        # We'll detect it from `hasattr(model, 'fc_c_mu')`, etc. 
+        fc_c = getattr(model, 'fc_c', None)
+        fc_c_mu = getattr(model, 'fc_c_mu', None)
+        fc_c_logvar = getattr(model, 'fc_c_logvar', None)
+        fc_gripper = getattr(model, 'fc_gripper', None)
+        encoder = VMFEncoder(
+            conv=model.conv,
+            fc_mu=model.fc_mu,
+            fc_kappa=model.fc_kappa,
+            fc_c=fc_c,
+            fc_c_mu=fc_c_mu,
+            fc_c_logvar=fc_c_logvar,
+            fc_gripper=fc_gripper,
+            use_distribution_for_c=use_distribution_for_c
+        )
+        # The decoder is model.mlp => but in the actual forward, we often do reparam in model forward. 
+        # We'll treat the MLP as the final decode. 
+        decoder = model.mlp
+        return ActionIdentifier(
+            encoder=encoder,
+            decoder=decoder,
+            stats_path=stats_path,
+            coordinate_system=coordinate_system,
+            camera_name=camera_name,
+            deterministic=deterministic
+        )
     else:
-        full_decoder = None
+        # fallback => treat the entire model as single forward
+        return ActionIdentifier(
+            encoder=model,
+            decoder=None,
+            stats_path=stats_path,
+            coordinate_system=coordinate_system,
+            camera_name=camera_name,
+            deterministic=deterministic
+        )
 
-    # Initialize ActionIdentifier with the new encoder and decoder
-    action_identifier = ActionIdentifier(
-        encoder=encoder if isinstance(model, ActionExtractionVariationalResNet) else encoder_layers,
-        decoder=full_decoder,
-        stats_path=stats_path,
-        coordinate_system=coordinate_system,
-        camera_name=camera_name,
-        deterministic=deterministic
-    )
 
-    return action_identifier
-    
 def validate_pose_estimator(args):
     architecture = 'direct_resnet_mlp'
     data_modality = 'cropped_rgbd+color_mask'
@@ -263,11 +546,9 @@ def validate_pose_estimator(args):
     
     from action_extractor.utility_scripts.validation_visualization import validate_and_record
     validate_and_record(trained_model, validation_set, args.trained_model_name[:-4], batch_size, device)
-        
+
+
 if __name__ == '__main__':
-    architecture = ''
-    modality = ''
-    
     parser = argparse.ArgumentParser(description="Load model for pose estimation")
     parser.add_argument(
         '--trained_model_name', '-mn', 
@@ -287,7 +568,6 @@ if __name__ == '__main__':
         default='/home/yilong/Documents/ae_data/datasets/mimicgen_core/coffee_rel',
         help='Path to where the datasets are stored'
     )
-    
     args = parser.parse_args()
     
     validate_pose_estimator(args)

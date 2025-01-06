@@ -102,7 +102,7 @@ class Bottleneck(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, video_length=2, in_channels=3, use_spatial_softmax=True):
+    def __init__(self, block, layers, video_length=2, in_channels=3, use_spatial_softmax=False):
         super(ResNet, self).__init__()
         self.use_spatial_softmax = use_spatial_softmax  # <--- NEW parameter
 
