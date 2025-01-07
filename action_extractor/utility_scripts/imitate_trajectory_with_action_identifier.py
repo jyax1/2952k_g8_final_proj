@@ -31,8 +31,8 @@ dataset_path = "/home/yilong/Documents/ae_data/random_processing/lift_1000"
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
 
 # non-variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/resnet_spatial_softmax-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-45.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/resnet_spatial_softmax-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-45.pth'
+conv_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-44.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-44.pth'
 
 n = 100
 save_webp = False
@@ -49,7 +49,7 @@ else:
     fc_mu_path = None
     fc_logvar_path = None
     
-output_dir = "/home/yilong/Documents/action_extractor/debug/resnet_45_lift_1000"
+output_dir = "/home/yilong/Documents/action_extractor/debug/resnet_global_average_pooling_45_lift_1000"
 
 # checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
 # arch_type = 'hyperspherical'
