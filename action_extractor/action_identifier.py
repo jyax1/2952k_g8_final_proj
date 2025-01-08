@@ -306,10 +306,10 @@ def load_action_identifier(
     fc_mu_path=None,
     fc_logvar_path=None,
     fc_kappa_path=None,
-    fc_c_path=None,         # optionally if we store deterministic c
-    fc_c_mu_path=None,      # if we store c mu
-    fc_c_logvar_path=None,  # if we store c logvar
-    fc_gripper_path=None,   # if we store a separate gripper head
+    fc_c_path=None,
+    fc_c_mu_path=None,
+    fc_c_logvar_path=None,
+    fc_gripper_path=None,
     # model config
     resnet_version='resnet18',
     video_length=2,
@@ -321,19 +321,30 @@ def load_action_identifier(
     stats_path='action_statistics_delta_position+gripper.npz',
     coordinate_system='global',
     camera_name='frontview',
-    split_layer='avgpool',  # The last layer of the encoder
+    split_layer='avgpool',  # The last layer name to split the ResNet
     deterministic=True,
     # new param to pick which architecture we want:
     arch_type='resnet',   # or 'variational', 'hyperspherical', 'sla'
     use_distribution_for_c=False
 ):
     """
-    Load an action identifier that can handle different architectures. 
-    If checkpoint_path is provided, we load the entire model from it.
-      (Ignoring the separate param paths.)
-    Otherwise, if no checkpoint, we do partial param loading as before.
+    Modified so that for ActionExtractionResNet, we ALWAYS split into encoder+decoder,
+    whether loading from checkpoint or partial param paths. This ensures we call
+    'decode(...)' -> un-standardization in ActionIdentifier.forward().
     """
-    # 1) Construct the model
+    from action_extractor.architectures.direct_resnet_mlp import ActionExtractionResNet
+    from action_extractor.architectures.direct_variational_resnet import (
+        ActionExtractionVariationalResNet,
+        ActionExtractionHypersphericalResNet,
+        ActionExtractionSLAResNet
+    )
+    from .action_identifier import (
+        ActionIdentifier, VariationalEncoder, VMFEncoder
+    )
+    import torch
+    import torch.nn as nn
+
+    # 1) Instantiate the correct model class
     if arch_type == 'variational':
         model_class = ActionExtractionVariationalResNet
     elif arch_type == 'hyperspherical':
@@ -351,75 +362,55 @@ def load_action_identifier(
         action_length=action_length,
         num_classes=num_classes,
         num_mlp_layers=num_mlp_layers,
-        # use_distribution_for_c=use_distribution_for_c  # only relevant if SLA
     )
 
     # 2) If checkpoint_path is provided, load entire model state
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         state_dict = checkpoint["model_state_dict"]
-
-        # 1) Create a new OrderedDict without "module." prefix
         new_state_dict = {}
         for k, v in state_dict.items():
             if k.startswith("module."):
-                new_key = k[len("module."):]  # strip the "module." 
+                new_key = k[len("module."):]
             else:
                 new_key = k
             new_state_dict[new_key] = v
-
-        # 2) Load it into your (non-DataParallel) model
         model.load_state_dict(new_state_dict, strict=True)
 
-        # Build a trivial 'encoder' + 'decoder' that basically calls the model as a whole
-        # because these architectures do their own forward logic
-        # So we can just do: 
-        return ActionIdentifier(
-            encoder=model,  # we treat 'model' as the entire forward
-            decoder=None,
-            stats_path=stats_path,
-            coordinate_system=coordinate_system,
-            camera_name=camera_name,
-            deterministic=deterministic
-        )
+    # 3) Otherwise, do partial param loading (if provided)
+    else:
+        if conv_path is not None:
+            model.conv.load_state_dict(torch.load(conv_path, map_location='cpu'))
+        if mlp_path is not None and hasattr(model, 'mlp'):
+            model.mlp.load_state_dict(torch.load(mlp_path, map_location='cpu'))
+        if hasattr(model, 'fc_mu') and fc_mu_path is not None:
+            model.fc_mu.load_state_dict(torch.load(fc_mu_path, map_location='cpu'))
+        if hasattr(model, 'fc_logvar') and fc_logvar_path is not None:
+            model.fc_logvar.load_state_dict(torch.load(fc_logvar_path, map_location='cpu'))
+        if hasattr(model, 'fc_kappa') and fc_kappa_path is not None:
+            model.fc_kappa.load_state_dict(torch.load(fc_kappa_path, map_location='cpu'))
 
-    # 3) Otherwise, do partial param loading
-    #    We'll assume user might pass conv_path, mlp_path, etc.
-    #    We'll load them if not None.
-    #    This is basically your old approach, but extended for new variants.
+        # SLA optional c or c_mu/logvar
+        if arch_type == 'sla':
+            if use_distribution_for_c:
+                if hasattr(model, 'fc_c_mu') and fc_c_mu_path is not None:
+                    model.fc_c_mu.load_state_dict(torch.load(fc_c_mu_path, map_location='cpu'))
+                if hasattr(model, 'fc_c_logvar') and fc_c_logvar_path is not None:
+                    model.fc_c_logvar.load_state_dict(torch.load(fc_c_logvar_path, map_location='cpu'))
+            else:
+                if hasattr(model, 'fc_c') and fc_c_path is not None:
+                    model.fc_c.load_state_dict(torch.load(fc_c_path, map_location='cpu'))
+            if hasattr(model, 'fc_gripper') and fc_gripper_path is not None:
+                model.fc_gripper.load_state_dict(torch.load(fc_gripper_path, map_location='cpu'))
 
-    if conv_path is not None:
-        model.conv.load_state_dict(torch.load(conv_path, map_location='cpu'))
-    if mlp_path is not None and hasattr(model, 'mlp'):
-        model.mlp.load_state_dict(torch.load(mlp_path, map_location='cpu'))
-
-    if hasattr(model, 'fc_mu') and fc_mu_path is not None:
-        model.fc_mu.load_state_dict(torch.load(fc_mu_path, map_location='cpu'))
-    if hasattr(model, 'fc_logvar') and fc_logvar_path is not None:
-        model.fc_logvar.load_state_dict(torch.load(fc_logvar_path, map_location='cpu'))
-    if hasattr(model, 'fc_kappa') and fc_kappa_path is not None:
-        model.fc_kappa.load_state_dict(torch.load(fc_kappa_path, map_location='cpu'))
-
-    # If SLA and not distribution => might have fc_c or else fc_c_mu/logvar
-    if arch_type == 'sla':
-        if use_distribution_for_c:
-            if hasattr(model, 'fc_c_mu') and fc_c_mu_path is not None:
-                model.fc_c_mu.load_state_dict(torch.load(fc_c_mu_path, map_location='cpu'))
-            if hasattr(model, 'fc_c_logvar') and fc_c_logvar_path is not None:
-                model.fc_c_logvar.load_state_dict(torch.load(fc_c_logvar_path, map_location='cpu'))
-        else:
-            if hasattr(model, 'fc_c') and fc_c_path is not None:
-                model.fc_c.load_state_dict(torch.load(fc_c_path, map_location='cpu'))
-        if hasattr(model, 'fc_gripper') and fc_gripper_path is not None:
-            model.fc_gripper.load_state_dict(torch.load(fc_gripper_path, map_location='cpu'))
-
-    # 4) Split the model into "encoder" and "decoder" only if it's a non-variational approach 
-    #    or standard variational approach that we want to dissect. 
-    #    For Hyperspherical or SLA, you might want to treat 'model' as a single forward pass
-    #    that does the reparam. But let's keep logic consistent:
-
+    # -------------------------------------------------------------------------
+    # 4) Now return an ActionIdentifier. We'll unify the logic so that for
+    #    ActionExtractionResNet, we ALWAYS do the "encoder/decoder" split,
+    #    whether we loaded from checkpoint or partial param. This ensures
+    #    we run "decode(...)" -> un-standardize in ActionIdentifier.
+    # -------------------------------------------------------------------------
     if isinstance(model, ActionExtractionResNet):
-        # non-variational => we do the old sequential split
+        # --- Non-variational => do the old sequential split ---
         encoder_layers = nn.Sequential()
         decoder_layers = nn.Sequential()
         add_to_decoder = False
@@ -430,8 +421,15 @@ def load_action_identifier(
                     add_to_decoder = True
             else:
                 decoder_layers.add_module(name, module)
-        # Combine
-        full_decoder = nn.Sequential(decoder_layers, nn.Flatten(), model.mlp)
+
+        # Combine into final "decoder"
+        from torch import nn as nn2
+        full_decoder = nn.Sequential(
+            decoder_layers,
+            nn2.Flatten(),
+            model.mlp
+        )
+
         return ActionIdentifier(
             encoder=encoder_layers,
             decoder=full_decoder,
@@ -440,8 +438,8 @@ def load_action_identifier(
             camera_name=camera_name,
             deterministic=deterministic
         )
+
     elif isinstance(model, ActionExtractionVariationalResNet):
-        # We build a VariationalEncoder + MLP decoder
         encoder = VariationalEncoder(
             conv=model.conv,
             fc_mu=model.fc_mu,
@@ -456,11 +454,10 @@ def load_action_identifier(
             camera_name=camera_name,
             deterministic=deterministic
         )
-    elif isinstance(model, ActionExtractionHypersphericalResNet):
-        # or SLA. 
-        # We'll do a single 'encoder' that returns (mu, kappa, [c, c_logvar, ...]) 
-        # if SLA, then we also have c, c_logvar, etc. 
-        # We'll detect it from `hasattr(model, 'fc_c_mu')`, etc. 
+
+    elif isinstance(model, ActionExtractionHypersphericalResNet) or isinstance(model, ActionExtractionSLAResNet):
+        # vMF or SLA path
+        from .action_identifier import VMFEncoder
         fc_c = getattr(model, 'fc_c', None)
         fc_c_mu = getattr(model, 'fc_c_mu', None)
         fc_c_logvar = getattr(model, 'fc_c_logvar', None)
@@ -475,8 +472,6 @@ def load_action_identifier(
             fc_gripper=fc_gripper,
             use_distribution_for_c=use_distribution_for_c
         )
-        # The decoder is model.mlp => but in the actual forward, we often do reparam in model forward. 
-        # We'll treat the MLP as the final decode. 
         decoder = model.mlp
         return ActionIdentifier(
             encoder=encoder,
@@ -487,7 +482,7 @@ def load_action_identifier(
             deterministic=deterministic
         )
     else:
-        # fallback => treat the entire model as single forward
+        # fallback => treat entire model as single forward
         return ActionIdentifier(
             encoder=model,
             decoder=None,
@@ -496,6 +491,7 @@ def load_action_identifier(
             camera_name=camera_name,
             deterministic=deterministic
         )
+
 
 
 def validate_pose_estimator(args):

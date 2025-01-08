@@ -26,6 +26,8 @@ import csv
 from tqdm import tqdm
 import torch.nn.functional as F
 import numpy as np
+from einops import rearrange
+import robomimic.utils.obs_utils as ObsUtils
 # from utils.utils import check_dataset  # (assuming your own utility function)
 
 # ---------------------------------------------------------------------
@@ -195,6 +197,8 @@ class Trainer:
         self.lr = lr
         self.momentum = momentum
         
+        self.saved_param_file_sets = []
+        
         self.aux = True if 'aux' in model_name else False
         self.device = self.accelerator.device
 
@@ -203,6 +207,8 @@ class Trainer:
 
         # Identify the loss type
         self.loss_type = loss.lower()
+        
+        self.best_rollout_success = 0.0
 
         # Identify if the model is variational
         if isinstance(self.model, ActionExtractionSLAResNet):
@@ -378,6 +384,20 @@ class Trainer:
             # Validate
             val_loss, outputs, labels, avg_deviations = self.validate()
             self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
+            rollout_success_rate = self.validate_inferred_rollout(
+                max_demos=100
+            )
+            self.writer.add_scalar('Rollout Success Rate', rollout_success_rate, epoch)
+
+            # -------------------------------------------------------------------------------
+            # (2) IF ROLLOUT SUCCESS RATE IMPROVES, SAVE A "BEST" CHECKPOINT + SEPARATE FILES
+            # -------------------------------------------------------------------------------
+            if rollout_success_rate > self.best_rollout_success:
+                self.best_rollout_success = rollout_success_rate
+                self.save_best_checkpoint(epoch + 1)
+                print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
+            else:
+                print(f"Rollout success rate: {rollout_success_rate}% <= {self.best_rollout_success}%, did not improve.")
 
             # Log validation metrics
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
@@ -388,15 +408,12 @@ class Trainer:
             # LR schedule
             self.scheduler.step(val_loss)
 
-            # ---------------------------------------------------------------------
-            # (2) IF VAL LOSS IMPROVES, SAVE A "BEST" CHECKPOINT + SEPARATE FILES
-            # ---------------------------------------------------------------------
-            if val_loss < self.best_val_loss:
-                self.best_val_loss = val_loss
-                self.save_best_checkpoint(epoch + 1)
-                print(f"Validation loss improved to {val_loss:.6f}.  (Best checkpoint saved)")
-            else:
-                print(f"Validation loss did not improve at epoch {epoch + 1}.")
+            # if val_loss < self.best_val_loss:
+            #     self.best_val_loss = val_loss
+            #     self.save_best_checkpoint(epoch + 1)
+            #     print(f"Validation loss improved to {val_loss:.6f}.  (Best checkpoint saved)")
+            # else:
+            #     print(f"Validation loss did not improve at epoch {epoch + 1}.")
 
         # Done with epochs
         self.writer.close()
@@ -459,21 +476,144 @@ class Trainer:
 
         return avg_val_loss, outputs, labels, avg_deviations
     
+    def validate_inferred_rollout(self, max_demos=100):
+        """
+        Infers actions from the model (using the same stacked frames logic) 
+        and rolls out in an environment for a subset of demos in self.validation_set.
+        Returns a success_rate in [0..100].
+        """
+        self.model.eval()
+        device = self.accelerator.device
+
+        # (1) Grab relevant fields from validation_set
+        cameras = self.validation_set.cameras
+        data_modality = self.validation_set.data_modality
+        frame_stack = self.validation_set.video_length
+
+        # Ensure your action_std and action_mean are on the same device as the model
+        # (If your train_set has them as Tensors)
+        action_std = torch.tensor(self.train_set.action_std, dtype=torch.float32, device=device)
+        action_mean = torch.tensor(self.train_set.action_mean, dtype=torch.float32, device=device)
+
+        # Create environment from the first HDF5 or from dataset metadata
+        from robomimic.utils.file_utils import get_env_metadata_from_dataset
+        from robomimic.utils.env_utils import create_env_from_metadata
+        if len(self.validation_set.hdf5_files) == 0:
+            print("No HDF5 files in validation_set! Can't create environment.")
+            return 0.0
+
+        env_meta = get_env_metadata_from_dataset(self.validation_set.hdf5_files[0])
+        obs_modality_specs = {
+            "obs": {
+                "rgb": cameras,
+                "depth": [f"{camera.split('_')[0]}_depth" for camera in cameras],
+            }
+        }
+        ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
+        env = create_env_from_metadata(env_meta=env_meta, render_offscreen=False)
+
+        success_count = 0
+        total_count = 0
+        
+         # We'll gather the total number of demos to process for the progress bar
+        total_demos = 0
+        for root in self.validation_set.roots:
+            data_group = root["data"]
+            all_demos = list(data_group.keys())
+            total_demos += min(len(all_demos), max_demos)
+
+        # Create a tqdm progress bar for the total number of demos
+        pbar = tqdm(total=total_demos, desc="Inferred Rollout Validation", leave=True)
+
+        # (2) Loop over all Zarr roots
+        for root in self.validation_set.roots:
+            data_group = root["data"]
+            all_demos = list(data_group.keys())
+            all_demos = all_demos[:max_demos]
+
+            for demo in all_demos:
+                obs_group = data_group[demo]["obs"]
+                states = data_group[demo]["states"]
+
+                num_samples = obs_group[cameras[0]].shape[0]
+                initial_state = states[0]
+                env.reset()
+                env.reset_to({"states": initial_state})
+
+                inferred_actions = []
+
+                # (3) Build stacked frames, model inference
+                for t in range(num_samples - frame_stack):
+                    frame_list = []
+                    for j in range(frame_stack):
+                        cam_images = []
+                        for cam in cameras:
+                            img = obs_group[cam][t + j] / 255.0
+                            mask_cam = cam.split('_')[0] + '_maskdepth'
+                            mask_depth = obs_group[mask_cam][t + j] / 255.0
+                            if data_modality == 'cropped_rgbd+color_mask':
+                                mask_depth = mask_depth[:, :, :2]
+                            combined_img = np.concatenate((img, mask_depth), axis=2)
+                            cam_images.append(combined_img)
+                        stacked_cams = np.concatenate(cam_images, axis=2)
+                        frame_list.append(stacked_cams)
+
+                    stacked_np = np.concatenate(frame_list, axis=2)
+                    obs_tensor = (
+                        torch.from_numpy(rearrange(stacked_np, "h w c -> c h w"))
+                        .float()
+                        .unsqueeze(0)
+                        .to(device)
+                    )
+
+                    with torch.no_grad():
+                        model_out = self.model(obs_tensor)  # shape [1, N]
+                    model_out = model_out.squeeze(0)       # shape [N, ]
+
+                    # --- De-normalize in GPU, THEN move to CPU ---
+                    unstd_action = model_out * action_std + action_mean
+                    action = unstd_action.cpu().numpy()  # final action on CPU
+
+                    # (Optionally) insert zeros, scale, clamp gripper
+                    if action.shape[0] == 4:
+                        action = np.insert(action, [3, 3, 3], 0.0)
+                        action[:3] *= 80.0
+                        action[-1] = np.sign(action[-1])
+
+                    inferred_actions.append(action)
+
+                # (4) Environment roll-out
+                for act in inferred_actions:
+                    env.step(act)
+
+                # (5) Check success
+                if env.is_success()['task']:
+                    success_count += 1
+                total_count += 1
+                
+                # Update the progress bar after each demo
+                pbar.update(1)
+
+        pbar.close()  # optionally close the bar
+        
+        success_rate = 100.0 * success_count / max(1, total_count)
+        return success_rate
+    
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         """
         Example CSV logging function. 
         Writes the current val_loss, optionally some sample predictions, etc.
         """
-        csv_path = os.path.join(self.results_path, f'{self.model_name}_val.csv')
-        with open(csv_path, 'a', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            if end_of_epoch:
+        if end_of_epoch:
+            with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
+                writer = csv.writer(csvfile)
                 writer.writerow([f"Epoch: {epoch} ended after {iteration} iterations, val_loss (MSE): {val_loss}"])
-            else:
+        else:    
+            with open(os.path.join(self.results_path, f'{self.model_name}_val.csv'), 'a', newline='') as csvfile:
+                writer = csv.writer(csvfile)
                 writer.writerow([f"val_loss (MSE): {val_loss}; Epoch: {epoch}; Iteration: {iteration}"])
-                # Optionally log a few samples
                 num_rows = outputs.shape[0]
-                indices = torch.randperm(num_rows)[:3]  # grab 3 random examples
+                indices = torch.randperm(num_rows)[:10]
                 sample_outputs = outputs[indices, :]
                 sample_labels = labels[indices, :]
                 writer.writerow([f"sample outputs:\n {sample_outputs}"])
@@ -623,6 +763,13 @@ class Trainer:
 
         else:
             print('Model type not recognized for separate-file saving.')
-
-        # You could track these param files to remove older ones if you only want the latest best.
-        # (Omitted here for brevity.)
+        
+        self.saved_param_file_sets.append(param_file_list)
+        # 5) If we have more than 10 sets of param files, remove the oldest set from disk.
+        if len(self.saved_param_file_sets) > 10:
+            oldest_files = self.saved_param_file_sets.pop(0)
+            for old_file in oldest_files:
+                full_path = os.path.join(self.results_path, old_file)
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                    print(f"Removed old param file: {full_path}")

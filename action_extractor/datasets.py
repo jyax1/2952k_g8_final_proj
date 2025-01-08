@@ -66,6 +66,7 @@ class BaseDataset(Dataset):
     def _load_datasets(self, path, demo_percentage, num_demo_train, validation, cameras, all_cameras, max_workers=8):
         # Find all HDF5 files and convert to Zarr if necessary
         sequence_dirs = glob(f"{path}/**/*.hdf5", recursive=True)
+        self.hdf5_files = sequence_dirs
         for seq_dir in sequence_dirs:
             ds_dir = seq_dir.replace('.hdf5', '.zarr')        # e.g. /path/to/file.zarr
             zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')

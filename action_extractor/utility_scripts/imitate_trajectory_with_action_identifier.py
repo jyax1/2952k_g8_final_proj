@@ -31,8 +31,8 @@ dataset_path = "/home/yilong/Documents/ae_data/random_processing/lift_1000"
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'
 
 # non-variational settings
-conv_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-44.pth'
-mlp_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-44.pth'
+conv_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_resnet-45.pth'
+mlp_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_mlp-45.pth'
 
 n = 100
 save_webp = False
@@ -49,12 +49,13 @@ else:
     fc_mu_path = None
     fc_logvar_path = None
     
-output_dir = "/home/yilong/Documents/action_extractor/debug/resnet_global_average_pooling_45_lift_1000"
+output_dir = "/home/yilong/Documents/action_extractor/debug/hyperspherical_lift_1000"
 
-# checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
-# arch_type = 'hyperspherical'
-checkpoint_path = None
-arch_type = 'resnet'
+checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
+arch_type = 'hyperspherical'
+# checkpoint_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_checkpoint_latest.pth'
+# # checkpoint_path = None
+# arch_type = 'resnet'
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
@@ -91,7 +92,8 @@ def imitate_trajectory_with_action_identifier(
     output_dir=output_dir,
     conv_path=conv_path,
     mlp_path=mlp_path,
-    stats_path='/home/yilong/Documents/ae_data/random_processing/lift_1000/action_statistics_delta_position+gripper.npz',
+    # stats_path='/home/yilong/Documents/ae_data/random_processing/lift_1000/action_statistics_delta_position+gripper.npz',
+    stats_path='/home/yilong/Documents/ae_data/random_processing/iiwa16168/action_statistics_delta_position+gripper_oscar.npz',
     n_demos=None,
     data_modality='cropped_rgbd+color_mask',
     cameras=["frontview_image", "sideview_image"],
@@ -156,7 +158,7 @@ def imitate_trajectory_with_action_identifier(
         in_channels=len(cameras) * 6,  # Adjusted for multiple cameras
         action_length=1,
         num_classes=4,
-        num_mlp_layers=3,
+        num_mlp_layers=10,
         fc_mu_path=fc_mu_path,
         fc_logvar_path=fc_logvar_path,
         stats_path=stats_path,
@@ -309,8 +311,9 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
-                    action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
-                    # action *= 
+                    # action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
+                    # # action *= 
+                    action *= 80
                     action[-1] = np.sign(action[-1])
                     
                     env_camera0.step(action)
@@ -329,8 +332,9 @@ def imitate_trajectory_with_action_identifier(
                 for i, action in enumerate(inferred_actions):
                     # Insert three zeros into the fourth, fifth, and sixth positions
                     action = np.insert(action, [3, 3, 3], 0.0)
-                    action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
-                    # action *= 60
+                    # action[:3] /= (np.linalg.norm(action[:3]) + 1e-8)
+                    # # action *= 60
+                    action *= 80
                     action[-1] = np.sign(action[-1])
 
                     env_camera1.step(action)
