@@ -387,7 +387,7 @@ class Trainer:
             # Validate
             val_loss, outputs, labels, avg_deviations = self.validate()
             self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
-            rollout_success_rate, total_rollout_demos = self.validate_inferred_rollout(
+            rollout_success_rate, num_demos_in_valset = self.validate_inferred_rollout(
                 max_demos=self.rollout_max_demos
             )
             self.writer.add_scalar('Rollout Success Rate', rollout_success_rate, epoch)
@@ -396,17 +396,17 @@ class Trainer:
             # -------------------------------------------------------------------------------
             # (2) IF ROLLOUT SUCCESS RATE IMPROVES, SAVE A "BEST" CHECKPOINT + SEPARATE FILES
             # -------------------------------------------------------------------------------
-            if rollout_success_rate > self.best_rollout_success:
+            if rollout_success_rate > self.best_rollout_success or rollout_success_rate == 100.0:
                 self.best_rollout_success = rollout_success_rate
                 self.save_best_checkpoint(epoch + 1)
                 print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
-                 # (B) If we ever hit 100% success, increase max_demos and reset best
-                if rollout_success_rate == 100.0 and self.rollout_max_demos < total_rollout_demos:
+                 # (B) If we hit more than 90% success, increase max_demos and reset best
+                if rollout_success_rate >= 90.0 and self.rollout_max_demos < num_demos_in_valset:
                     self.rollout_max_demos += 20
                     self.best_rollout_success = 60.0
-                    print(f"Hit 100% success! Increased rollout_max_demos to {self.rollout_max_demos}, "
+                    print(f"Over 90% success! Increased rollout_max_demos to {self.rollout_max_demos}, "
                         f"reset best_rollout_success to 60.0.")
-                elif rollout_success_rate == 100.0 and self.rollout_max_demos == total_rollout_demos:
+                elif rollout_success_rate == 100.0 and self.rollout_max_demos == num_demos_in_valset:
                     print(f"100% rollout success rate on entire validation set.")
             else:
                 print(f"Rollout success rate: {rollout_success_rate}% <= {self.best_rollout_success}%, did not improve.")
@@ -529,10 +529,12 @@ class Trainer:
         
          # We'll gather the total number of demos to process for the progress bar
         total_demos = 0
+        valset_demos = 0
         for root in self.validation_set.roots:
             data_group = root["data"]
             all_demos = list(data_group.keys())
             total_demos += min(len(all_demos), max_demos)
+            valset_demos += len(all_demos)
 
         # Create a tqdm progress bar for the total number of demos
         pbar = tqdm(total=total_demos, desc="Inferred Rollout Validation", leave=True)
@@ -609,7 +611,7 @@ class Trainer:
         pbar.close()  # optionally close the bar
         
         success_rate = 100.0 * success_count / max(1, total_count)
-        return success_rate, total_demos
+        return success_rate, valset_demos
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         """
@@ -639,7 +641,7 @@ class Trainer:
         After every epoch, overwrite a single file that holds the 
         "latest" checkpoint (including epoch, model state, etc.).
         """
-        checkpoint_path = os.path.join(self.results_path, f"{self.model_name}_checkpoint_latest.pth")
+        checkpoint_path = os.path.join(self.results_path, f"checkpoints/{self.model_name}_checkpoint_latest.pth")
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -661,7 +663,7 @@ class Trainer:
         this best epoch, just like your original scheme.
         """
         # 1) Save "best" checkpoint (single file)
-        best_ckpt_path = os.path.join(self.results_path, f"{self.model_name}_checkpoint_best.pth")
+        best_ckpt_path = os.path.join(self.results_path, f"checkpoints/{self.model_name}_checkpoint_best.pth")
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -679,10 +681,10 @@ class Trainer:
         #    Here's the same logic from your original save_model() method:
         
         param_file_list = []
-
+        param_file_path = 'param_files/'
         if isinstance(self.model, ActionExtractionCNN):
-            cnn_path = f'{self.model_name}_cnn-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            cnn_path = param_file_path + f'{self.model_name}_cnn-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
             torch.save(self.model.frames_convolution_model.state_dict(), 
                        os.path.join(self.results_path, cnn_path))
             torch.save(self.model.action_mlp_model.state_dict(), 
@@ -690,8 +692,8 @@ class Trainer:
             param_file_list.extend([cnn_path, mlp_path])
 
         elif isinstance(self.model, ActionExtractionViT):
-            cnn_path = f'{self.model_name}_cnn-{epoch}.pth'
-            vit_path = f'{self.model_name}_vit-{epoch}.pth'
+            cnn_path = param_file_path + f'{self.model_name}_cnn-{epoch}.pth'
+            vit_path = param_file_path + f'{self.model_name}_vit-{epoch}.pth'
             torch.save(self.model.frames_convolution_model.state_dict(), 
                        os.path.join(self.results_path, cnn_path))
             torch.save(self.model.action_transformer_model.state_dict(), 
@@ -699,17 +701,17 @@ class Trainer:
             param_file_list.extend([cnn_path, vit_path])
 
         elif isinstance(self.model, ActionExtractionResNet):
-            resnet_path = f'{self.model_name}_resnet-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            resnet_path = param_file_path + f'{self.model_name}_resnet-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, resnet_path))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, mlp_path))
             param_file_list.extend([resnet_path, mlp_path])
 
         elif isinstance(self.model, ActionExtractionVariationalResNet):
-            resnet_path = f'{self.model_name}_resnet-{epoch}.pth'
-            fc_mu_path = f'{self.model_name}_fc_mu-{epoch}.pth'
-            fc_logvar_path = f'{self.model_name}_fc_logvar-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            resnet_path = param_file_path + f'{self.model_name}_resnet-{epoch}.pth'
+            fc_mu_path = param_file_path + f'{self.model_name}_fc_mu-{epoch}.pth'
+            fc_logvar_path = param_file_path + f'{self.model_name}_fc_logvar-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
 
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, resnet_path))
             torch.save(self.model.fc_mu.state_dict(), os.path.join(self.results_path, fc_mu_path))
@@ -718,10 +720,10 @@ class Trainer:
             param_file_list.extend([resnet_path, fc_mu_path, fc_logvar_path, mlp_path])
 
         elif isinstance(self.model, ActionExtractionHypersphericalResNet):
-            resnet_path = f'{self.model_name}_resnet-{epoch}.pth'
-            fc_mu_path = f'{self.model_name}_fc_mu-{epoch}.pth'
-            fc_kappa_path = f'{self.model_name}_fc_kappa-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            resnet_path = param_file_path + f'{self.model_name}_resnet-{epoch}.pth'
+            fc_mu_path = param_file_path + f'{self.model_name}_fc_mu-{epoch}.pth'
+            fc_kappa_path = param_file_path + f'{self.model_name}_fc_kappa-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
 
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, resnet_path))
             torch.save(self.model.fc_mu.state_dict(), os.path.join(self.results_path, fc_mu_path))
@@ -730,49 +732,49 @@ class Trainer:
             param_file_list.extend([resnet_path, fc_mu_path, fc_kappa_path, mlp_path])
 
         elif isinstance(self.model, ResNet3D):
-            resnet_path = f'{self.model_name}_resnet-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            resnet_path = param_file_path + f'{self.model_name}_resnet-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
             torch.save(self.model.conv.state_dict(), os.path.join(self.results_path, resnet_path))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, mlp_path))
             param_file_list.extend([resnet_path, mlp_path])
 
         elif isinstance(self.model, LatentEncoderPretrainCNNUNet) or isinstance(self.model, LatentEncoderPretrainResNetUNet):
-            idm_path = f'{self.model_name}_idm-{epoch}.pth'
-            fdm_path = f'{self.model_name}_fdm-{epoch}.pth'
+            idm_path = param_file_path + f'{self.model_name}_idm-{epoch}.pth'
+            fdm_path = param_file_path + f'{self.model_name}_fdm-{epoch}.pth'
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, idm_path))
             torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, fdm_path))
             param_file_list.extend([idm_path, fdm_path])
 
         elif isinstance(self.model, LatentDecoderMLP):
-            mlp_path = f'{self.model_name}-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}-{epoch}.pth'
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, mlp_path))
             param_file_list.append(mlp_path)
 
         elif isinstance(self.model, LatentDecoderTransformer):
-            transformer_path = f'{self.model_name}-{epoch}.pth'
+            transformer_path = param_file_path + f'{self.model_name}-{epoch}.pth'
             torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, transformer_path))
             param_file_list.append(transformer_path)
 
         elif isinstance(self.model, LatentDecoderObsConditionedUNetMLP):
-            unet_path = f'{self.model_name}_unet-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            unet_path = param_file_path + f'{self.model_name}_unet-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
             torch.save(self.model.unet.state_dict(), os.path.join(self.results_path, unet_path))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, mlp_path))
             param_file_list.extend([unet_path, mlp_path])
 
         elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetTransformer):
-            fdm_path = f'{self.model_name}_fdm-{epoch}.pth'
-            idm_path = f'{self.model_name}_idm-{epoch}.pth'
-            transformer_path = f'{self.model_name}_transformer-{epoch}.pth'
+            fdm_path = param_file_path + f'{self.model_name}_fdm-{epoch}.pth'
+            idm_path = param_file_path + f'{self.model_name}_idm-{epoch}.pth'
+            transformer_path = param_file_path + f'{self.model_name}_transformer-{epoch}.pth'
             torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, fdm_path))
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, idm_path))
             torch.save(self.model.transformer.state_dict(), os.path.join(self.results_path, transformer_path))
             param_file_list.extend([fdm_path, idm_path, transformer_path])
 
         elif isinstance(self.model, LatentDecoderAuxiliarySeparateUNetMLP):
-            fdm_path = f'{self.model_name}_fdm-{epoch}.pth'
-            idm_path = f'{self.model_name}_idm-{epoch}.pth'
-            mlp_path = f'{self.model_name}_mlp-{epoch}.pth'
+            fdm_path = param_file_path + f'{self.model_name}_fdm-{epoch}.pth'
+            idm_path = param_file_path + f'{self.model_name}_idm-{epoch}.pth'
+            mlp_path = param_file_path + f'{self.model_name}_mlp-{epoch}.pth'
             torch.save(self.model.fdm.state_dict(), os.path.join(self.results_path, fdm_path))
             torch.save(self.model.idm.state_dict(), os.path.join(self.results_path, idm_path))
             torch.save(self.model.mlp.state_dict(), os.path.join(self.results_path, mlp_path))
@@ -786,7 +788,7 @@ class Trainer:
         if len(self.saved_param_file_sets) > 10:
             oldest_files = self.saved_param_file_sets.pop(0)
             for old_file in oldest_files:
-                full_path = os.path.join(self.results_path, old_file)
+                full_path = os.path.join(self.results_path, param_file_path + old_file)
                 if os.path.exists(full_path):
                     os.remove(full_path)
                     print(f"Removed old param file: {full_path}")

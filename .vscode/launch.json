@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
@@ -266,7 +267,33 @@
 
 
         {
-            "name": "debug variational frontside",
+            "name": "debug resnet",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "action_extractor/train.py",
+            "console": "integratedTerminal",
+            "args": ["-a=direct_resnet_mlp",
+            "--epoch=50",
+            "--batch_size=16",
+            "-rln=18",
+            "--horizon=2",
+            "--data_modality=cropped_rgbd+color_mask",
+            "--action_type=delta_position+gripper",
+            "--note=debug-frontside",
+            "--cameras=frontview_image,sideview_image",
+            "--learning_rate=0.001",
+            "--num_mlp_layers=3",
+            "--val_demo_percentage=0.9",
+            "--demo_percentage=0.9",
+            "--coordinate_system=global",
+            "--loss=cosine+mse",
+            "--vMF_sample_method=rejection",
+            "--standardize_data"
+        ]
+        },
+
+        {
+            "name": "debug SLA",
             "type": "debugpy",
             "request": "launch",
             "program": "action_extractor/train.py",

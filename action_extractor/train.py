@@ -318,6 +318,8 @@ if __name__ == '__main__':
 
     if args.valsets_path == '':
         args.valsets_path = args.datasets_path
+        
+    args.results_path = os.path.join(args.results_path, args.note)
 
     print('Arguments:', args) # Check argument correctness in jobs
     train(args)
