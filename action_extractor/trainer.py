@@ -259,6 +259,7 @@ class Trainer:
 
         self.start_epoch = 0
         self.best_val_loss = float('inf')
+        self.rollout_max_demos = 20  # start with 20
 
     def get_optimizer(self, optimizer_name):
         if optimizer_name.lower() == 'adam':
@@ -280,6 +281,8 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         self.start_epoch = checkpoint['epoch']
+        self.best_rollout_success = checkpoint['best_rollout_success']
+        self.rollout_max_demos = checkpoint['rollout_max_demos']
         print(f"Loaded checkpoint from {checkpoint_path}, starting from epoch {self.start_epoch}")
 
     def train(self):
@@ -384,10 +387,11 @@ class Trainer:
             # Validate
             val_loss, outputs, labels, avg_deviations = self.validate()
             self.save_validation(val_loss, outputs, labels, epoch + 1, i + 1)
-            rollout_success_rate = self.validate_inferred_rollout(
-                max_demos=100
+            rollout_success_rate, total_rollout_demos = self.validate_inferred_rollout(
+                max_demos=self.rollout_max_demos
             )
             self.writer.add_scalar('Rollout Success Rate', rollout_success_rate, epoch)
+            self.writer.add_scalar('Rollout Set Size', self.rollout_max_demos, epoch)
 
             # -------------------------------------------------------------------------------
             # (2) IF ROLLOUT SUCCESS RATE IMPROVES, SAVE A "BEST" CHECKPOINT + SEPARATE FILES
@@ -396,6 +400,14 @@ class Trainer:
                 self.best_rollout_success = rollout_success_rate
                 self.save_best_checkpoint(epoch + 1)
                 print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
+                 # (B) If we ever hit 100% success, increase max_demos and reset best
+                if rollout_success_rate == 100.0 and self.rollout_max_demos < total_rollout_demos:
+                    self.rollout_max_demos += 20
+                    self.best_rollout_success = 60.0
+                    print(f"Hit 100% success! Increased rollout_max_demos to {self.rollout_max_demos}, "
+                        f"reset best_rollout_success to 60.0.")
+                elif rollout_success_rate == 100.0 and self.rollout_max_demos == total_rollout_demos:
+                    print(f"100% rollout success rate on entire validation set.")
             else:
                 print(f"Rollout success rate: {rollout_success_rate}% <= {self.best_rollout_success}%, did not improve.")
 
@@ -597,7 +609,7 @@ class Trainer:
         pbar.close()  # optionally close the bar
         
         success_rate = 100.0 * success_count / max(1, total_count)
-        return success_rate
+        return success_rate, total_demos
     
     def save_validation(self, val_loss, outputs, labels, epoch, iteration, end_of_epoch=False):
         """
@@ -633,6 +645,8 @@ class Trainer:
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_rollout_success': self.best_rollout_success,
+            'rollout_max_demos': self.rollout_max_demos
         }, checkpoint_path)
         print(f"Saved latest checkpoint (epoch {epoch}) to {checkpoint_path}")
 
@@ -653,6 +667,9 @@ class Trainer:
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_rollout_success': self.best_rollout_success,
+            'rollout_max_demos': self.rollout_max_demos
+            
         }, best_ckpt_path)
         print(f"Overwrote best checkpoint with epoch {epoch} at {best_ckpt_path}")
 
