@@ -152,15 +152,17 @@ class ResNet(nn.Module):
 
         if self.use_spatial_softmax:
             # ----------- Spatial Softmax Approach -----------
-            # 1) Flatten the spatial dims to do a softmax across them
+            # (1) Clamp to non-negative
+            x = F.relu(x)  # <--- ADDED ReLU to remove negative activations
+
             B, C, H, W = x.shape
-            # flatten to [B, C, H*W]
-            x_2d = x.view(B, C, -1)            
-            # softmax across the last dimension (the spatial dimension)
+            # Flatten to [B, C, H*W]
+            x_2d = x.view(B, C, -1)
+            # Softmax over spatial dimension
             softmax_map = F.softmax(x_2d, dim=2)  # [B, C, H*W]
-            # reshape back to [B, C, H, W]
+            # Reshape back to [B, C, H, W]
             softmax_map = softmax_map.view(B, C, H, W)
-            # Weighted sum of the original x by the softmax => shape [B, C]
+            # Weighted sum => shape [B, C]
             x = (softmax_map * x).sum(dim=[2, 3])  # [B, C]
         else:
             # ----------- Global Average Pooling Approach -----------
