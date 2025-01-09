@@ -50,6 +50,7 @@ def train(args):
         action_type=args.action_type,
         data_modality=args.data_modality,
         vMF_sample_method=args.vMF_sample_method,
+        spatial_softmax=args.spatial_softmax,
         )
 
     # Instandiate datasets
@@ -296,6 +297,11 @@ if __name__ == '__main__':
     parser.add_argument(
         '--num_gpus', type=int, default=None,
         help='Number of GPUs to use (default: use all available)'
+    )
+    
+    parser.add_argument(
+        '--spatial_softmax', action='store_true',
+        help='Use spatial softmax to extract features for ResNet architectures'
     )
 
     args = parser.parse_args()

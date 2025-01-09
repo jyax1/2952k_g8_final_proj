@@ -98,6 +98,7 @@ def load_model(architecture,
                action_type='pose',
                data_modality='rgb', # to be extracted
                vMF_sample_method='rejection',
+               spatial_softmax=False,
 ):
     if architecture == 'direct_cnn_mlp':
         if data_modality == 'voxel':
@@ -159,7 +160,8 @@ def load_model(architecture,
             'video_length': horizon,
             'action_length': 1,
             'num_classes': num_classes,
-            'num_mlp_layers': num_mlp_layers
+            'num_mlp_layers': num_mlp_layers,
+            'use_spatial_softmax': spatial_softmax
         }
         
          # Add vMF parameter only for HypersphericalResNet

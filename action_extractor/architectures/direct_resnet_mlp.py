@@ -174,11 +174,11 @@ class ResNet(nn.Module):
 from .utils import resnet_builder
 
 class ActionExtractionResNet(nn.Module):
-    def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, action_length=1, num_classes=7, num_mlp_layers=3):
+    def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, action_length=1, num_classes=7, num_mlp_layers=3, use_spatial_softmax=False):
         super(ActionExtractionResNet, self).__init__()
 
         # Define the ResNet version to use
-        self.conv, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length, in_channels=in_channels)
+        self.conv, resnet_out_dim = resnet_builder(resnet_version=resnet_version, video_length=video_length, in_channels=in_channels, use_spatial_softmax=use_spatial_softmax)
 
         # Use ResNetMLP for the MLP head
         self.mlp = ResNetMLP(

@@ -13,14 +13,15 @@ class BaseVAE(nn.Module):
 
 class ActionExtractionVariationalResNet(BaseVAE):
     def __init__(self, resnet_version='resnet18', video_length=2, in_channels=3, 
-                 latent_dim=32, action_length=1, num_classes=7, num_mlp_layers=3):
+                 latent_dim=32, action_length=1, num_classes=7, num_mlp_layers=3, use_spatial_softmax=False):
         super(ActionExtractionVariationalResNet, self).__init__()
 
         # Build the ResNet backbone
         self.conv, resnet_out_dim = resnet_builder(
             resnet_version=resnet_version, 
             video_length=video_length, 
-            in_channels=in_channels
+            in_channels=in_channels,
+            use_spatial_softmax=use_spatial_softmax
         )
 
         # Encoder outputs for mean and log variance
@@ -253,7 +254,8 @@ class ActionExtractionHypersphericalResNet(nn.Module):
                  vMF_sample_method='wood',
                  max_tries_sampling=10,
                  approximate_bessel=True,
-                 kappa_thresh=50.0):
+                 kappa_thresh=50.0,
+                 use_spatial_softmax=False):
         super().__init__()
 
         self.latent_dim = latent_dim
@@ -268,7 +270,8 @@ class ActionExtractionHypersphericalResNet(nn.Module):
         self.conv, resnet_out_dim = resnet_builder(
             resnet_version=resnet_version, 
             video_length=video_length,
-            in_channels=in_channels
+            in_channels=in_channels,
+            use_spatial_softmax=use_spatial_softmax
         )
 
         self.fc_mu = nn.Linear(resnet_out_dim, latent_dim)
@@ -385,7 +388,8 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
                  max_tries_sampling=10,
                  approximate_bessel=True,
                  kappa_thresh=50.0,
-                 use_distribution_for_c=False):
+                 use_distribution_for_c=False,
+                 use_spatial_softmax=False):
         """
         Same arguments as parent's constructor. 
         We'll add two extra linear layers to produce c_mu, c_logvar.
@@ -402,7 +406,8 @@ class ActionExtractionSLAResNet(ActionExtractionHypersphericalResNet):
             vMF_sample_method=vMF_sample_method,
             max_tries_sampling=max_tries_sampling,
             approximate_bessel=approximate_bessel,
-            kappa_thresh=kappa_thresh
+            kappa_thresh=kappa_thresh,
+            use_spatial_softmax=use_spatial_softmax
         )
         # We can glean the "resnet_out_dim" from parent's self.fc_mu.in_features
         resnet_out_dim = self.fc_mu.in_features

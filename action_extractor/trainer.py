@@ -230,7 +230,10 @@ class Trainer:
         if not os.path.exists(results_path):
             os.makedirs(results_path)
 
-        self.writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard_logs', model_name))
+        parent_dir = os.path.dirname(results_path)  # e.g. "results"
+        tensorboard_dir = os.path.join(parent_dir, 'tensorboard_logs', model_name)
+        os.makedirs(os.path.dirname(tensorboard_dir), exist_ok=True)
+        self.writer = SummaryWriter(log_dir=tensorboard_dir)
 
         self.start_epoch = 0
         self.best_val_loss = float('inf')
@@ -358,6 +361,7 @@ class Trainer:
             # ---------------------
             # Check success rate >= 90% or not, regardless of improvement
             # ---------------------
+            best_rollout_success_reset = False
             if rollout_success_rate >= 90.0 and self.rollout_max_demos < num_demos_in_valset:
                 # increment the times we reached 90+ success
                 self.n_times_90pct_reached += 1
@@ -367,11 +371,12 @@ class Trainer:
                 # If we have reached 90% enough times, increase demos by 20, reset best success to 60
                 if self.n_times_90pct_reached >= self.n_times_90pct_needed:
                     self.rollout_max_demos += 20
-                    self.best_rollout_success = 60.0
+                    self.best_rollout_success = 89.0
                     self.n_times_90pct_reached = 0
                     print(f"Reached >=90% success {self.n_times_90pct_needed} times; "
                           f"increased rollout_max_demos to {self.rollout_max_demos}, "
-                          f"reset best_rollout_success to 60.0, reset 90%-counter.")
+                          f"reset best_rollout_success to 89.0%, reset 90%-counter.")
+                    best_rollout_success_reset = True
             else:
                 # If success < 90, reset
                 if rollout_success_rate < 90.0:
@@ -381,7 +386,8 @@ class Trainer:
             # Now decide if "best" improved => do best checkpoint
             # ---------------------
             if rollout_success_rate > self.best_rollout_success:
-                self.best_rollout_success = rollout_success_rate
+                if not best_rollout_success_reset:
+                    self.best_rollout_success = rollout_success_rate
                 self.save_best_checkpoint(epoch + 1)
                 print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
 
