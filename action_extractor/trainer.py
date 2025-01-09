@@ -156,14 +156,15 @@ class Trainer:
                  momentum=0.9,
                  loss='mse',
                  vae=False,
-                 num_gpus=1):
-        
+                 num_gpus=1,
+                 n_times_90pct_needed=3 
+                 ):
+
         self.accelerator = Accelerator(mixed_precision='fp16')
         self.model = model
         self.model_name = model_name
         self.train_set = train_set
         self.validation_set = validation_set
-        # 1) results_path is something like "results/model_name"
         self.results_path = results_path
         self.batch_size = batch_size
         self.epochs = epochs
@@ -171,7 +172,6 @@ class Trainer:
         self.momentum = momentum
         
         self.saved_param_file_sets = []
-        
         self.aux = True if 'aux' in model_name else False
         self.device = self.accelerator.device
 
@@ -181,7 +181,11 @@ class Trainer:
         self.loss_type = loss.lower()
         self.best_rollout_success = 0.0
 
-        # (A) Make subdirs: "checkpoints" and "param_files"
+        # Keep track of how many times we've reached >= 90% success
+        self.n_times_90pct_reached = 0
+        self.n_times_90pct_needed = n_times_90pct_needed
+
+        # Subdirectories
         checkpoints_dir = os.path.join(self.results_path, "checkpoints")
         paramfiles_dir = os.path.join(self.results_path, "param_files")
         os.makedirs(checkpoints_dir, exist_ok=True)
@@ -197,7 +201,6 @@ class Trainer:
         else:
             self.variational_model_type = None
 
-        # Base reconstruction loss
         if self.loss_type == 'mse':
             base_recon_loss = nn.MSELoss()
         elif self.loss_type == 'cosine':
@@ -219,7 +222,6 @@ class Trainer:
             self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
         )
 
-        # Prepare for distributed
         self.model, self.optimizer, self.train_loader, self.validation_loader, self.criterion = self.accelerator.prepare(
             self.model, self.optimizer, self.train_loader, self.validation_loader, self.criterion
         )
@@ -255,6 +257,8 @@ class Trainer:
         self.start_epoch = checkpoint['epoch']
         self.best_rollout_success = checkpoint['best_rollout_success']
         self.rollout_max_demos = checkpoint['rollout_max_demos']
+        # Also restore how many times we've reached 90% so far (if present)
+        self.n_times_90pct_reached = checkpoint.get('n_times_90pct_reached', 0)
         print(f"Loaded checkpoint from {checkpoint_path}, starting from epoch {self.start_epoch}")
 
     def train(self):
@@ -270,7 +274,6 @@ class Trainer:
                 leave=True
             )
 
-            # If using VAELoss with a schedule, update the epoch weighting
             if hasattr(self.criterion, 'update_epoch'):
                 self.criterion.update_epoch(epoch)
                 self.writer.add_scalar('KLD_Weight', self.criterion.kld_weight, epoch)
@@ -351,21 +354,40 @@ class Trainer:
             self.writer.add_scalar('Rollout Success Rate', rollout_success_rate, epoch)
             self.writer.add_scalar('Rollout Set Size', self.rollout_max_demos, epoch)
 
+            # Check if success improved
             if rollout_success_rate > self.best_rollout_success or rollout_success_rate == 100.0:
                 self.best_rollout_success = rollout_success_rate
                 self.save_best_checkpoint(epoch + 1)
                 print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
 
-                # Increase max_demos if > 90% success
+                # Logic for >= 90% success
                 if rollout_success_rate >= 90.0 and self.rollout_max_demos < num_demos_in_valset:
-                    self.rollout_max_demos += 20
-                    self.best_rollout_success = 60.0
-                    print(f"Over 90% success! Increased rollout_max_demos to {self.rollout_max_demos}, "
-                          f"reset best_rollout_success to 60.0.")
-                elif rollout_success_rate == 100.0 and self.rollout_max_demos == num_demos_in_valset:
+                    # increment the times we reached 90+ success
+                    self.n_times_90pct_reached += 1
+                    print(f">=90% success. n_times_90pct_reached = {self.n_times_90pct_reached} "
+                          f"(need {self.n_times_90pct_needed} times)")
+
+                    # If we have reached 90% enough times, increase demos by 20, reset best success to 60
+                    if self.n_times_90pct_reached >= self.n_times_90pct_needed:
+                        self.rollout_max_demos += 20
+                        self.best_rollout_success = 60.0
+                        self.n_times_90pct_reached = 0
+                        print(f"Reached >=90% success {self.n_times_90pct_needed} times; "
+                              f"increased rollout_max_demos to {self.rollout_max_demos}, "
+                              f"reset best_rollout_success to 60.0, reset 90%-counter.")
+                else:
+                    # if success < 90 or we've hit 100% but are at max demos => reset
+                    if rollout_success_rate < 90.0:
+                        self.n_times_90pct_reached = 0
+
+                # 100% on entire set
+                if rollout_success_rate == 100.0 and self.rollout_max_demos == num_demos_in_valset:
                     print(f"100% rollout success rate on entire validation set.")
             else:
                 print(f"Rollout success rate: {rollout_success_rate}% <= {self.best_rollout_success}%, did not improve.")
+                # If success < 90, reset
+                if rollout_success_rate < 90.0:
+                    self.n_times_90pct_reached = 0
 
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
             self.writer.add_scalar('Validation Deviation/X', avg_deviations[0].mean().item(), epoch)
@@ -568,7 +590,8 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'best_rollout_success': self.best_rollout_success,
-            'rollout_max_demos': self.rollout_max_demos
+            'rollout_max_demos': self.rollout_max_demos,
+            'n_times_90pct_reached': self.n_times_90pct_reached
         }, checkpoint_path)
         print(f"Saved latest checkpoint (epoch {epoch}) to {checkpoint_path}")
 
@@ -576,7 +599,6 @@ class Trainer:
     # SAVE A "BEST" CHECKPOINT + SEPARATE MODEL FILES
     # ---------------------------------------------------------------------
     def save_best_checkpoint(self, epoch):
-        # 1) Save "best" checkpoint
         checkpoints_dir = os.path.join(self.results_path, "checkpoints")
         best_ckpt_path = os.path.join(checkpoints_dir, f"{self.model_name}_checkpoint_best.pth")
         torch.save({
@@ -585,13 +607,12 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'best_rollout_success': self.best_rollout_success,
-            'rollout_max_demos': self.rollout_max_demos
+            'rollout_max_demos': self.rollout_max_demos,
+            'n_times_90pct_reached': self.n_times_90pct_reached
         }, best_ckpt_path)
         print(f"Overwrote best checkpoint with epoch {epoch} at {best_ckpt_path}")
 
-        # 2) Save separate param files in param_files/
         param_file_list = []
-        paramfiles_dir = os.path.join(self.results_path, "param_files")
 
         def _save_param(relative_path, state_dict):
             full_path = os.path.join(self.results_path, relative_path)
@@ -694,12 +715,9 @@ class Trainer:
             print('Model type not recognized for separate-file saving.')
         
         self.saved_param_file_sets.append(param_file_list)
-
-        # If we have more than 10 sets of param files, remove the oldest set
         if len(self.saved_param_file_sets) > 10:
             oldest_files = self.saved_param_file_sets.pop(0)
             for old_file in oldest_files:
-                # old_file is e.g. "param_files/modelName_cnn-10.pth"
                 full_path = os.path.join(self.results_path, old_file)
                 if os.path.exists(full_path):
                     os.remove(full_path)
