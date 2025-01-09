@@ -53,7 +53,6 @@ class DeltaControlLoss(nn.Module):
 
         total_loss = vector_loss + mse_loss_gripper
         deviations = torch.abs(pred_direction_normalized - target_direction_normalized)
-
         return total_loss, deviations
 
 class SumMSECosineLoss(nn.Module):
@@ -157,6 +156,8 @@ class Trainer:
                  loss='mse',
                  vae=False,
                  num_gpus=1,
+                 # new parameter: how many times we must see >= 90% success
+                 # before we increment self.rollout_max_demos by 20
                  n_times_90pct_needed=3 
                  ):
 
@@ -354,40 +355,40 @@ class Trainer:
             self.writer.add_scalar('Rollout Success Rate', rollout_success_rate, epoch)
             self.writer.add_scalar('Rollout Set Size', self.rollout_max_demos, epoch)
 
-            # Check if success improved
-            if rollout_success_rate > self.best_rollout_success or rollout_success_rate == 100.0:
+            # ---------------------
+            # Check success rate >= 90% or not, regardless of improvement
+            # ---------------------
+            if rollout_success_rate >= 90.0 and self.rollout_max_demos < num_demos_in_valset:
+                # increment the times we reached 90+ success
+                self.n_times_90pct_reached += 1
+                print(f">=90% success. n_times_90pct_reached = {self.n_times_90pct_reached} "
+                      f"(need {self.n_times_90pct_needed} times)")
+
+                # If we have reached 90% enough times, increase demos by 20, reset best success to 60
+                if self.n_times_90pct_reached >= self.n_times_90pct_needed:
+                    self.rollout_max_demos += 20
+                    self.best_rollout_success = 60.0
+                    self.n_times_90pct_reached = 0
+                    print(f"Reached >=90% success {self.n_times_90pct_needed} times; "
+                          f"increased rollout_max_demos to {self.rollout_max_demos}, "
+                          f"reset best_rollout_success to 60.0, reset 90%-counter.")
+            else:
+                # If success < 90, reset
+                if rollout_success_rate < 90.0:
+                    self.n_times_90pct_reached = 0
+
+            # ---------------------
+            # Now decide if "best" improved => do best checkpoint
+            # ---------------------
+            if rollout_success_rate > self.best_rollout_success:
                 self.best_rollout_success = rollout_success_rate
                 self.save_best_checkpoint(epoch + 1)
                 print(f"Rollout success improved to {rollout_success_rate}% -> saved best checkpoint.")
 
-                # Logic for >= 90% success
-                if rollout_success_rate >= 90.0 and self.rollout_max_demos < num_demos_in_valset:
-                    # increment the times we reached 90+ success
-                    self.n_times_90pct_reached += 1
-                    print(f">=90% success. n_times_90pct_reached = {self.n_times_90pct_reached} "
-                          f"(need {self.n_times_90pct_needed} times)")
-
-                    # If we have reached 90% enough times, increase demos by 20, reset best success to 60
-                    if self.n_times_90pct_reached >= self.n_times_90pct_needed:
-                        self.rollout_max_demos += 20
-                        self.best_rollout_success = 60.0
-                        self.n_times_90pct_reached = 0
-                        print(f"Reached >=90% success {self.n_times_90pct_needed} times; "
-                              f"increased rollout_max_demos to {self.rollout_max_demos}, "
-                              f"reset best_rollout_success to 60.0, reset 90%-counter.")
-                else:
-                    # if success < 90 or we've hit 100% but are at max demos => reset
-                    if rollout_success_rate < 90.0:
-                        self.n_times_90pct_reached = 0
-
-                # 100% on entire set
                 if rollout_success_rate == 100.0 and self.rollout_max_demos == num_demos_in_valset:
                     print(f"100% rollout success rate on entire validation set.")
             else:
                 print(f"Rollout success rate: {rollout_success_rate}% <= {self.best_rollout_success}%, did not improve.")
-                # If success < 90, reset
-                if rollout_success_rate < 90.0:
-                    self.n_times_90pct_reached = 0
 
             self.writer.add_scalar('Validation Loss', val_loss, epoch)
             self.writer.add_scalar('Validation Deviation/X', avg_deviations[0].mean().item(), epoch)
