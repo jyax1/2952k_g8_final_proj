@@ -15,6 +15,7 @@ if oscar:
 else:
     dp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
     dp = '/home/yilong/Documents/ae_data/random_processing/lift_1000'
+    dp = '/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/test'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'

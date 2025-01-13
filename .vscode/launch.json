@@ -316,6 +316,19 @@
             "--vMF_sample_method=rejection",
             "--standardize_data"
         ]
+        },
+
+        {
+            "name": "debug dataset_states_to_obs_parallel.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "action_extractor/utility_scripts/dataset_states_to_obs_parallel.py",
+            "console": "integratedTerminal",
+            "args": ["--dataset=/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/lift.hdf5",
+            "--camera_height=480",
+            "--camera_width=640",
+            "--output_name=lift_1_obs.hdf5"
+        ]
         }
     ]
 }

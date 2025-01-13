@@ -26,6 +26,7 @@ right_video_mode = 'inferred_actions'
 dataset_path = "/home/yilong/Documents/policy_data/lift/obs_policy_c"
 dataset_path = "/home/yilong/Documents/policy_data/lift/lift_smaller_2000"
 dataset_path = "/home/yilong/Documents/ae_data/random_processing/lift_1000"
+dataset_path = "/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/test"
 # dataset_path = "/home/yilong/Documents/ae_data/random_processing/iiwa16168_test"
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-49-353.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168,lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-49-353.pth'

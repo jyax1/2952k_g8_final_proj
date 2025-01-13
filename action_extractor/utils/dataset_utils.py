@@ -332,7 +332,8 @@ def preprocess_data_parallel(root, camera, R, max_workers=4, batch_size=500, chu
             hsv_chunk = np.stack([
                 cv2.cvtColor(img, cv2.COLOR_RGB2HSV) for img in images_chunk
             ])
-            green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
+            # green_lower, green_upper = np.array([40, 40, 90]), np.array([80, 255, 255])
+            green_lower, green_upper = np.array([45, 80, 90]), np.array([75, 255, 255])
             cyan_lower,  cyan_upper  = np.array([80, 40, 100]), np.array([100, 255, 255])
 
             green_mask = ((hsv_chunk >= green_lower) & (hsv_chunk <= green_upper)).all(axis=-1).astype(np.uint8)*255

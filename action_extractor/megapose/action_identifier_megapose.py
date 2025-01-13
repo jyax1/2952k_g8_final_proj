@@ -1,118 +1,126 @@
-import logging
-import time
-import torch
-import numpy as np
-from pathlib import Path
-from typing import Optional, Dict, Any
-
-from megapose.config import LOCAL_DATA_DIR
-from megapose.datasets.scene_dataset import ObjectData
-from megapose.datasets.object_dataset import RigidObjectDataset, RigidObject
-from megapose.inference.types import ObservationTensor, PoseEstimatesType
-from megapose.inference.utils import make_detections_from_object_data
-from megapose.utils.load_model import NAMED_MODELS, load_named_model
-from megapose.lib3d.transform import Transform
-
+# Standard Library
+import argparse
+import json
 import os
-import logging
+from pathlib import Path
+from typing import List, Tuple, Union
 
-# Set required environment variables before importing Panda3D
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Use first GPU
-os.environ["DISPLAY"] = ":0"  # Set display
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
+# Third Party
+import numpy as np
+from bokeh.io import export_png
+from bokeh.plotting import gridplot
+from PIL import Image
 
-def get_pose_from_inputs(
-    rgb: np.ndarray,
-    depth: np.ndarray,
-    intrinsics: np.ndarray,
-    mesh_path: str,
-    bounding_box: tuple,
-    model_name: str = "megapose-1.0-RGBD"
-) -> PoseEstimatesType:
-    """
-    Given an RGB(+D) image, camera intrinsics, a bounding box, and a mesh,
-    regress the object pose in the camera frame using MegaPose.
-    """
+# MegaPose
+from megapose.config import LOCAL_DATA_DIR
+from megapose.datasets.object_dataset import RigidObject, RigidObjectDataset
+from megapose.datasets.scene_dataset import CameraData, ObjectData
+from megapose.inference.types import (
+    DetectionsType,
+    ObservationTensor,
+    PoseEstimatesType,
+)
+from megapose.inference.utils import make_detections_from_object_data
+from megapose.lib3d.transform import Transform
+from megapose.panda3d_renderer import Panda3dLightData
+from megapose.panda3d_renderer.panda3d_scene_renderer import Panda3dSceneRenderer
+from megapose.utils.conversion import convert_scene_observation_to_panda3d
+from megapose.utils.load_model import NAMED_MODELS, load_named_model
+from megapose.utils.logging import get_logger, set_logging_level
+from megapose.visualization.bokeh_plotter import BokehPlotter
+from megapose.visualization.utils import make_contour_overlay
 
-    # 1. (Optional) set environment variables for headless usage, if necessary
-    os.environ["DISPLAY"] = ":0"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    os.environ["EGL_VISIBLE_DEVICES"] = "0"
-    
-    # 2. Create observation tensor (similar to run_inference_on_example.py)
-    observation = ObservationTensor.from_numpy(
-        rgb=rgb,
-        depth=depth,  # might be None
-        K=intrinsics
-    ).cuda()
+logger = get_logger(__name__)
 
-    # 3. Create object data + bounding box detection
-    #    (like load_detections does, but directly from bounding_box)
-    object_data = ObjectData(
-        label="custom_object",
-        bbox_modal=np.array(bounding_box)
-    )
-    detections = make_detections_from_object_data([object_data]).cuda()
+def load_observation(
+    example_dir: Path,
+    load_depth: bool = False,
+) -> Tuple[np.ndarray, Union[None, np.ndarray], CameraData]:
+    camera_data = CameraData.from_json((example_dir / "camera_data.json").read_text())
 
-    # 4. Create a minimal object dataset (just one object)
-    rigid_object = RigidObject(
-        label="custom_object",
-        mesh_path=Path(mesh_path),
-        mesh_units="m"  # adjust if your mesh is in different units
-    )
-    object_dataset = RigidObjectDataset([rigid_object])
+    rgb = np.array(Image.open(example_dir / "image_rgb.png"), dtype=np.uint8)
+    assert rgb.shape[:2] == camera_data.resolution
 
-    # 5. Load the MegaPose model WITHOUT the unused renderer_kwargs
-    #    and run inference similarly to run_inference_on_example.py
+    depth = None
+    if load_depth:
+        depth = np.array(Image.open(example_dir / "image_depth.png"), dtype=np.float32) / 1000
+        assert depth.shape[:2] == camera_data.resolution
+
+    return rgb, depth, camera_data
+
+def load_observation_tensor(
+    example_dir: Path,
+    load_depth: bool = False,
+) -> ObservationTensor:
+    rgb, depth, camera_data = load_observation(example_dir, load_depth)
+    observation = ObservationTensor.from_numpy(rgb, depth, camera_data.K)
+    return observation
+
+def load_object_data(data_path: Path) -> List[ObjectData]:
+    object_data = json.loads(data_path.read_text())
+    object_data = [ObjectData.from_json(d) for d in object_data]
+    return object_data
+
+def load_detections(
+    example_dir: Path,
+) -> DetectionsType:
+    input_object_data = load_object_data(example_dir / "inputs/object_data.json")
+    detections = make_detections_from_object_data(input_object_data).cuda()
+    return detections
+
+def make_object_dataset(example_dir: Path) -> RigidObjectDataset:
+    rigid_objects = []
+    mesh_units = "mm"
+    object_dirs = (example_dir / "meshes").iterdir()
+    for object_dir in object_dirs:
+        label = object_dir.name
+        mesh_path = None
+        for fn in object_dir.glob("*"):
+            if fn.suffix in {".obj", ".ply"}:
+                assert not mesh_path, f"there multiple meshes in the {label} directory"
+                mesh_path = fn
+        assert mesh_path, f"couldnt find a obj or ply mesh for {label}"
+        rigid_objects.append(RigidObject(label=label, mesh_path=mesh_path, mesh_units=mesh_units))
+        # TODO: fix mesh units
+    rigid_object_dataset = RigidObjectDataset(rigid_objects)
+    return rigid_object_dataset
+
+def save_predictions(
+    example_dir: Path,
+    pose_estimates: PoseEstimatesType,
+) -> None:
+    labels = pose_estimates.infos["label"]
+    poses = pose_estimates.poses.cpu().numpy()
+    object_data = [
+        ObjectData(label=label, TWO=Transform(pose)) for label, pose in zip(labels, poses)
+    ]
+    object_data_json = json.dumps([x.to_json() for x in object_data])
+    output_fn = example_dir / "outputs" / "object_data.json"
+    output_fn.parent.mkdir(exist_ok=True)
+    output_fn.write_text(object_data_json)
+    logger.info(f"Wrote predictions: {output_fn}")
+    return
+
+def run_inference(
+    example_dir: Path,
+    model_name: str,
+) -> None:
+
     model_info = NAMED_MODELS[model_name]
+
+    observation = load_observation_tensor(
+        example_dir, load_depth=model_info["requires_depth"]
+    ).cuda()
+    detections = load_detections(example_dir).cuda()
+    object_dataset = make_object_dataset(example_dir)
+
+    logger.info(f"Loading model {model_name}.")
     pose_estimator = load_named_model(model_name, object_dataset).cuda()
 
-    # 6. Run the inference pipeline
-    #    If you want to remove 'n_workers' or other keys, you can filter:
-    inference_kwargs = {
-        k: v for k, v in model_info["inference_parameters"].items()
-        if k != "n_workers"  # or remove any other unsupported keys
-    }
-
-    # 7. PoseEstimatesType is returned by run_inference_pipeline
-    predictions, _ = pose_estimator.run_inference_pipeline(
-        observation,
-        detections=detections,
-        # you could also just do **model_info["inference_parameters"]
-        # if none of them cause errors
-        **inference_kwargs
+    logger.info(f"Running inference.")
+    output, _ = pose_estimator.run_inference_pipeline(
+        observation, detections=detections, **model_info["inference_parameters"]
     )
-    
-    return predictions
 
-def main():
-    """Example usage to demonstrate get_pose_from_inputs()."""
-    # Create test inputs
-    test_rgb = np.ones((128, 128, 3), dtype=np.uint8) * 255
-    test_depth = None  # Or a valid depth array if your model needs it
-    test_intrinsics = np.array([
-        [500,   0, 64],
-        [  0, 500, 64],
-        [  0,   0,  1]
-    ])
-    test_bbox = (32, 32, 96, 96)
-    
-    # Update mesh_path to a valid local mesh (OBJ, PLY, etc.)
-    mesh_path = "/home/yilong/Documents/action_extractor/action_extractor/megapose/mesh/panda_hand.obj"
-    
-    try:
-        predictions = get_pose_from_inputs(
-            rgb=test_rgb,
-            depth=test_depth,
-            intrinsics=test_intrinsics,
-            mesh_path=mesh_path,
-            bounding_box=test_bbox,
-            model_name="megapose-1.0-RGBD"  # or e.g. "megapose-1.0-RGB"
-        )
-        print(f"Predicted poses: {predictions}")
-    except Exception as e:
-        print(f"Error in pose estimation: {e}")
-
-if __name__ == "__main__":
-    main()
+    save_predictions(example_dir, output)
+    return
