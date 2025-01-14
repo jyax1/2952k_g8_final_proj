@@ -131,6 +131,54 @@ def convert_mp4_to_webp(input_path, output_path, quality=80):
         output_path
     ]
     subprocess.run(cmd, check=True)
+    
+
+def find_green_bounding_box(img_array):
+    """
+    Given an RGB image (H x W x 3) with a green gripper,
+    return a bounding box (x_min, y_min, x_max, y_max) 
+    that encloses the largest green region,
+    using a stricter threshold and morphological cleanup.
+    """
+    # 1. Convert from RGB to HSV
+    hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+    
+    # 2. Define a narrower green color range in HSV
+    #    Adjust these as needed for your specific shade of green.
+    #    (H: 50–70, S: 150–255, V: 50–255 are somewhat "stringent")
+    lower_green = np.array([50, 150, 50], dtype=np.uint8)
+    upper_green = np.array([70, 255, 255], dtype=np.uint8)
+    
+    # 3. Create a mask for pixels within this green range
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+    
+    # 4. Morphological operations to remove small noise
+    #    - Erode and then dilate (opening), or vice versa if needed
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.erode(mask, kernel, iterations=1)
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    
+    # 5. Find connected components (so we can get the largest green blob)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # stats is an array of shape (num_labels, 5): [label, left, top, width, height, area]
+    # The first row (index 0) is the background label.
+
+    if num_labels <= 1:
+        # No green component found
+        return None
+    
+    # 6. Identify the largest non-background component by area
+    #    stats[1:, cv2.CC_STAT_AREA] -> area of each labeled component (excluding background)
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])  # +1 offset for background row
+    
+    # 7. Extract bounding box of that largest component
+    x = stats[largest_label, cv2.CC_STAT_LEFT]
+    y = stats[largest_label, cv2.CC_STAT_TOP]
+    w = stats[largest_label, cv2.CC_STAT_WIDTH]
+    h = stats[largest_label, cv2.CC_STAT_HEIGHT]
+    
+    # Return in (x_min, y_min, x_max, y_max) format
+    return (x, y, x + w, y + h)
 
 
 #####################################################################
@@ -197,7 +245,7 @@ def imitate_trajectory_with_action_identifier(
     logger = get_logger(__name__)
 
     model_info = NAMED_MODELS["megapose-1.0-RGB-multi-hypothesis"]
-    logger.info("Loading model 'megapose-1.0-RGB-multi-hypothesis' once at startup.")
+    logger.info("Loading model 'megapose-1.0-RGB-multi-hypothesis'.")
     pose_estimator = load_named_model("megapose-1.0-RGB-multi-hypothesis", object_dataset).cuda()
 
     # 2) Convert HDF5->Zarr if needed
@@ -357,14 +405,16 @@ def imitate_trajectory_with_action_identifier(
                 T_i_inv = np.linalg.inv(T_i)
                 T_delta = T_i_inv @ T_i1
 
-                t_delta = T_delta[:3, 3] * 80.0
+                t_delta = T_delta[:3, 3]
                 R_delta = T_delta[:3,:3]
                 q_delta = rotation_matrix_to_quaternion(R_delta)
 
                 action = np.zeros(7, dtype=np.float32)
                 action[:3] = t_delta
-                action[3:] = q_delta
+                # action[3:] = q_delta
+                action[-1] = 1.0  # dummy gripper value
                 actions_for_demo.append(action)
+                print(action)
 
             # roll out environment
             initial_state = root["data"][demo]["states"][0]

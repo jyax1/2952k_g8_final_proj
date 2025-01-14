@@ -1,0 +1,12 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "startXvfb",
+        "type": "shell",
+        // The command kills any existing Xvfb, then starts a new one at :99
+        "command": "pkill Xvfb || true; Xvfb :99 -screen 0 1280x800x24 &",
+        "problemMatcher": []
+      }
+    ]
+  }

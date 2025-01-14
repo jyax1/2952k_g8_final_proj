@@ -13,6 +13,7 @@ from megapose.inference.utils import make_detections_from_object_data
 from megapose.lib3d.transform import Transform
 from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger
+from megapose.inference.pose_estimator import PoseEstimator
 
 logger = get_logger(__name__)
 
@@ -83,7 +84,8 @@ def run_inference_on_data(
     image_rgb: np.ndarray,          # shape (H, W, 3), uint8
     K: np.ndarray,                  # shape (3, 3) camera intrinsics
     detections: DetectionsType,     # bounding boxes + labels, etc.
-    model_name: str,
+    pose_estimator: PoseEstimator,
+    model_info: dict,
     object_dataset: RigidObjectDataset,
     requires_depth: bool = False,
     depth: Optional[np.ndarray] = None,   # shape (H, W) or None
@@ -101,9 +103,7 @@ def run_inference_on_data(
     ).cuda()  # Move to GPU
 
     # 2) Load the named model
-    model_info = NAMED_MODELS[model_name]
-    logger.info(f"Loading model {model_name} ...")
-    pose_estimator = load_named_model(model_name, object_dataset).cuda()
+    # Done outside this function
 
     # 3) Run inference
     logger.info("Running inference pipeline...")
@@ -168,11 +168,16 @@ def main():
     model_name = "megapose-1.0-RGB-multi-hypothesis"
     requires_depth = False
     output_dir = None  # or None if you don't need to save
+    
+    model_info = NAMED_MODELS[model_name]
+    logger.info(f"Loading model {model_name} ...")
+    pose_estimator = load_named_model(model_name, object_dataset).cuda()
 
     pose_estimates = run_inference_on_data(
         image_rgb, K,
         detections,
-        model_name,
+        pose_estimator,
+        model_info,
         object_dataset,
         requires_depth=requires_depth,
         depth=None,
