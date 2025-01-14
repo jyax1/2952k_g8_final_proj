@@ -1,3 +1,20 @@
+#####################################################################
+# Add these lines BEFORE other Panda3D imports to silence logs:
+#####################################################################
+import logging
+
+# Silence "Loading model ..." logs from your python code
+logging.getLogger("action_extractor.megapose.action_identifier_megapose").setLevel(logging.WARNING)
+
+import panda3d.core as p3d
+# Suppress "Known pipe types", "Xlib extension missing", etc.
+p3d.load_prc_file_data("", "notify-level-glxdisplay fatal\n")
+p3d.load_prc_file_data("", "notify-level-x11display fatal\n")
+p3d.load_prc_file_data("", "notify-level-gsg fatal\n")
+
+#####################################################################
+# Normal imports
+#####################################################################
 import os
 import h5py
 import numpy as np
@@ -24,9 +41,14 @@ import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 
-# Updated video recorder creation to avoid "profile=high" issues with H.264:
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 
+#####################################################################
+# Instead of from action_extractor.megapose.action_identifier_megapose 
+# we STILL import the same run_inference_on_data, but we will pass 
+# our pre-loaded model to it so it doesn't re-load. We'll define 
+# a small wrapper or local approach for that.
+#####################################################################
 from action_extractor.megapose.action_identifier_megapose import (
     run_inference_on_data,
     make_detections_from_object_data,
@@ -34,7 +56,6 @@ from action_extractor.megapose.action_identifier_megapose import (
 )
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_left_video_path, bottom_right_video_path, output_path):
-    # Same logic to combine quadrant videos
     top_left_reader = imageio.get_reader(top_left_video_path)
     top_right_reader = imageio.get_reader(top_right_video_path)
     bottom_left_reader = imageio.get_reader(bottom_left_video_path)
@@ -70,6 +91,7 @@ def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_l
         for frame in combined_frames:
             writer.append_data(frame)
 
+
 def quaternion_to_rotation_matrix(q):
     w, x, y, z = q
     return np.array([
@@ -78,11 +100,13 @@ def quaternion_to_rotation_matrix(q):
         [2*(x*z - y*w),           2*(y*z + x*w),         1 - 2*(x**2 + y**2)]
     ], dtype=np.float32)
 
+
 def pose_vector_to_matrix(translation, quaternion):
     T = np.eye(4, dtype=np.float32)
     T[:3, :3] = quaternion_to_rotation_matrix(quaternion)
     T[:3, 3]  = translation
     return T
+
 
 def convert_mp4_to_webp(input_path, output_path, quality=80):
     import subprocess
@@ -108,6 +132,45 @@ def convert_mp4_to_webp(input_path, output_path, quality=80):
     ]
     subprocess.run(cmd, check=True)
 
+
+#####################################################################
+# We'll define a "run_inference_with_cached_model" that reuses model
+#####################################################################
+def run_inference_with_cached_model(
+    pose_estimator,
+    image_rgb: np.ndarray,
+    K: np.ndarray,
+    detections,
+    requires_depth: bool = False,
+    depth: np.ndarray = None
+):
+    """
+    A local function that calls the same logic as run_inference_on_data,
+    but doesn't re-load the model. We only pass in a preloaded 'pose_estimator'.
+    """
+    from megapose.inference.types import ObservationTensor
+    from megapose.utils.logging import get_logger
+    logger = get_logger(__name__)  # if you want to log
+
+    # Build ObservationTensor
+    observation = ObservationTensor.from_numpy(
+        image_rgb,
+        depth,
+        K
+    ).cuda()
+
+    # Just call the pipeline with the existing pose_estimator
+    logger.debug("Running inference pipeline with cached model...")
+
+    output, _ = pose_estimator.run_inference_pipeline(
+        observation,
+        detections=detections.cuda(),
+        # no extra named arguments needed if your model_info has been 
+        # integrated into the pose_estimator
+    )
+    return output
+
+
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
@@ -118,16 +181,24 @@ def imitate_trajectory_with_action_identifier(
     right_video_mode='megapose_inference'
 ):
     """
-    This version:
-    - uses a simpler/lower video codec profile (i.e., no 'high' profile).
-    - extracts the (1,4,4) SE(3) matrix from pose_estimates.poses.
-    - forms delta actions accordingly.
+    - Only loads the Megapose model once (caching).
+    - Suppresses Panda3D logging noise.
+    - Uses (1,4,4) SE(3) from pose_estimates.poses.
+    - Also uses a simpler video codec (libx264rgb).
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1) Build object_dataset from mesh_dir
     from pathlib import Path
     object_dataset = make_object_dataset_from_folder(Path(mesh_dir))
+
+    # ---- LOAD THE MODEL ONLY ONCE ----
+    from megapose.utils.load_model import NAMED_MODELS, load_named_model
+    from megapose.utils.logging import get_logger
+    logger = get_logger(__name__)
+
+    model_info = NAMED_MODELS["megapose-1.0-RGB-multi-hypothesis"]
+    logger.info("Loading model 'megapose-1.0-RGB-multi-hypothesis' once at startup.")
+    pose_estimator = load_named_model("megapose-1.0-RGB-multi-hypothesis", object_dataset).cuda()
 
     # 2) Convert HDF5->Zarr if needed
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -157,13 +228,13 @@ def imitate_trajectory_with_action_identifier(
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create envs, using a simpler codec (libx264rgb) or a default profile
+    # Create envs
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='libx264rgb',  # or 'libx264' with no special profile
+            codec='libx264rgb',  
             input_pix_fmt='rgb24',
             crf=22,
             thread_type='FRAME',
@@ -178,7 +249,7 @@ def imitate_trajectory_with_action_identifier(
         env_camera1,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='libx264rgb',  # same approach
+            codec='libx264rgb',
             input_pix_fmt='rgb24',
             crf=22,
             thread_type='FRAME',
@@ -202,7 +273,6 @@ def imitate_trajectory_with_action_identifier(
             qy = (R[0,2] - R[2,0]) / S
             qz = (R[1,0] - R[0,1]) / S
         else:
-            # negative trace fallback
             if (R[0,0] > R[1,1]) and (R[0,0] > R[2,2]):
                 S = np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2]) * 2
                 qw = (R[2,1] - R[1,2]) / S
@@ -249,27 +319,27 @@ def imitate_trajectory_with_action_identifier(
             all_poses_world = []
             for i in range(num_samples):
                 rgb_image = obs_group["frontview_image"][i]
+
+                # Make bounding box as before
                 from megapose.datasets.scene_dataset import ObjectData
                 object_data = [ObjectData(label="panda-hand", bbox_modal=[0,0,128,128])]
                 detections = make_detections_from_object_data(object_data)
 
-                # run_inference_on_data => pose_estimates.poses is (1,4,4) or (0,4,4)
-                pose_estimates = run_inference_on_data(
+                # Instead of run_inference_on_data which reloads, we call our local function
+                # but reusing the same 'pose_estimator' we loaded above.
+                pose_estimates = run_inference_with_cached_model(
+                    pose_estimator=pose_estimator,
                     image_rgb=rgb_image,
                     K=frontview_K.astype(np.float32),
-                    detections=detections,
-                    model_name="megapose-1.0-RGB-multi-hypothesis",
-                    object_dataset=object_dataset,
-                    requires_depth=False,
-                    depth=None,
-                    output_dir=None
+                    detections=detections
                 )
 
                 if pose_estimates.poses.shape[0] < 1:
                     all_poses_world.append(None)
                     continue
 
-                T_cam_obj = pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
+                # shape (4,4)
+                T_cam_obj = pose_estimates.poses[0].cpu().numpy()
                 T_camera_world = frontview_R
                 T_world_obj = T_camera_world @ T_cam_obj
                 all_poses_world.append(T_world_obj)
@@ -327,7 +397,6 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
-            # combine quadrant videos
             combine_videos_quadrants(
                 upper_left_video_path,
                 upper_right_video_path,
@@ -359,7 +428,8 @@ def imitate_trajectory_with_action_identifier(
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Now you won't see the model reloaded every time, 
+    # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
         mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
