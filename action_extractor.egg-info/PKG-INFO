@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.2
 Name: action_extractor
 Version: 0.1.0
 Summary: Action extraction from demonstrations
@@ -13,3 +13,4 @@ Requires-Dist: torchvideotransforms
 Requires-Dist: tqdm
 Requires-Dist: matplotlib
 Requires-Dist: seaborn
+Dynamic: requires-dist
