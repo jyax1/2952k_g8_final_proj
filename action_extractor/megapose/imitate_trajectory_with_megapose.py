@@ -188,16 +188,16 @@ def imitate_trajectory_with_action_identifier(
     right_video_mode='megapose_inference'
 ):
     """
-    Refactored so that we now take a `mesh_dir` argument. We will build a valid
-    RigidObjectDataset from `mesh_dir` and pass it to `run_inference_on_data`.
+    Refactored so that we now take a `mesh_dir` argument, and account for
+    the fact that pose_estimates.poses is shape (1,4,4) in SE(3).
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. Convert the mesh_dir into a RigidObjectDataset
+    # 1. Build object_dataset from mesh_dir
     from pathlib import Path
     object_dataset = make_object_dataset_from_folder(Path(mesh_dir))
 
-    # 2. Preprocess dataset (HDF5->Zarr) if needed
+    # 2. Preprocess dataset if needed
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
         ds_dir = seq_dir.replace('.hdf5', '.zarr')
@@ -206,7 +206,6 @@ def imitate_trajectory_with_action_identifier(
             hdf5_to_zarr_parallel_with_progress(seq_dir)
             store = DirectoryStore(ds_dir)
             root = zarr.group(store, overwrite=False)
-            # do preprocess_data_parallel if needed
             store.close()
             directorystore_to_zarr_zip(ds_dir, zarr_path)
             shutil.rmtree(ds_dir)
@@ -227,38 +226,27 @@ def imitate_trajectory_with_action_identifier(
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create the environment for top-right (env_camera0)
+    # Create envs + wrappers
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
-            fps=20,
-            codec='h264',
-            input_pix_fmt='rgb24',
-            crf=22,
-            thread_type='FRAME',
-            thread_count=1
+            fps=20, codec='h264', input_pix_fmt='rgb24',
+            crf=22, thread_type='FRAME', thread_count=1
         ),
-        steps_per_render=1,
-        width=128, height=128,
+        steps_per_render=1, width=128, height=128,
         mode='rgb_array',
         camera_name=cameras[0].split('_')[0]
     )
 
-    # Create the environment for bottom-right (env_camera1)
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
         env_camera1,
         video_recoder=VideoRecorder.create_h264(
-            fps=20,
-            codec='h264',
-            input_pix_fmt='rgb24',
-            crf=22,
-            thread_type='FRAME',
-            thread_count=1
+            fps=20, codec='h264', input_pix_fmt='rgb24',
+            crf=22, thread_type='FRAME', thread_count=1
         ),
-        steps_per_render=1,
-        width=128, height=128,
+        steps_per_render=1, width=128, height=128,
         mode='rgb_array',
         camera_name=cameras[1].split('_')[0]
     )
@@ -267,36 +255,38 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
     results = []
 
-    # For rotation matrix -> quaternion with fallback
     def rotation_matrix_to_quaternion(R):
+        """
+        Convert 3x3 R to quaternion [qw, qx, qy, qz].
+        """
         eps = 1e-7
-        trace = R[0, 0] + R[1, 1] + R[2, 2]
+        trace = R[0,0] + R[1,1] + R[2,2]
         if trace > 0.0:
             S = np.sqrt(trace + 1.0) * 2.0
             qw = 0.25 * S
-            qx = (R[2, 1] - R[1, 2]) / S
-            qy = (R[0, 2] - R[2, 0]) / S
-            qz = (R[1, 0] - R[0, 1]) / S
+            qx = (R[2,1] - R[1,2]) / S
+            qy = (R[0,2] - R[2,0]) / S
+            qz = (R[1,0] - R[0,1]) / S
         else:
-            if (R[0, 0] > R[1, 1]) and (R[0, 0] > R[2, 2]):
-                S = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
-                qw = (R[2, 1] - R[1, 2]) / S
+            # negative trace fallback
+            if (R[0,0] > R[1,1]) and (R[0,0] > R[2,2]):
+                S = np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2]) * 2.0
+                qw = (R[2,1] - R[1,2]) / S
                 qx = 0.25 * S
-                qy = (R[0, 1] + R[1, 0]) / S
-                qz = (R[0, 2] + R[2, 0]) / S
-            elif R[1, 1] > R[2, 2]:
-                S = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
-                qw = (R[0, 2] - R[2, 0]) / S
-                qx = (R[0, 1] + R[1, 0]) / S
+                qy = (R[0,1] + R[1,0]) / S
+                qz = (R[0,2] + R[2,0]) / S
+            elif (R[1,1] > R[2,2]):
+                S = np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2]) * 2.0
+                qw = (R[0,2] - R[2,0]) / S
+                qx = (R[0,1] + R[1,0]) / S
                 qy = 0.25 * S
-                qz = (R[1, 2] + R[2, 1]) / S
+                qz = (R[1,2] + R[2,1]) / S
             else:
-                S = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
-                qw = (R[1, 0] - R[0, 1]) / S
-                qx = (R[0, 2] + R[2, 0]) / S
-                qy = (R[1, 2] + R[2, 1]) / S
+                S = np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1]) * 2.0
+                qw = (R[1,0] - R[0,1]) / S
+                qx = (R[0,2] + R[2,0]) / S
+                qy = (R[1,2] + R[2,1]) / S
                 qz = 0.25 * S
-
         return [qw, qx, qy, qz]
 
     for root in roots:
@@ -306,13 +296,13 @@ def imitate_trajectory_with_action_identifier(
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
             upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
             lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
-            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
+            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_combined.mp4")  # or a separate combined
             combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
             obs_group = root["data"][demo]["obs"]
             num_samples = obs_group["frontview_image"].shape[0]
 
-            # Write left videos
+            # Create the left videos
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
             lower_left_frames = [obs_group["sideview_image"][i]   for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
@@ -322,60 +312,56 @@ def imitate_trajectory_with_action_identifier(
                 for frame in lower_left_frames:
                     writer.append_data(frame)
 
-            # For "megapose_inference", gather absolute poses, then compute deltas
+            # Collect absolute SE(3) poses, then do deltas
             all_poses_world = []
             for i in range(num_samples):
-                rgb_image = obs_group["frontview_image"][i]  # shape (128,128,3), np.uint8
-                # Optionally find bounding box via find_green_bounding_box(rgb_image)
-                # or just assume full image is bounding box
+                rgb_image = obs_group["frontview_image"][i]  # shape (128,128,3) np.uint8
                 from megapose.datasets.scene_dataset import ObjectData
                 object_data = [ObjectData(label="panda-hand", bbox_modal=[0,0,128,128])]
                 detections = make_detections_from_object_data(object_data)
 
-                # Now we run inference with the object_dataset we built from mesh_dir
                 pose_estimates = run_inference_on_data(
                     image_rgb=rgb_image,
                     K=frontview_K.astype(np.float32),
                     detections=detections,
                     model_name="megapose-1.0-RGB-multi-hypothesis",
-                    object_dataset=object_dataset,  # <--- Using the actual dataset
+                    object_dataset=object_dataset,
                     requires_depth=False,
                     depth=None,
                     output_dir=None
                 )
 
-                poses_np = pose_estimates.poses.cpu().numpy()  # shape (1,7) if single detection
-                if poses_np.shape[0] < 1:
-                    # If no detection, store None
+                # Now pose_estimates.poses is (1,4,4), e.g. an SE(3) matrix
+                # If no detection, shape might be (0,4,4). Check that first
+                if pose_estimates.poses.shape[0] < 1:
                     all_poses_world.append(None)
                     continue
 
-                tx, ty, tz, qw, qx, qy, qz = poses_np[0]
+                # Extract the 4x4 matrix
+                T_cam_obj = pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
 
-                # frontview_R might be camera->world or world->camera
-                # If it's camera->world, we do:
+                # frontview_R could be camera->world or world->camera
                 T_camera_world = frontview_R
-                T_cam_obj = pose_vector_to_matrix([tx, ty, tz], [qw, qx, qy, qz])
                 T_world_obj = T_camera_world @ T_cam_obj
+
                 all_poses_world.append(T_world_obj)
 
-            # Compute delta actions
+            # Compute deltas
             actions_for_demo = []
             for i in range(num_samples - 1):
                 if (all_poses_world[i] is None) or (all_poses_world[i+1] is None):
                     actions_for_demo.append(np.zeros(7, dtype=np.float32))
                     continue
-                
-                T_i   = all_poses_world[i]
-                T_i1  = all_poses_world[i+1]
 
-                # delta = T_i^-1 * T_i+1
+                T_i = all_poses_world[i]
+                T_i1 = all_poses_world[i+1]
+
+                # delta = T_i^-1 * T_i1
                 T_i_inv = np.linalg.inv(T_i)
                 T_delta = T_i_inv @ T_i1
 
-                # scale translation
+                # Scale translation
                 t_delta = T_delta[:3, 3] * 80.0
-
                 R_delta = T_delta[:3, :3]
                 q_delta = rotation_matrix_to_quaternion(R_delta)
 
@@ -384,7 +370,7 @@ def imitate_trajectory_with_action_identifier(
                 action[3:] = q_delta
                 actions_for_demo.append(action)
 
-            # Roll out the actions
+            # Roll out
             initial_state = root["data"][demo]["states"][0]
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
@@ -414,12 +400,9 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
-            # Combine quadrant videos
             combine_videos_quadrants(
-                upper_left_video_path,
-                upper_right_video_path,
-                lower_left_video_path,
-                lower_right_video_path,
+                upper_left_video_path, upper_right_video_path,
+                lower_left_video_path, lower_right_video_path,
                 combined_video_path
             )
             os.remove(upper_left_video_path)
@@ -427,7 +410,7 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
-    success_rate = (n_success / total_n) * 100 if total_n else 0
+    success_rate = (n_success / total_n)*100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
     with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
         f.write("\n".join(results))
