@@ -49,9 +49,6 @@ logger = get_logger(__name__)
 
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
 
-K = get_camera_intrinsic_matrix(self.env.sim, camera_name=cam_name, camera_height=camera_height, camera_width=camera_width)
-R = get_camera_extrinsic_matrix(self.env.sim, camera_name=cam_name)
-
 #####################################################################
 # Instead of from action_extractor.megapose.action_identifier_megapose 
 # we STILL import the same run_inference_on_data, but we will pass 
@@ -211,6 +208,9 @@ def imitate_trajectory_with_action_identifier(
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} once at script start.")
     pose_estimator = load_named_model(model_name, object_dataset).cuda()
+    
+    left_finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
+    right_finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
 
     # 3) Preprocess dataset if needed (HDF5->Zarr)
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -244,6 +244,16 @@ def imitate_trajectory_with_action_identifier(
 
     # Create envs
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
+    
+    
+    example_image = roots[0]["data"]['demo_0']["obs"]["frontview_image"][0]
+    camera_height, camera_width = example_image.shape[:2]
+
+    # Now call robosuite functions:
+    K = get_camera_intrinsic_matrix(env_camera0.env.sim, camera_name="frontview",
+                                    camera_height=camera_height, camera_width=camera_width)
+    R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
+    
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
@@ -254,7 +264,7 @@ def imitate_trajectory_with_action_identifier(
             thread_type='FRAME',
             thread_count=1,
         ),
-        steps_per_render=1, width=128, height=128,
+        steps_per_render=1, width=camera_width, height=camera_height,
         mode='rgb_array', camera_name=cameras[0].split('_')[0]
     )
 
@@ -269,7 +279,7 @@ def imitate_trajectory_with_action_identifier(
             thread_type='FRAME',
             thread_count=1
         ),
-        steps_per_render=1, width=128, height=128,
+        steps_per_render=1, width=camera_width, height=camera_height,
         mode='rgb_array', camera_name=cameras[1].split('_')[0]
     )
 
@@ -346,7 +356,7 @@ def imitate_trajectory_with_action_identifier(
                 # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
                 pose_estimates = estimate_pose(
                     image_rgb=rgb_image,
-                    K=frontview_K.astype(np.float32),
+                    K=K.astype(np.float32),
                     detections=detections,
                     pose_estimator=pose_estimator,
                     model_info=model_info,
@@ -362,7 +372,7 @@ def imitate_trajectory_with_action_identifier(
                 T_cam_obj = pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
                 
                 # We assume frontview_R is camera->world (or world->camera).
-                T_camera_world = frontview_R
+                T_camera_world = R
                 T_world_obj = T_camera_world @ T_cam_obj
                 all_poses_world.append(T_world_obj)
 
@@ -451,7 +461,7 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
+        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/test",
         mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         n=100,
