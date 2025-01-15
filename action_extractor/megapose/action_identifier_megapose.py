@@ -80,14 +80,12 @@ def save_predictions(
 # Inference function that accepts in-memory image, K, detections, etc.
 # -----------------------------------------------------------------------------
 
-def run_inference_on_data(
+def estimate_pose(
     image_rgb: np.ndarray,          # shape (H, W, 3), uint8
     K: np.ndarray,                  # shape (3, 3) camera intrinsics
     detections: DetectionsType,     # bounding boxes + labels, etc.
     pose_estimator: PoseEstimator,
     model_info: dict,
-    object_dataset: RigidObjectDataset,
-    requires_depth: bool = False,
     depth: Optional[np.ndarray] = None,   # shape (H, W) or None
     output_dir: Optional[Path] = None,    # if you want to save predictions
 ) -> PoseEstimatesType:
@@ -106,7 +104,6 @@ def run_inference_on_data(
     # Done outside this function
 
     # 3) Run inference
-    logger.info("Running inference pipeline...")
     output, _ = pose_estimator.run_inference_pipeline(
         observation,
         detections=detections.cuda(),
@@ -166,20 +163,17 @@ def main():
 
     # 6. Run inference
     model_name = "megapose-1.0-RGB-multi-hypothesis"
-    requires_depth = False
     output_dir = None  # or None if you don't need to save
     
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} ...")
     pose_estimator = load_named_model(model_name, object_dataset).cuda()
 
-    pose_estimates = run_inference_on_data(
+    pose_estimates = estimate_pose(
         image_rgb, K,
         detections,
         pose_estimator,
         model_info,
-        object_dataset,
-        requires_depth=requires_depth,
         depth=None,
         output_dir=output_dir,
     )

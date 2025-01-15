@@ -50,13 +50,13 @@ else:
     fc_mu_path = None
     fc_logvar_path = None
     
-output_dir = "/home/yilong/Documents/action_extractor/debug/hyperspherical_lift_1000"
+output_dir = "/home/yilong/Documents/action_extractor/debug/resnet_test_1000"
 
-checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
-arch_type = 'hyperspherical'
-# checkpoint_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_checkpoint_latest.pth'
-# # checkpoint_path = None
+# checkpoint_path = '/home/yilong/Documents/action_extractor/results/S_variational-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632*8-rejection_checkpoint.pth'
 # arch_type = 'resnet'
+checkpoint_path = '/home/yilong/Documents/action_extractor/results/resnet_global_average_pooling-lift1000-cropped_rgbd+color_mask-delta_position+gripper-frontside-cosine+mse-bs1632_checkpoint_latest.pth'
+checkpoint_path = None
+arch_type = 'resnet'
 
 # conv_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_resnet-50-300.pth'
 # mlp_path='/home/yilong/Documents/action_extractor/results/iiwa16168-cropped_rgbd+color_mask-delta_position+gripper-frontside-bs1632_mlp-50-300.pth'
@@ -159,7 +159,7 @@ def imitate_trajectory_with_action_identifier(
         in_channels=len(cameras) * 6,  # Adjusted for multiple cameras
         action_length=1,
         num_classes=4,
-        num_mlp_layers=10,
+        num_mlp_layers=3,
         fc_mu_path=fc_mu_path,
         fc_logvar_path=fc_logvar_path,
         stats_path=stats_path,

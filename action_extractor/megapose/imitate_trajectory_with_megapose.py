@@ -43,6 +43,10 @@ from robomimic.utils.env_utils import create_env_from_metadata
 
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 
+from pathlib import Path
+from megapose.utils.logging import get_logger
+logger = get_logger(__name__)
+
 #####################################################################
 # Instead of from action_extractor.megapose.action_identifier_megapose 
 # we STILL import the same run_inference_on_data, but we will pass 
@@ -50,46 +54,43 @@ from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrap
 # a small wrapper or local approach for that.
 #####################################################################
 from action_extractor.megapose.action_identifier_megapose import (
-    run_inference_on_data,
     make_detections_from_object_data,
     make_object_dataset_from_folder,
+    estimate_pose
 )
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_left_video_path, bottom_right_video_path, output_path):
+    import imageio
+
     top_left_reader = imageio.get_reader(top_left_video_path)
     top_right_reader = imageio.get_reader(top_right_video_path)
     bottom_left_reader = imageio.get_reader(bottom_left_video_path)
     bottom_right_reader = imageio.get_reader(bottom_right_video_path)
-    fps = top_left_reader.get_meta_data()["fps"]
 
-    top_left_frames = list(top_left_reader)
-    top_right_frames = list(top_right_reader)
-    bottom_left_frames = list(bottom_left_reader)
-    bottom_right_frames = list(bottom_right_reader)
-
-    min_length = min(
-        len(top_left_frames), len(top_right_frames),
-        len(bottom_left_frames), len(bottom_right_frames)
-    )
-    top_left_frames    = top_left_frames[:min_length]
-    top_right_frames   = top_right_frames[:min_length]
-    bottom_left_frames = bottom_left_frames[:min_length]
-    bottom_right_frames= bottom_right_frames[:min_length]
-
-    combined_frames = [
-        np.vstack([
-            np.hstack([tl, tr]),
-            np.hstack([bl, br])
-        ])
-        for tl, tr, bl, br in zip(
-            top_left_frames, top_right_frames,
-            bottom_left_frames, bottom_right_frames
-        )
-    ]
+    fps = top_left_reader.get_meta_data()["fps"]  # or handle if they differ
 
     with imageio.get_writer(output_path, fps=fps) as writer:
-        for frame in combined_frames:
-            writer.append_data(frame)
+        while True:
+            try:
+                tl_frame = top_left_reader.get_next_data()
+                tr_frame = top_right_reader.get_next_data()
+                bl_frame = bottom_left_reader.get_next_data()
+                br_frame = bottom_right_reader.get_next_data()
+            except (StopIteration, IndexError):
+                # Means at least one reader had no more frames
+                break
+
+            # Combine frames in a quadrant layout
+            top = np.hstack([tl_frame, tr_frame])
+            bottom = np.hstack([bl_frame, br_frame])
+            combined = np.vstack([top, bottom])
+
+            writer.append_data(combined)
+
+    top_left_reader.close()
+    top_right_reader.close()
+    bottom_left_reader.close()
+    bottom_right_reader.close()
 
 
 def quaternion_to_rotation_matrix(q):
@@ -180,75 +181,33 @@ def find_green_bounding_box(img_array):
     # Return in (x_min, y_min, x_max, y_max) format
     return (x, y, x + w, y + h)
 
-
-#####################################################################
-# We'll define a "run_inference_with_cached_model" that reuses model
-#####################################################################
-def run_inference_with_cached_model(
-    pose_estimator,
-    image_rgb: np.ndarray,
-    K: np.ndarray,
-    detections,
-    requires_depth: bool = False,
-    depth: np.ndarray = None
-):
-    """
-    A local function that calls the same logic as run_inference_on_data,
-    but doesn't re-load the model. We only pass in a preloaded 'pose_estimator'.
-    """
-    from megapose.inference.types import ObservationTensor
-    from megapose.utils.logging import get_logger
-    logger = get_logger(__name__)  # if you want to log
-
-    # Build ObservationTensor
-    observation = ObservationTensor.from_numpy(
-        image_rgb,
-        depth,
-        K
-    ).cuda()
-
-    # Just call the pipeline with the existing pose_estimator
-    logger.debug("Running inference pipeline with cached model...")
-
-    output, _ = pose_estimator.run_inference_pipeline(
-        observation,
-        detections=detections.cuda(),
-        # no extra named arguments needed if your model_info has been 
-        # integrated into the pose_estimator
-    )
-    return output
-
-
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-    output_dir="/home/yilong/Documents/action_extractor/debug/hyperspherical_lift_1000",
+    output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     n=100,
     save_webp=False,
     cameras=["frontview_image", "sideview_image"],
-    right_video_mode='megapose_inference'
 ):
     """
     - Only loads the Megapose model once (caching).
     - Suppresses Panda3D logging noise.
-    - Uses (1,4,4) SE(3) from pose_estimates.poses.
+    - Uses (1,4,4) SE(3) from pose_estimates.poses, but via the new `estimate_pose`.
     - Also uses a simpler video codec (libx264rgb).
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    from pathlib import Path
+    # 1) Build object_dataset from mesh_dir using your new function
     object_dataset = make_object_dataset_from_folder(Path(mesh_dir))
 
-    # ---- LOAD THE MODEL ONLY ONCE ----
+    # 2) Load the model ONCE
+    model_name = "megapose-1.0-RGB-multi-hypothesis"
     from megapose.utils.load_model import NAMED_MODELS, load_named_model
-    from megapose.utils.logging import get_logger
-    logger = get_logger(__name__)
+    model_info = NAMED_MODELS[model_name]
+    logger.info(f"Loading model {model_name} once at script start.")
+    pose_estimator = load_named_model(model_name, object_dataset).cuda()
 
-    model_info = NAMED_MODELS["megapose-1.0-RGB-multi-hypothesis"]
-    logger.info("Loading model 'megapose-1.0-RGB-multi-hypothesis'.")
-    pose_estimator = load_named_model("megapose-1.0-RGB-multi-hypothesis", object_dataset).cuda()
-
-    # 2) Convert HDF5->Zarr if needed
+    # 3) Preprocess dataset if needed (HDF5->Zarr)
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
         ds_dir = seq_dir.replace('.hdf5', '.zarr')
@@ -261,10 +220,12 @@ def imitate_trajectory_with_action_identifier(
             directorystore_to_zarr_zip(ds_dir, zarr_path)
             shutil.rmtree(ds_dir)
 
+    # 4) Collect the Zarr files
     zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
     stores = [ZipStore(zarr_file, mode='r') for zarr_file in zarr_files]
     roots = [zarr.group(store) for store in stores]
 
+    # 5) Initialize environment 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
@@ -282,11 +243,11 @@ def imitate_trajectory_with_action_identifier(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='libx264rgb',  
+            codec='h264',  
             input_pix_fmt='rgb24',
             crf=22,
             thread_type='FRAME',
-            thread_count=1
+            thread_count=1,
         ),
         steps_per_render=1, width=128, height=128,
         mode='rgb_array', camera_name=cameras[0].split('_')[0]
@@ -297,7 +258,7 @@ def imitate_trajectory_with_action_identifier(
         env_camera1,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='libx264rgb',
+            codec='h264',
             input_pix_fmt='rgb24',
             crf=22,
             thread_type='FRAME',
@@ -311,6 +272,7 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
     results = []
 
+    # A function to convert rotation matrix -> quaternion
     def rotation_matrix_to_quaternion(R):
         eps = 1e-7
         trace = R[0,0] + R[1,1] + R[2,2]
@@ -341,6 +303,7 @@ def imitate_trajectory_with_action_identifier(
                 qz = 0.25 * S
         return [qw, qx, qy, qz]
 
+    # Loop over demos
     for root in roots:
         demos = list(root["data"].keys())[:n] if n else list(root["data"].keys())
         for demo in tqdm(demos, desc="Processing demos"):
@@ -354,7 +317,7 @@ def imitate_trajectory_with_action_identifier(
             obs_group = root["data"][demo]["obs"]
             num_samples = obs_group["frontview_image"].shape[0]
 
-            # Build left videos
+            # Build the left videos
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
             lower_left_frames = [obs_group["sideview_image"][i]   for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
@@ -365,34 +328,40 @@ def imitate_trajectory_with_action_identifier(
                     writer.append_data(frame)
 
             all_poses_world = []
-            for i in range(num_samples):
+            for i in tqdm(range(num_samples), desc="Inferring pose for each sample"):
+                # Build the bounding box. For instance, we do
+                # from megapose.datasets.scene_dataset import ObjectData
+                from megapose.datasets.scene_dataset import ObjectData
                 rgb_image = obs_group["frontview_image"][i]
 
-                # Make bounding box as before
-                from megapose.datasets.scene_dataset import ObjectData
+                # e.g. we do a naive bounding box [0,0,128,128] or find_green_bounding_box
                 object_data = [ObjectData(label="panda-hand", bbox_modal=[0,0,128,128])]
                 detections = make_detections_from_object_data(object_data)
 
-                # Instead of run_inference_on_data which reloads, we call our local function
-                # but reusing the same 'pose_estimator' we loaded above.
-                pose_estimates = run_inference_with_cached_model(
-                    pose_estimator=pose_estimator,
+                # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
+                pose_estimates = estimate_pose(
                     image_rgb=rgb_image,
                     K=frontview_K.astype(np.float32),
-                    detections=detections
+                    detections=detections,
+                    pose_estimator=pose_estimator,
+                    model_info=model_info,
+                    depth=None,              # or an actual depth if you have it
+                    output_dir=None
                 )
 
+                # If no detection, shape might be (0,4,4)
                 if pose_estimates.poses.shape[0] < 1:
                     all_poses_world.append(None)
                     continue
 
-                # shape (4,4)
-                T_cam_obj = pose_estimates.poses[0].cpu().numpy()
+                T_cam_obj = pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
+                
+                # We assume frontview_R is camera->world (or world->camera).
                 T_camera_world = frontview_R
                 T_world_obj = T_camera_world @ T_cam_obj
                 all_poses_world.append(T_world_obj)
 
-            # compute delta actions
+            # Compute delta actions
             actions_for_demo = []
             for i in range(num_samples - 1):
                 if (all_poses_world[i] is None) or (all_poses_world[i+1] is None):
@@ -401,22 +370,21 @@ def imitate_trajectory_with_action_identifier(
 
                 T_i  = all_poses_world[i]
                 T_i1 = all_poses_world[i+1]
-
                 T_i_inv = np.linalg.inv(T_i)
                 T_delta = T_i_inv @ T_i1
 
-                t_delta = T_delta[:3, 3]
-                R_delta = T_delta[:3,:3]
+                t_delta = T_delta[:3, 3]  # shape (3,)
+                R_delta = T_delta[:3, :3]
                 q_delta = rotation_matrix_to_quaternion(R_delta)
 
                 action = np.zeros(7, dtype=np.float32)
                 action[:3] = t_delta
-                # action[3:] = q_delta
-                action[-1] = 1.0  # dummy gripper value
+                # if you want orientation in the last 4
+                # action[3:] = q_delta  
+                # or if you only need 6D, adapt accordingly
                 actions_for_demo.append(action)
-                print(action)
 
-            # roll out environment
+            # Roll out environment
             initial_state = root["data"][demo]["states"][0]
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
@@ -447,6 +415,7 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
+            # Combine quadrant videos
             combine_videos_quadrants(
                 upper_left_video_path,
                 upper_right_video_path,
@@ -459,7 +428,7 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
-    success_rate = (n_success / total_n)*100 if total_n else 0
+    success_rate = (n_success / total_n) * 100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
     with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
         f.write("\n".join(results))
@@ -483,7 +452,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
         mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/hyperspherical_lift_1000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         n=100,
         save_webp=False
     )

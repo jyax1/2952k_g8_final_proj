@@ -2,6 +2,7 @@
 README.md
 cropped_rgb.png
 cropped_rgbd_bbox.png
+debug_xvfb.sh
 environment.yml
 image_depth.png
 image_rgb.png
@@ -10,6 +11,7 @@ requirements.txt
 setup.cfg
 setup.py
 .vscode/launch.json
+.vscode/tasks.json
 action_extractor/__init__.py
 action_extractor/action_identifier.py
 action_extractor/config.py
@@ -33,7 +35,10 @@ action_extractor/architectures/utils.py
 action_extractor/data_collection/collect_action_id_data_parallel.py
 action_extractor/data_collection/collect_no_rotation_lift_demos.py
 action_extractor/megapose/action_identifier_megapose.py
+action_extractor/megapose/imitate_trajectory_with_megapose.py
 action_extractor/megapose/test_pose_estimation.py
+action_extractor/megapose/panda_hand_mesh/panda-hand.ply
+action_extractor/megapose/panda_hand_mesh/panda-hand.png
 action_extractor/utility_scripts/__init__.py
 action_extractor/utility_scripts/convert_robosuite.py
 action_extractor/utility_scripts/copy_n_demos.py
