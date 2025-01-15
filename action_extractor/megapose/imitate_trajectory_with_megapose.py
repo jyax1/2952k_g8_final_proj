@@ -47,6 +47,11 @@ from pathlib import Path
 from megapose.utils.logging import get_logger
 logger = get_logger(__name__)
 
+from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
+
+K = get_camera_intrinsic_matrix(self.env.sim, camera_name=cam_name, camera_height=camera_height, camera_width=camera_width)
+R = get_camera_extrinsic_matrix(self.env.sim, camera_name=cam_name)
+
 #####################################################################
 # Instead of from action_extractor.megapose.action_identifier_megapose 
 # we STILL import the same run_inference_on_data, but we will pass 
@@ -335,7 +340,7 @@ def imitate_trajectory_with_action_identifier(
                 rgb_image = obs_group["frontview_image"][i]
 
                 # e.g. we do a naive bounding box [0,0,128,128] or find_green_bounding_box
-                object_data = [ObjectData(label="panda-hand", bbox_modal=[0,0,128,128])]
+                object_data = [ObjectData(label="panda-hand", bbox_modal=find_green_bounding_box(rgb_image))]
                 detections = make_detections_from_object_data(object_data)
 
                 # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
@@ -368,20 +373,16 @@ def imitate_trajectory_with_action_identifier(
                     actions_for_demo.append(np.zeros(7, dtype=np.float32))
                     continue
 
-                T_i  = all_poses_world[i]
-                T_i1 = all_poses_world[i+1]
-                T_i_inv = np.linalg.inv(T_i)
-                T_delta = T_i_inv @ T_i1
+                pos_i  = all_poses_world[i][:3, 3]   # shape (3,)
+                pos_i1 = all_poses_world[i+1][:3, 3]
 
-                t_delta = T_delta[:3, 3]  # shape (3,)
-                R_delta = T_delta[:3, :3]
-                q_delta = rotation_matrix_to_quaternion(R_delta)
+                # Subtract positions directly in global frame
+                p_delta = 80.0 * (pos_i1 - pos_i)  # a 3D difference vector
 
                 action = np.zeros(7, dtype=np.float32)
-                action[:3] = t_delta
-                # if you want orientation in the last 4
-                # action[3:] = q_delta  
-                # or if you only need 6D, adapt accordingly
+                action[:3] = p_delta
+                # if you want orientation in last 4
+                # action[3:] = q_delta
                 actions_for_demo.append(action)
 
             # Roll out environment
