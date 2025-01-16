@@ -410,7 +410,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=25, # Maximum num_workers suitable for my machine
+        default=16, # Maximum num_workers suitable for my machine
         help="(optional) num_workers for parallel saving",
     )
 

@@ -123,7 +123,7 @@ def estimate_pose_batched(
     list_of_images: list[np.ndarray],     # each image is (H,W,3) in np.uint8
     list_of_bboxes: list[list[dict]],     # bounding boxes per image
     K: np.ndarray,                        # shape (3,3) camera intrinsics, same for all frames
-    pose_estimator,                       # A loaded PoseEstimator (hand_pose_estimator or finger_pose_estimator)
+    pose_estimator: PoseEstimator,                       # A loaded PoseEstimator (hand_pose_estimator or finger_pose_estimator)
     model_info: dict,
     depth_list: list[np.ndarray] = None,  # optional depth images, each is (H,W) float
 ) -> list[PoseEstimatesType]:

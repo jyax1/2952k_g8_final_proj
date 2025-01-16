@@ -59,7 +59,7 @@ from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsi
 from action_extractor.megapose.action_identifier_megapose import (
     make_detections_from_object_data,
     make_object_dataset_from_folder,
-    estimate_pose
+    estimate_pose_batched
 )
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_left_video_path, bottom_right_video_path, output_path):
@@ -233,7 +233,7 @@ def imitate_trajectory_with_action_identifier(
     num_demos=100,
     save_webp=False,
     cameras=["frontview_image", "sideview_image"],
-    batch_size=10,
+    batch_size=40,
 ):
     """
     - Only loads the Megapose model once (caching).
@@ -345,7 +345,7 @@ def imitate_trajectory_with_action_identifier(
             obs_group = root["data"][demo]["obs"]
             num_samples = obs_group["frontview_image"].shape[0]
 
-            # Build the left videos
+            # Save the left videos
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
             lower_left_frames = [obs_group["sideview_image"][i]   for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
@@ -355,122 +355,82 @@ def imitate_trajectory_with_action_identifier(
                 for frame in lower_left_frames:
                     writer.append_data(frame)
 
-            all_hand_poses_world = []
-            all_fingers_distances = []
-            for i in tqdm(range(num_samples), desc="Inferring pose for each sample"):
-                # Build the bounding box. For instance, we do
-                # from megapose.datasets.scene_dataset import ObjectData
-                from megapose.datasets.scene_dataset import ObjectData
-                rgb_image = obs_group["frontview_image"][i]
-                
-                def save_np_as_png(array: np.ndarray, filename: str):
-                    from PIL import Image
-                    """
-                    Saves a NumPy array (H x W, or H x W x 3/4) as a PNG image.
-                    - If array is float [0..1], we scale to [0..255] and cast to uint8
-                    - If array is already in uint8 [0..255], we just convert directly
-                    """
-                    # 1) If float, scale to 0..255
-                    if array.dtype in (np.float32, np.float64):
-                        array = (array * 255).clip(0, 255).astype(np.uint8)
+            # We'll store the final global pose for each frame
+            all_hand_poses_world = [None]*num_samples
+            all_fingers_distances = [0.0]*num_samples
 
-                    # 2) Convert to PIL Image
-                    img = Image.fromarray(array)
+            # We'll chunk frames by batch_size
+            for chunk_start in tqdm(range(0, num_samples, batch_size), desc=f"Processing frames in {demo}"):
+                chunk_end = min(chunk_start + batch_size, num_samples)
 
-                    # 3) Save as PNG
-                    img.save(filename)
-                    print(f"Saved array as {filename}")
+                #  gather images + bounding boxes for this chunk
+                images_chunk = []
+                bboxes_chunk = []
+                for i in range(chunk_start, chunk_end):
+                    rgb_image = obs_group["frontview_image"][i]
                     
-                    exit()
+                    # bounding box for "panda-hand"
+                    box_hand = find_color_bounding_box(rgb_image, color_name="green")
+                    # if None => no bounding box, so pass empty list
+                    if box_hand is not None:
+                        bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
+                    else:
+                        bboxes_chunk.append([])
+                    
+                    images_chunk.append(rgb_image)
 
-                # e.g. we do a naive bounding box [0,0,128,128] or find_green_bounding_box
-                hand_object_data = [ObjectData(label="panda-hand", bbox_modal=find_color_bounding_box(rgb_image, color_name="green"))]
-                hand_detections = make_detections_from_object_data(hand_object_data)
-
-                # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
-                hand_pose_estimates = estimate_pose(
-                    image_rgb=rgb_image,
-                    K=K.astype(np.float32),
-                    detections=hand_detections,
+                # run batched hand pose estimation
+                chunk_hand_results = estimate_pose_batched(
+                    list_of_images=images_chunk,
+                    list_of_bboxes=bboxes_chunk,
+                    K=K,
                     pose_estimator=hand_pose_estimator,
                     model_info=model_info,
-                    depth=None,              # or an actual depth if you have it
-                    output_dir=None
+                    depth_list=None
                 )
-                
-                left_finger_bbox = find_color_bounding_box(rgb_image, color_name="cyan")
-                right_finger_bbox = find_color_bounding_box(rgb_image, color_name="magenta")
-                
-                # finger1_object_data = [ObjectData(label="panda-finger", bbox_modal=finger_bounding_boxes[0])]
-                # finger1_detections = make_detections_from_object_data(finger1_object_data)
-                
-                # finger2_object_data = [ObjectData(label="panda-finger", bbox_modal=finger_bounding_boxes[1])]
-                # finger2_detections = make_detections_from_object_data(finger2_object_data)
-                
-                # finger1_pose_estimates = estimate_pose(
-                #     image_rgb=rgb_image,
-                #     K=K.astype(np.float32),
-                #     detections=finger1_detections,
-                #     pose_estimator=finger_pose_estimator,
-                #     model_info=model_info,
-                #     depth=None,              # or an actual depth if you have it
-                #     output_dir=None
-                # )
-                
-                # finger2_pose_estimates = estimate_pose(
-                #     image_rgb=rgb_image,
-                #     K=K.astype(np.float32),
-                #     detections=finger2_detections,
-                #     pose_estimator=finger_pose_estimator,
-                #     model_info=model_info,
-                #     depth=None,              # or an actual depth if you have it
-                #     output_dir=None
-                # )
-                
-                # finger1_pose = R @ finger1_pose_estimates.poses[0].cpu().numpy()
-                # finger2_pose = R @ finger2_pose_estimates.poses[0].cpu().numpy()
-                # fingers_distance = np.linalg.norm(finger1_pose[:3, 3] - finger2_pose[:3, 3])
-                
-                # all_fingers_distances.append(fingers_distance)
-                
-                # print(fingers_distance)
-                
-                fingers_distance = bounding_box_distance(left_finger_bbox, right_finger_bbox)
-                all_fingers_distances.append(fingers_distance)
-                
-                # If no detection, shape might be (0,4,4)
-                if hand_pose_estimates.poses.shape[0] < 1:
-                    all_hand_poses_world.append(None)
-                    continue
 
-                T_cam_hand = hand_pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
-                
-                # We assume frontview_R is camera->world (or world->camera).
-                T_camera_world = R
-                T_world_hand = T_camera_world @ T_cam_hand
-                all_hand_poses_world.append(T_world_hand)
+                # also do finger bounding boxes + distances if needed
+                # We'll do a single pass for the finger distance:
+                finger_dist_chunk = []
+                for i in range(chunk_start, chunk_end):
+                    rgb_image = obs_group["frontview_image"][i]
+                    left_finger_bbox = find_color_bounding_box(rgb_image, color_name="cyan")
+                    right_finger_bbox = find_color_bounding_box(rgb_image, color_name="magenta")
+                    d = bounding_box_distance(left_finger_bbox, right_finger_bbox)
+                    finger_dist_chunk.append(d)
 
-            # Compute delta actions
+                # store results
+                for offset, i in enumerate(range(chunk_start, chunk_end)):
+                    # chunk_hand_results[offset] is a PoseEstimatesType
+                    pose_est_for_frame = chunk_hand_results[offset]
+                    all_fingers_distances[i] = finger_dist_chunk[offset]
+                    if len(pose_est_for_frame) < 1:
+                        # no detection
+                        all_hand_poses_world[i] = None
+                    else:
+                        T_cam_hand = pose_est_for_frame.poses[0].cpu().numpy()
+                        # transform to world
+                        T_world_hand = R @ T_cam_hand
+                        all_hand_poses_world[i] = T_world_hand
+
+            # Now we have all_hand_poses_world + all_fingers_distances
+            # => compute actions
             actions_for_demo = []
             for i in range(num_samples - 1):
                 if (all_hand_poses_world[i] is None) or (all_hand_poses_world[i+1] is None):
                     actions_for_demo.append(np.zeros(7, dtype=np.float32))
                     continue
-
-                pos_i  = all_hand_poses_world[i][:3, 3]   # shape (3,)
+                
+                pos_i  = all_hand_poses_world[i][:3, 3]
                 pos_i1 = all_hand_poses_world[i+1][:3, 3]
-
-                # Subtract positions directly in global frame
-                p_delta = 80.0 * (pos_i1 - pos_i)  # a 3D difference vector
+                dp = 80.0 * (pos_i1 - pos_i)
                 
                 finger_distance1 = all_fingers_distances[i]
                 finger_distance2 = all_fingers_distances[i+1]
-
+                
                 action = np.zeros(7, dtype=np.float32)
-                action[:3] = p_delta
-                action[-1] = - np.sign(finger_distance2 - finger_distance1)
-                # if you want orientation in last 4
-                # action[3:] = q_delta
+                action[:3] = dp
+                action[-1] = -np.sign(finger_distance2 - finger_distance1)
                 actions_for_demo.append(action)
 
             # Roll out environment
@@ -517,6 +477,7 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
+    # final
     success_rate = (n_success / total_n) * 100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
     with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
@@ -539,11 +500,11 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736989038_8197331/test",
+        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         num_demos=100,
         save_webp=False,
-        batch_size=10
+        batch_size=40
     )
