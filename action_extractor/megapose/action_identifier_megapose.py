@@ -5,6 +5,9 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import pandas as pd
+
+from megapose.utils.tensor_collection import PandasTensorCollection
 
 from megapose.datasets.object_dataset import RigidObject, RigidObjectDataset
 from megapose.datasets.scene_dataset import CameraData, ObjectData
@@ -115,6 +118,124 @@ def estimate_pose(
         save_predictions(output_dir, output)
 
     return output
+
+def estimate_pose_batched(
+    list_of_images: list[np.ndarray],     # each image is (H,W,3) in np.uint8
+    list_of_bboxes: list[list[dict]],     # bounding boxes per image
+    K: np.ndarray,                        # shape (3,3) camera intrinsics, same for all frames
+    pose_estimator,                       # A loaded PoseEstimator (hand_pose_estimator or finger_pose_estimator)
+    model_info: dict,
+    depth_list: list[np.ndarray] = None,  # optional depth images, each is (H,W) float
+) -> list[PoseEstimatesType]:
+    """
+    Runs batched pose estimation on multiple images in a single forward pass.
+    
+    :param list_of_images: list of (H,W,3) images (np.uint8) 
+    :param list_of_bboxes: for each image i, a list of dicts specifying bounding boxes:
+                           e.g. list_of_bboxes[i] = [
+                             {"label": "panda-hand", "bbox": [x1,y1,x2,y2], "instance_id": 0}, 
+                             ...
+                           ]
+    :param K: (3,3) intrinsics
+    :param pose_estimator: PoseEstimator instance
+    :param model_info: dict of inference_parameters
+    :param depth_list: optional list of (H,W) float depth maps, length = len(list_of_images)
+    :return: A list of PoseEstimatesType, one for each image.
+    """
+    assert len(list_of_images) == len(list_of_bboxes), (
+        "list_of_images and list_of_bboxes must have same length"
+    )
+    N = len(list_of_images)
+    
+    # ----------------------------------------------------------------
+    # 1) Construct one big ObservationTensor with shape [N,3,H,W] or [N,4,H,W]
+    # ----------------------------------------------------------------
+    images_torch = []
+    for i in range(N):
+        rgb = list_of_images[i]    # shape (H,W,3) in uint8
+        # convert to float [0..1], shape (H,W,3)
+        rgb_torch = torch.from_numpy(rgb).float() / 255.0
+        # [3,H,W]
+        rgb_torch = rgb_torch.permute(2,0,1)
+        # => shape (1,3,H,W)
+        rgb_torch = rgb_torch.unsqueeze(0)
+
+        if depth_list is not None:
+            depth_np = depth_list[i]  # shape (H,W)
+            depth_torch = torch.from_numpy(depth_np).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+            img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)  # shape (1,4,H,W)
+            images_torch.append(img_4ch)
+        else:
+            images_torch.append(rgb_torch)  # shape (1,3,H,W)
+
+    # stack along batch dimension => shape (N,C,H,W)
+    images_batched = torch.cat(images_torch, dim=0)  
+
+    # replicate K => shape (N,3,3)
+    K_torch = torch.from_numpy(K).float().unsqueeze(0).expand(N, -1, -1).clone()
+
+    # create ObservationTensor and move to GPU
+    observation = ObservationTensor(images_batched, K_torch).cuda()
+
+    # ----------------------------------------------------------------
+    # 2) Build a single DetectionsType containing all bounding boxes
+    # ----------------------------------------------------------------
+    # We'll create a DataFrame with columns like 'batch_im_id','label','instance_id'
+    rows = []
+    bboxes_list = []
+    for i in range(N):
+        # list_of_bboxes[i] is e.g.:
+        # [ {"label":"panda-hand","bbox":[x1,y1,x2,y2],"instance_id":0}, ... ]
+        for obj_dict in list_of_bboxes[i]:
+            label = obj_dict["label"]
+            box_  = obj_dict["bbox"]   # [x1,y1,x2,y2]
+            inst_id = obj_dict.get("instance_id", 0)
+            row_dict = {
+                "batch_im_id": i,
+                "label": label,
+                "instance_id": inst_id
+            }
+            rows.append(row_dict)
+            bboxes_list.append(box_)
+    
+    if len(rows) == 0:
+        # no bounding boxes at all => empty
+        empty_df = pd.DataFrame([], columns=["batch_im_id","label","instance_id"])
+        empty_boxes = torch.empty((0,4), dtype=torch.float32)
+        detections_batched = PandasTensorCollection(empty_df, bboxes=empty_boxes)
+    else:
+        df = pd.DataFrame(rows)
+        boxes_np = np.array(bboxes_list, dtype=np.float32)  # shape (#boxes,4)
+        boxes_torch = torch.from_numpy(boxes_np)
+        detections_batched = PandasTensorCollection(df, bboxes=boxes_torch)
+
+    detections_batched = detections_batched.cuda()
+
+    # ----------------------------------------------------------------
+    # 3) Single forward pass for all frames
+    # ----------------------------------------------------------------
+    pose_est_batched, _ = pose_estimator.run_inference_pipeline(
+        observation,
+        detections=detections_batched,
+        **model_info["inference_parameters"],
+    )
+
+    # ----------------------------------------------------------------
+    # 4) Split results per image
+    # ----------------------------------------------------------------
+    results_per_image = [None]*N
+    df_res = pose_est_batched.infos
+    for i in range(N):
+        mask = (df_res["batch_im_id"] == i)
+        if not mask.any():
+            # no detection for that image => empty slice
+            results_per_image[i] = pose_est_batched[[]]
+        else:
+            idx = mask[mask].index
+            subset = pose_est_batched[idx]
+            results_per_image[i] = subset
+
+    return results_per_image
 
 
 # -----------------------------------------------------------------------------

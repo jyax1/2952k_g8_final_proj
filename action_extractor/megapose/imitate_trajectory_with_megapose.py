@@ -230,9 +230,10 @@ def imitate_trajectory_with_action_identifier(
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
     finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
-    n=100,
+    num_demos=100,
     save_webp=False,
     cameras=["frontview_image", "sideview_image"],
+    batch_size=10,
 ):
     """
     - Only loads the Megapose model once (caching).
@@ -332,7 +333,7 @@ def imitate_trajectory_with_action_identifier(
 
     # Loop over demos
     for root in roots:
-        demos = list(root["data"].keys())[:n] if n else list(root["data"].keys())
+        demos = list(root["data"].keys())[:num_demos] if num_demos else list(root["data"].keys())
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -542,6 +543,7 @@ if __name__ == "__main__":
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
-        n=100,
-        save_webp=False
+        num_demos=100,
+        save_webp=False,
+        batch_size=10
     )
