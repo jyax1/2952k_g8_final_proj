@@ -27,6 +27,7 @@ from glob import glob
 from einops import rearrange
 from zarr import DirectoryStore, ZipStore
 import shutil
+import math
 
 from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
 from action_extractor.utils.dataset_utils import (
@@ -183,9 +184,126 @@ def find_green_bounding_box(img_array):
     # Return in (x_min, y_min, x_max, y_max) format
     return (x, y, x + w, y + h)
 
+def find_two_largest_nonoverlapping_cyan_bboxes(
+    rgb_image: np.ndarray,
+    lower_cyan: np.ndarray = np.array([80, 40, 50], dtype=np.uint8),
+    upper_cyan: np.ndarray = np.array([100, 255, 255], dtype=np.uint8),
+) -> list:
+    """
+    Finds up to two largest contiguous cyan regions in an RGB image
+    that do not overlap, returning their bounding boxes.
+
+    Args:
+        rgb_image (np.ndarray): Input image in RGB format [H,W,3], dtype=uint8.
+        lower_cyan (np.ndarray): Lower HSV bound for cyan. Default: [80, 40, 50]
+        upper_cyan (np.ndarray): Upper HSV bound for cyan. Default: [100,255,255]
+
+    Returns:
+        bboxes (list): Up to two bounding boxes [x_min, y_min, x_max, y_max]
+                       for the largest non-overlapping cyan regions.
+                       If fewer exist, returns 1 or 0.
+    """
+    # 1) Convert from RGB to HSV
+    hsv_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+
+    # 2) Threshold to get a cyan mask
+    mask = cv2.inRange(hsv_image, lower_cyan, upper_cyan)
+
+    # 3) Optional morphological cleanup
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    # 4) Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+    # The first label=0 is background, so skip it
+    # We'll store tuples (area, [x_min, y_min, x_max, y_max])
+    regions = []
+    for label_id in range(1, num_labels):
+        x, y, w, h, area = stats[label_id]
+        bbox = [x, y, x + w, y + h]  # x_min, y_min, x_max, y_max
+        regions.append((area, bbox))
+
+    # 5) Sort by area descending
+    regions.sort(key=lambda r: r[0], reverse=True)
+
+    # Helper to check overlap
+    def boxes_overlap(b1, b2):
+        """
+        Returns True if two boxes [x1,y1,x2,y2] overlap,
+        otherwise False.
+        """
+        # Unpack
+        x1a, y1a, x2a, y2a = b1
+        x1b, y1b, x2b, y2b = b2
+
+        # Overlap if there's any intersection in both x and y axes
+        # Condition for "no overlap" is:
+        #   x2a < x1b OR x2b < x1a OR y2a < y1b OR y2b < y1a
+        # So overlap is the negation:
+        return not (x2a <= x1b or x2b <= x1a or y2a <= y1b or y2b <= y1a)
+
+    # 6) Pick the largest region for the first bounding box
+    bboxes = []
+    if len(regions) > 0:
+        # The largest bounding box
+        bboxes.append(regions[0][1])  # bounding box of the largest area region
+
+        # 7) Try to find a second one that does not overlap with the first
+        for i in range(1, len(regions)):
+            _, candidate_bbox = regions[i]
+            if not boxes_overlap(bboxes[0], candidate_bbox):
+                # Found a non-overlapping second bounding box
+                bboxes.append(candidate_bbox)
+                break  # We only need two boxes at most
+    
+    bboxes.sort(key=lambda box: box[0])
+
+    return bboxes
+
+
+def bounding_box_center(bbox):
+    """
+    Given a bbox = [x_min, y_min, x_max, y_max],
+    return its center (cx, cy).
+    """
+    x_min, y_min, x_max, y_max = bbox
+    cx = (x_min + x_max) / 2.0
+    cy = (y_min + y_max) / 2.0
+    return cx, cy
+
+def bounding_box_distance(bbox1, bbox2):
+    """
+    Compute the Euclidean distance between the centers of two bounding boxes.
+    """
+    cx1, cy1 = bounding_box_center(bbox1)
+    cx2, cy2 = bounding_box_center(bbox2)
+    return math.hypot(cx2 - cx1, cy2 - cy1)
+
+def measure_finger_boxes_distance(rgb_image):
+    """
+    1) Finds two largest non-overlapping cyan bounding boxes 
+    2) Returns the distance between their centers in pixel space.
+       If fewer than 2 boxes exist, returns None.
+    """
+    finger_bounding_boxes = find_two_largest_nonoverlapping_cyan_bboxes(rgb_image)
+
+    if len(finger_bounding_boxes) < 2:
+        # Not enough boxes to measure distance
+        return None
+
+    bbox1 = finger_bounding_boxes[0]  # [x_min, y_min, x_max, y_max]
+    bbox2 = finger_bounding_boxes[1]
+
+    dist = bounding_box_distance(bbox1, bbox2)
+    return dist
+
+
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
-    mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+    hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+    finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     n=100,
     save_webp=False,
@@ -200,17 +318,17 @@ def imitate_trajectory_with_action_identifier(
     os.makedirs(output_dir, exist_ok=True)
 
     # 1) Build object_dataset from mesh_dir using your new function
-    object_dataset = make_object_dataset_from_folder(Path(mesh_dir))
+    hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
+    finger_object_dataset = make_object_dataset_from_folder(Path(finger_mesh_dir))
 
     # 2) Load the model ONCE
     model_name = "megapose-1.0-RGB-multi-hypothesis"
     from megapose.utils.load_model import NAMED_MODELS, load_named_model
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} once at script start.")
-    pose_estimator = load_named_model(model_name, object_dataset).cuda()
+    hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
     
-    left_finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
-    right_finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
+    finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
 
     # 3) Preprocess dataset if needed (HDF5->Zarr)
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -287,37 +405,6 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
     results = []
 
-    # A function to convert rotation matrix -> quaternion
-    def rotation_matrix_to_quaternion(R):
-        eps = 1e-7
-        trace = R[0,0] + R[1,1] + R[2,2]
-        if trace > 0.0:
-            S = np.sqrt(trace + 1.0) * 2
-            qw = 0.25 * S
-            qx = (R[2,1] - R[1,2]) / S
-            qy = (R[0,2] - R[2,0]) / S
-            qz = (R[1,0] - R[0,1]) / S
-        else:
-            if (R[0,0] > R[1,1]) and (R[0,0] > R[2,2]):
-                S = np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2]) * 2
-                qw = (R[2,1] - R[1,2]) / S
-                qx = 0.25 * S
-                qy = (R[0,1] + R[1,0]) / S
-                qz = (R[0,2] + R[2,0]) / S
-            elif (R[1,1] > R[2,2]):
-                S = np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2]) * 2
-                qw = (R[0,2] - R[2,0]) / S
-                qx = (R[0,1] + R[1,0]) / S
-                qy = 0.25 * S
-                qz = (R[1,2] + R[2,1]) / S
-            else:
-                S = np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1]) * 2
-                qw = (R[1,0] - R[0,1]) / S
-                qx = (R[0,2] + R[2,0]) / S
-                qy = (R[1,2] + R[2,1]) / S
-                qz = 0.25 * S
-        return [qw, qx, qy, qz]
-
     # Loop over demos
     for root in roots:
         demos = list(root["data"].keys())[:n] if n else list(root["data"].keys())
@@ -342,55 +429,124 @@ def imitate_trajectory_with_action_identifier(
                 for frame in lower_left_frames:
                     writer.append_data(frame)
 
-            all_poses_world = []
+            all_hand_poses_world = []
+            all_fingers_distances = []
             for i in tqdm(range(num_samples), desc="Inferring pose for each sample"):
                 # Build the bounding box. For instance, we do
                 # from megapose.datasets.scene_dataset import ObjectData
                 from megapose.datasets.scene_dataset import ObjectData
                 rgb_image = obs_group["frontview_image"][i]
+                
+                def save_np_as_png(array: np.ndarray, filename: str):
+                    from PIL import Image
+                    """
+                    Saves a NumPy array (H x W, or H x W x 3/4) as a PNG image.
+                    - If array is float [0..1], we scale to [0..255] and cast to uint8
+                    - If array is already in uint8 [0..255], we just convert directly
+                    """
+                    # 1) If float, scale to 0..255
+                    if array.dtype in (np.float32, np.float64):
+                        array = (array * 255).clip(0, 255).astype(np.uint8)
+
+                    # 2) Convert to PIL Image
+                    img = Image.fromarray(array)
+
+                    # 3) Save as PNG
+                    img.save(filename)
+                    print(f"Saved array as {filename}")
+                    
+                    exit()
+                    
+                save_np_as_png(rgb_image, "test.png")
 
                 # e.g. we do a naive bounding box [0,0,128,128] or find_green_bounding_box
-                object_data = [ObjectData(label="panda-hand", bbox_modal=find_green_bounding_box(rgb_image))]
-                detections = make_detections_from_object_data(object_data)
+                hand_object_data = [ObjectData(label="panda-hand", bbox_modal=find_green_bounding_box(rgb_image))]
+                hand_detections = make_detections_from_object_data(hand_object_data)
 
                 # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
-                pose_estimates = estimate_pose(
+                hand_pose_estimates = estimate_pose(
                     image_rgb=rgb_image,
                     K=K.astype(np.float32),
-                    detections=detections,
-                    pose_estimator=pose_estimator,
+                    detections=hand_detections,
+                    pose_estimator=hand_pose_estimator,
                     model_info=model_info,
                     depth=None,              # or an actual depth if you have it
                     output_dir=None
                 )
-
+                
+                # finger_bounding_boxes = find_two_largest_nonoverlapping_cyan_bboxes(rgb_image)
+                
+                
+                
+                # finger1_object_data = [ObjectData(label="panda-finger", bbox_modal=finger_bounding_boxes[0])]
+                # finger1_detections = make_detections_from_object_data(finger1_object_data)
+                
+                # finger2_object_data = [ObjectData(label="panda-finger", bbox_modal=finger_bounding_boxes[1])]
+                # finger2_detections = make_detections_from_object_data(finger2_object_data)
+                
+                # finger1_pose_estimates = estimate_pose(
+                #     image_rgb=rgb_image,
+                #     K=K.astype(np.float32),
+                #     detections=finger1_detections,
+                #     pose_estimator=finger_pose_estimator,
+                #     model_info=model_info,
+                #     depth=None,              # or an actual depth if you have it
+                #     output_dir=None
+                # )
+                
+                # finger2_pose_estimates = estimate_pose(
+                #     image_rgb=rgb_image,
+                #     K=K.astype(np.float32),
+                #     detections=finger2_detections,
+                #     pose_estimator=finger_pose_estimator,
+                #     model_info=model_info,
+                #     depth=None,              # or an actual depth if you have it
+                #     output_dir=None
+                # )
+                
+                # finger1_pose = R @ finger1_pose_estimates.poses[0].cpu().numpy()
+                # finger2_pose = R @ finger2_pose_estimates.poses[0].cpu().numpy()
+                # fingers_distance = np.linalg.norm(finger1_pose[:3, 3] - finger2_pose[:3, 3])
+                
+                # all_fingers_distances.append(fingers_distance)
+                
+                # print(fingers_distance)
+                
+                fingers_distance = measure_finger_boxes_distance(rgb_image)
+                all_fingers_distances.append(fingers_distance)
+                print(fingers_distance)
+                
                 # If no detection, shape might be (0,4,4)
-                if pose_estimates.poses.shape[0] < 1:
-                    all_poses_world.append(None)
+                if hand_pose_estimates.poses.shape[0] < 1:
+                    all_hand_poses_world.append(None)
                     continue
 
-                T_cam_obj = pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
+                T_cam_hand = hand_pose_estimates.poses[0].cpu().numpy()  # shape (4,4)
                 
                 # We assume frontview_R is camera->world (or world->camera).
                 T_camera_world = R
-                T_world_obj = T_camera_world @ T_cam_obj
-                all_poses_world.append(T_world_obj)
+                T_world_hand = T_camera_world @ T_cam_hand
+                all_hand_poses_world.append(T_world_hand)
 
             # Compute delta actions
             actions_for_demo = []
             for i in range(num_samples - 1):
-                if (all_poses_world[i] is None) or (all_poses_world[i+1] is None):
+                if (all_hand_poses_world[i] is None) or (all_hand_poses_world[i+1] is None):
                     actions_for_demo.append(np.zeros(7, dtype=np.float32))
                     continue
 
-                pos_i  = all_poses_world[i][:3, 3]   # shape (3,)
-                pos_i1 = all_poses_world[i+1][:3, 3]
+                pos_i  = all_hand_poses_world[i][:3, 3]   # shape (3,)
+                pos_i1 = all_hand_poses_world[i+1][:3, 3]
 
                 # Subtract positions directly in global frame
                 p_delta = 80.0 * (pos_i1 - pos_i)  # a 3D difference vector
+                
+                finger_distance1 = all_fingers_distances[i]
+                finger_distance2 = all_fingers_distances[i+1]
 
                 action = np.zeros(7, dtype=np.float32)
                 action[:3] = p_delta
+                action[-1] = - np.sign(finger_distance2 - finger_distance1)
                 # if you want orientation in last 4
                 # action[3:] = q_delta
                 actions_for_demo.append(action)
@@ -461,8 +617,9 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/test",
-        mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736989038_8197331/test",
+        hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+        finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         n=100,
         save_webp=False
