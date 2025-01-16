@@ -137,130 +137,73 @@ def convert_mp4_to_webp(input_path, output_path, quality=80):
     subprocess.run(cmd, check=True)
     
 
-def find_green_bounding_box(img_array):
+COLOR_RANGES = {
+    "green":   (np.array([50, 150, 50],  dtype=np.uint8), np.array([70, 255, 255], dtype=np.uint8)),
+    "cyan":    (np.array([80, 150, 50],  dtype=np.uint8), np.array([100,255,255],  dtype=np.uint8)),
+    "magenta": (np.array([140, 150, 50], dtype=np.uint8), np.array([170,255,255],  dtype=np.uint8)),
+}
+
+def find_color_bounding_box(
+    rgb_image: np.ndarray,
+    color_name: str = "green",
+    kernel_size: int = 3,
+    erode_iters: int = 1,
+    dilate_iters: int = 1
+) -> tuple:
     """
-    Given an RGB image (H x W x 3) with a green gripper,
-    return a bounding box (x_min, y_min, x_max, y_max) 
-    that encloses the largest green region,
-    using a stricter threshold and morphological cleanup.
+    Finds the largest bounding box for a contiguous region of a specified color
+    (by default, 'green') in an RGB image.
+
+    Args:
+        rgb_image: (H, W, 3) np.uint8 array in [0..255], representing an RGB image.
+        color_name: 'green', 'cyan', or 'magenta' (or any color you have in COLOR_RANGES).
+        kernel_size: size of morphological kernel for noise removal.
+        erode_iters: how many times to erode.
+        dilate_iters: how many times to dilate.
+
+    Returns:
+        bounding box as (x_min, y_min, x_max, y_max) around the largest
+        contiguous blob of that color, or None if no blob is found.
     """
-    # 1. Convert from RGB to HSV
-    hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-    
-    # 2. Define a narrower green color range in HSV
-    #    Adjust these as needed for your specific shade of green.
-    #    (H: 50–70, S: 150–255, V: 50–255 are somewhat "stringent")
-    lower_green = np.array([50, 150, 50], dtype=np.uint8)
-    upper_green = np.array([70, 255, 255], dtype=np.uint8)
-    
-    # 3. Create a mask for pixels within this green range
-    mask = cv2.inRange(hsv, lower_green, upper_green)
-    
-    # 4. Morphological operations to remove small noise
-    #    - Erode and then dilate (opening), or vice versa if needed
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.erode(mask, kernel, iterations=1)
-    mask = cv2.dilate(mask, kernel, iterations=1)
-    
-    # 5. Find connected components (so we can get the largest green blob)
+    # 1) Convert from RGB to HSV
+    hsv = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+
+    # 2) Retrieve the lower & upper HSV bounds for the desired color.
+    #    If color_name not in dict, raise error or handle it somehow
+    if color_name not in COLOR_RANGES:
+        raise ValueError(f"Unknown color '{color_name}'. Choose from {list(COLOR_RANGES.keys())}.")
+
+    lower_hsv, upper_hsv = COLOR_RANGES[color_name]
+
+    # 3) Create a mask for pixels within this HSV range
+    mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
+
+    # 4) Morphological operations to remove small noise
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    mask = cv2.erode(mask, kernel, iterations=erode_iters)
+    mask = cv2.dilate(mask, kernel, iterations=dilate_iters)
+
+    # 5) Find connected components (largest color blob)
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    # stats is an array of shape (num_labels, 5): [label, left, top, width, height, area]
-    # The first row (index 0) is the background label.
+    # stats shape: (num_labels, 5) => [label, left, top, width, height, area]
+    # label=0 is background
 
     if num_labels <= 1:
-        # No green component found
+        # No colored component found
         return None
-    
-    # 6. Identify the largest non-background component by area
-    #    stats[1:, cv2.CC_STAT_AREA] -> area of each labeled component (excluding background)
-    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])  # +1 offset for background row
-    
-    # 7. Extract bounding box of that largest component
+
+    # 6) Identify the largest non-background component by area
+    #    np.argmax(stats[1:, cv2.CC_STAT_AREA]) gives the largest blob among labels [1..]
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+
+    # 7) Extract bounding box of that largest component
     x = stats[largest_label, cv2.CC_STAT_LEFT]
     y = stats[largest_label, cv2.CC_STAT_TOP]
     w = stats[largest_label, cv2.CC_STAT_WIDTH]
     h = stats[largest_label, cv2.CC_STAT_HEIGHT]
-    
-    # Return in (x_min, y_min, x_max, y_max) format
+
+    # Return in (x_min, y_min, x_max, y_max)
     return (x, y, x + w, y + h)
-
-def find_two_largest_nonoverlapping_cyan_bboxes(
-    rgb_image: np.ndarray,
-    lower_cyan: np.ndarray = np.array([80, 40, 50], dtype=np.uint8),
-    upper_cyan: np.ndarray = np.array([100, 255, 255], dtype=np.uint8),
-) -> list:
-    """
-    Finds up to two largest contiguous cyan regions in an RGB image
-    that do not overlap, returning their bounding boxes.
-
-    Args:
-        rgb_image (np.ndarray): Input image in RGB format [H,W,3], dtype=uint8.
-        lower_cyan (np.ndarray): Lower HSV bound for cyan. Default: [80, 40, 50]
-        upper_cyan (np.ndarray): Upper HSV bound for cyan. Default: [100,255,255]
-
-    Returns:
-        bboxes (list): Up to two bounding boxes [x_min, y_min, x_max, y_max]
-                       for the largest non-overlapping cyan regions.
-                       If fewer exist, returns 1 or 0.
-    """
-    # 1) Convert from RGB to HSV
-    hsv_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
-
-    # 2) Threshold to get a cyan mask
-    mask = cv2.inRange(hsv_image, lower_cyan, upper_cyan)
-
-    # 3) Optional morphological cleanup
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-
-    # 4) Find connected components
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-
-    # The first label=0 is background, so skip it
-    # We'll store tuples (area, [x_min, y_min, x_max, y_max])
-    regions = []
-    for label_id in range(1, num_labels):
-        x, y, w, h, area = stats[label_id]
-        bbox = [x, y, x + w, y + h]  # x_min, y_min, x_max, y_max
-        regions.append((area, bbox))
-
-    # 5) Sort by area descending
-    regions.sort(key=lambda r: r[0], reverse=True)
-
-    # Helper to check overlap
-    def boxes_overlap(b1, b2):
-        """
-        Returns True if two boxes [x1,y1,x2,y2] overlap,
-        otherwise False.
-        """
-        # Unpack
-        x1a, y1a, x2a, y2a = b1
-        x1b, y1b, x2b, y2b = b2
-
-        # Overlap if there's any intersection in both x and y axes
-        # Condition for "no overlap" is:
-        #   x2a < x1b OR x2b < x1a OR y2a < y1b OR y2b < y1a
-        # So overlap is the negation:
-        return not (x2a <= x1b or x2b <= x1a or y2a <= y1b or y2b <= y1a)
-
-    # 6) Pick the largest region for the first bounding box
-    bboxes = []
-    if len(regions) > 0:
-        # The largest bounding box
-        bboxes.append(regions[0][1])  # bounding box of the largest area region
-
-        # 7) Try to find a second one that does not overlap with the first
-        for i in range(1, len(regions)):
-            _, candidate_bbox = regions[i]
-            if not boxes_overlap(bboxes[0], candidate_bbox):
-                # Found a non-overlapping second bounding box
-                bboxes.append(candidate_bbox)
-                break  # We only need two boxes at most
-    
-    bboxes.sort(key=lambda box: box[0])
-
-    return bboxes
 
 
 def bounding_box_center(bbox):
@@ -280,24 +223,6 @@ def bounding_box_distance(bbox1, bbox2):
     cx1, cy1 = bounding_box_center(bbox1)
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
-
-def measure_finger_boxes_distance(rgb_image):
-    """
-    1) Finds two largest non-overlapping cyan bounding boxes 
-    2) Returns the distance between their centers in pixel space.
-       If fewer than 2 boxes exist, returns None.
-    """
-    finger_bounding_boxes = find_two_largest_nonoverlapping_cyan_bboxes(rgb_image)
-
-    if len(finger_bounding_boxes) < 2:
-        # Not enough boxes to measure distance
-        return None
-
-    bbox1 = finger_bounding_boxes[0]  # [x_min, y_min, x_max, y_max]
-    bbox2 = finger_bounding_boxes[1]
-
-    dist = bounding_box_distance(bbox1, bbox2)
-    return dist
 
 
 def imitate_trajectory_with_action_identifier(
@@ -456,11 +381,9 @@ def imitate_trajectory_with_action_identifier(
                     print(f"Saved array as {filename}")
                     
                     exit()
-                    
-                save_np_as_png(rgb_image, "test.png")
 
                 # e.g. we do a naive bounding box [0,0,128,128] or find_green_bounding_box
-                hand_object_data = [ObjectData(label="panda-hand", bbox_modal=find_green_bounding_box(rgb_image))]
+                hand_object_data = [ObjectData(label="panda-hand", bbox_modal=find_color_bounding_box(rgb_image, color_name="green"))]
                 hand_detections = make_detections_from_object_data(hand_object_data)
 
                 # Use the new estimate_pose with the pre-loaded pose_estimator + model_info
@@ -474,9 +397,8 @@ def imitate_trajectory_with_action_identifier(
                     output_dir=None
                 )
                 
-                # finger_bounding_boxes = find_two_largest_nonoverlapping_cyan_bboxes(rgb_image)
-                
-                
+                left_finger_bbox = find_color_bounding_box(rgb_image, color_name="cyan")
+                right_finger_bbox = find_color_bounding_box(rgb_image, color_name="magenta")
                 
                 # finger1_object_data = [ObjectData(label="panda-finger", bbox_modal=finger_bounding_boxes[0])]
                 # finger1_detections = make_detections_from_object_data(finger1_object_data)
@@ -512,9 +434,8 @@ def imitate_trajectory_with_action_identifier(
                 
                 # print(fingers_distance)
                 
-                fingers_distance = measure_finger_boxes_distance(rgb_image)
+                fingers_distance = bounding_box_distance(left_finger_bbox, right_finger_bbox)
                 all_fingers_distances.append(fingers_distance)
-                print(fingers_distance)
                 
                 # If no detection, shape might be (0,4,4)
                 if hand_pose_estimates.poses.shape[0] < 1:
