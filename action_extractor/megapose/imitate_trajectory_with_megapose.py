@@ -68,7 +68,10 @@ from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsi
 #####################################################################
 from action_extractor.megapose.action_identifier_megapose import make_object_dataset_from_folder
 
-def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_left_video_path, bottom_right_video_path, output_path):
+def combine_videos_quadrants(top_left_video_path, top_right_video_path, 
+                           bottom_left_video_path, bottom_right_video_path, 
+                           output_path):
+    """Combines four videos into a single quadrant layout video."""
     import imageio
 
     top_left_reader = imageio.get_reader(top_left_video_path)
@@ -103,6 +106,7 @@ def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_l
 
 
 def quaternion_to_rotation_matrix(q):
+    """Converts quaternion [w,x,y,z] to 3x3 rotation matrix."""
     w, x, y, z = q
     return np.array([
         [1 - 2*(y**2 + z**2),     2*(x*y - z*w),         2*(x*z + y*w)],
@@ -112,6 +116,7 @@ def quaternion_to_rotation_matrix(q):
 
 
 def pose_vector_to_matrix(translation, quaternion):
+    """Combines translation vector and quaternion into 4x4 transformation matrix."""
     T = np.eye(4, dtype=np.float32)
     T[:3, :3] = quaternion_to_rotation_matrix(quaternion)
     T[:3, 3]  = translation
@@ -119,6 +124,7 @@ def pose_vector_to_matrix(translation, quaternion):
 
 
 def convert_mp4_to_webp(input_path, output_path, quality=80):
+    """Converts MP4 video to WebP format using ffmpeg."""
     import subprocess
     import shutil
     
