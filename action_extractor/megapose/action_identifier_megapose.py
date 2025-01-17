@@ -7,6 +7,12 @@ import numpy as np
 import torch
 import pandas as pd
 
+import math
+
+import cv2
+
+from typing import List, Optional
+
 from megapose.utils.tensor_collection import PandasTensorCollection
 
 from megapose.datasets.object_dataset import RigidObject, RigidObjectDataset
@@ -236,6 +242,252 @@ def estimate_pose_batched(
             results_per_image[i] = subset
 
     return results_per_image
+
+COLOR_RANGES = {
+    "green":   (np.array([50, 150, 50],  dtype=np.uint8), np.array([70, 255, 255], dtype=np.uint8)),
+    "cyan":    (np.array([80, 150, 50],  dtype=np.uint8), np.array([100,255,255],  dtype=np.uint8)),
+    "magenta": (np.array([140, 150, 50], dtype=np.uint8), np.array([170,255,255],  dtype=np.uint8)),
+}
+
+def find_color_bounding_box(
+    rgb_image: np.ndarray,
+    color_name: str = "green",
+    kernel_size: int = 3,
+    erode_iters: int = 1,
+    dilate_iters: int = 1
+) -> tuple:
+    """
+    Finds the largest bounding box for a contiguous region of a specified color
+    (by default, 'green') in an RGB image.
+
+    Args:
+        rgb_image: (H, W, 3) np.uint8 array in [0..255], representing an RGB image.
+        color_name: 'green', 'cyan', or 'magenta' (or any color you have in COLOR_RANGES).
+        kernel_size: size of morphological kernel for noise removal.
+        erode_iters: how many times to erode.
+        dilate_iters: how many times to dilate.
+
+    Returns:
+        bounding box as (x_min, y_min, x_max, y_max) around the largest
+        contiguous blob of that color, or None if no blob is found.
+    """
+    # 1) Convert from RGB to HSV
+    hsv = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+
+    # 2) Retrieve the lower & upper HSV bounds for the desired color.
+    #    If color_name not in dict, raise error or handle it somehow
+    if color_name not in COLOR_RANGES:
+        raise ValueError(f"Unknown color '{color_name}'. Choose from {list(COLOR_RANGES.keys())}.")
+
+    lower_hsv, upper_hsv = COLOR_RANGES[color_name]
+
+    # 3) Create a mask for pixels within this HSV range
+    mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
+
+    # 4) Morphological operations to remove small noise
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    mask = cv2.erode(mask, kernel, iterations=erode_iters)
+    mask = cv2.dilate(mask, kernel, iterations=dilate_iters)
+
+    # 5) Find connected components (largest color blob)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # stats shape: (num_labels, 5) => [label, left, top, width, height, area]
+    # label=0 is background
+
+    if num_labels <= 1:
+        # No colored component found
+        return None
+
+    # 6) Identify the largest non-background component by area
+    #    np.argmax(stats[1:, cv2.CC_STAT_AREA]) gives the largest blob among labels [1..]
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+
+    # 7) Extract bounding box of that largest component
+    x = stats[largest_label, cv2.CC_STAT_LEFT]
+    y = stats[largest_label, cv2.CC_STAT_TOP]
+    w = stats[largest_label, cv2.CC_STAT_WIDTH]
+    h = stats[largest_label, cv2.CC_STAT_HEIGHT]
+
+    # Return in (x_min, y_min, x_max, y_max)
+    return (x, y, x + w, y + h)
+
+
+def bounding_box_center(bbox):
+    """
+    Given a bbox = [x_min, y_min, x_max, y_max],
+    return its center (cx, cy).
+    """
+    x_min, y_min, x_max, y_max = bbox
+    cx = (x_min + x_max) / 2.0
+    cy = (y_min + y_max) / 2.0
+    return cx, cy
+
+def bounding_box_distance(bbox1, bbox2):
+    """
+    Compute the Euclidean distance between the centers of two bounding boxes.
+    """
+    cx1, cy1 = bounding_box_center(bbox1)
+    cx2, cy2 = bounding_box_center(bbox2)
+    return math.hypot(cx2 - cx1, cy2 - cy1)
+
+class ActionIdentifierMegapose:
+    """
+    A drop-in class to replicate exactly the 'chunked' frame processing logic from your script:
+    1) For each chunk of frames, we find bounding boxes for the 'panda-hand' color (green).
+    2) We call estimate_pose_batched(...) to get PoseEstimatesType for each frame in that chunk.
+    3) We also measure finger distances by scanning for 'cyan' and 'magenta' bounding boxes.
+    4) We combine results into all_hand_poses_world, all_fingers_distances.
+    5) We optionally compute the final (n-1) actions with compute_actions(...).
+    """
+
+    def __init__(
+        self,
+        pose_estimator,
+        R: np.ndarray,         # extrinsics from get_camera_extrinsic_matrix
+        K: np.ndarray,         # intrinsics from get_camera_intrinsic_matrix
+        model_info: dict,      # from NAMED_MODELS[model_name]
+        batch_size: int = 40,
+        scale_translation: float = 80.0,
+    ):
+        """
+        :param pose_estimator: The PoseEstimator for 'panda-hand' (already loaded).
+        :param R: A 4×4 (or 3×4) matrix from get_camera_extrinsic_matrix(...).
+                  Must be expanded to 4×4 if only 3×3 is available.
+        :param K: (3×3) intrinsics.
+        :param model_info: dict with "inference_parameters" etc.
+        :param batch_size: how many frames to process at once in estimate_pose_batched.
+        :param scale_translation: multiplier for global translation deltas (80).
+        """
+        self.pose_estimator = pose_estimator
+        self.model_info = model_info
+        self.batch_size = batch_size
+        self.scale_translation = scale_translation
+
+        # Ensure R is at least 4×4 if user gave 3×3 or 3×4
+        if R.shape == (4, 4):
+            self.R = R
+        else:
+            # minimal fix if the user only provided a rotation or 3×4
+            R_4x4 = np.eye(4, dtype=np.float32)
+            R_4x4[:R.shape[0], :R.shape[1]] = R
+            self.R = R_4x4
+
+        self.K = K
+
+    def get_all_hand_poses_finger_distances(
+        self,
+        frames_list: list[np.ndarray],
+    ) -> tuple[list[Optional[np.ndarray]], list[float]]:
+        """
+        Given a list of frames (each shape [H,W,3] in np.uint8),
+        replicates your script logic to:
+
+          1) chunk the frames in 'batch_size' steps,
+          2) find bounding boxes for 'green' (the hand),
+          3) call estimate_pose_batched for them,
+          4) measure finger distances (cyan vs magenta bounding boxes),
+          5) transform camera->object to world->object using R,
+          6) Return:
+               all_hand_poses_world : a list of length n, each an np.ndarray(4,4) or None
+               all_fingers_distances: same length n, each a float with finger distance
+        """
+        num_frames = len(frames_list)
+        all_hand_poses_world = [None] * num_frames
+        all_fingers_distances = [0.0] * num_frames
+
+        # Process in chunks
+        for chunk_start in range(0, num_frames, self.batch_size):
+            chunk_end = min(chunk_start + self.batch_size, num_frames)
+            images_chunk = []
+            bboxes_chunk = []
+
+            # Gather bounding boxes for 'panda-hand' (green)
+            for idx in range(chunk_start, chunk_end):
+                img = frames_list[idx]
+                box_hand = find_color_bounding_box(img, color_name="green")
+                if box_hand is not None:
+                    # instance_id=0 for single object
+                    bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
+                else:
+                    bboxes_chunk.append([])
+                images_chunk.append(img)
+
+            # Batched pose estimation for chunk
+            chunk_results = estimate_pose_batched(
+                list_of_images=images_chunk,
+                list_of_bboxes=bboxes_chunk,
+                K=self.K,
+                pose_estimator=self.pose_estimator,
+                model_info=self.model_info,
+                depth_list=None
+            )
+
+            # measure finger distances (cyan vs magenta)
+            finger_dist_chunk = []
+            for idx in range(chunk_start, chunk_end):
+                img = frames_list[idx]
+                bbox_cyan = find_color_bounding_box(img, color_name="cyan")
+                bbox_magenta = find_color_bounding_box(img, color_name="magenta")
+                d = 0.0
+                # If bounding boxes are None => bounding_box_distance would fail
+                if (bbox_cyan is not None) and (bbox_magenta is not None):
+                    d = bounding_box_distance(bbox_cyan, bbox_magenta)
+                finger_dist_chunk.append(d)
+
+            # store
+            for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
+                pose_est_for_frame = chunk_results[offset]
+                all_fingers_distances[global_idx] = finger_dist_chunk[offset]
+                if len(pose_est_for_frame) < 1:
+                    # no detection => None
+                    all_hand_poses_world[global_idx] = None
+                else:
+                    # get the first detection
+                    T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
+                    T_world_obj = self.R @ T_cam_obj
+                    all_hand_poses_world[global_idx] = T_world_obj
+
+        return all_hand_poses_world, all_fingers_distances
+
+    def compute_actions(
+        self,
+        all_hand_poses_world: list[Optional[np.ndarray]],
+        all_fingers_distances: list[float],
+    ) -> list[np.ndarray]:
+        """
+        Replicates your script's logic to produce (n-1) actions in shape (7,).
+        For each i from 0..(n-2):
+          - If either frame i or i+1 is None => action=0
+          - else => delta position * scale_translation, plus a sign-based 'gripper' coordinate in last dim
+        Returns a list of length (n-1) with each action of shape (7,).
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        actions = []
+        for i in range(num_frames - 1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i + 1]
+            if (pose_i is None) or (pose_i1 is None):
+                actions.append(np.zeros(7, dtype=np.float32))
+                continue
+
+            pos_i  = pose_i[:3, 3]
+            pos_i1 = pose_i1[:3, 3]
+            dp = self.scale_translation * (pos_i1 - pos_i)
+
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i + 1]
+
+            action = np.zeros(7, dtype=np.float32)
+            action[:3] = dp
+            # replicate your 'action[-1] = -np.sign(...)' logic
+            action[-1] = -np.sign(finger_distance2 - finger_distance1)
+            actions.append(action)
+
+        return actions
+
 
 
 # -----------------------------------------------------------------------------

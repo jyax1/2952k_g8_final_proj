@@ -48,6 +48,16 @@ from pathlib import Path
 from megapose.utils.logging import get_logger
 logger = get_logger(__name__)
 
+from megapose.utils.load_model import NAMED_MODELS, load_named_model
+from action_extractor.utils.dataset_utils import (
+    hdf5_to_zarr_parallel_with_progress,
+    directorystore_to_zarr_zip,
+)
+
+from action_extractor.megapose.action_identifier_megapose import (
+    make_object_dataset_from_folder,
+)
+
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
 
 #####################################################################
@@ -56,11 +66,7 @@ from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsi
 # our pre-loaded model to it so it doesn't re-load. We'll define 
 # a small wrapper or local approach for that.
 #####################################################################
-from action_extractor.megapose.action_identifier_megapose import (
-    make_detections_from_object_data,
-    make_object_dataset_from_folder,
-    estimate_pose_batched
-)
+from action_extractor.megapose.action_identifier_megapose import make_object_dataset_from_folder
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, bottom_left_video_path, bottom_right_video_path, output_path):
     import imageio
@@ -238,43 +244,59 @@ def imitate_trajectory_with_action_identifier(
     """
     - Only loads the Megapose model once (caching).
     - Suppresses Panda3D logging noise.
-    - Uses (1,4,4) SE(3) from pose_estimates.poses, but via the new `estimate_pose`.
-    - Also uses a simpler video codec (libx264rgb).
+    - Uses the ActionIdentifierMegapose class to infer (n-1) actions from a sequence of frames,
+      preserving exactly the same final logic (rolled-out environment, quadrant videos, etc.).
     """
+
+    # ----------------------------------------------------------------
+    # 0) Prepare output directory
+    # ----------------------------------------------------------------
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1) Build object_dataset from mesh_dir using your new function
+    # ----------------------------------------------------------------
+    # 1) Build object_dataset from mesh_dir
+    # ----------------------------------------------------------------
     hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
-    finger_object_dataset = make_object_dataset_from_folder(Path(finger_mesh_dir))
 
-    # 2) Load the model ONCE
+    # ----------------------------------------------------------------
+    # 2) Load the model once
+    # ----------------------------------------------------------------
     model_name = "megapose-1.0-RGB-multi-hypothesis"
-    from megapose.utils.load_model import NAMED_MODELS, load_named_model
     model_info = NAMED_MODELS[model_name]
-    logger.info(f"Loading model {model_name} once at script start.")
-    hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
-    
-    finger_pose_estimator = load_named_model(model_name, finger_object_dataset).cuda()
 
-    # 3) Preprocess dataset if needed (HDF5->Zarr)
+    from megapose.utils.logging import get_logger
+    logger = get_logger(__name__)
+    logger.info(f"Loading model {model_name} once at script start.")
+
+    hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
+    # In your old code, you also loaded finger_pose_estimator but you are only
+    # using bounding boxes for fingers. That’s unchanged if you wish.
+
+    # ----------------------------------------------------------------
+    # 3) Preprocess dataset if needed (HDF5 -> Zarr)
+    # ----------------------------------------------------------------
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
-        ds_dir = seq_dir.replace('.hdf5', '.zarr')
-        zarr_path = seq_dir.replace('.hdf5', '.zarr.zip')
+        ds_dir = seq_dir.replace(".hdf5", ".zarr")
+        zarr_path = seq_dir.replace(".hdf5", ".zarr.zip")
         if not os.path.exists(zarr_path):
             hdf5_to_zarr_parallel_with_progress(seq_dir)
             store = DirectoryStore(ds_dir)
-            root = zarr.group(store, overwrite=False)
+            root_z = zarr.group(store, overwrite=False)
             store.close()
             directorystore_to_zarr_zip(ds_dir, zarr_path)
             shutil.rmtree(ds_dir)
 
+    # ----------------------------------------------------------------
     # 4) Collect the Zarr files
+    # ----------------------------------------------------------------
     zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
-    stores = [ZipStore(zarr_file, mode='r') for zarr_file in zarr_files]
+    stores = [ZipStore(zarr_file, mode="r") for zarr_file in zarr_files]
     roots = [zarr.group(store) for store in stores]
 
-    # 5) Initialize environment 
+    # ----------------------------------------------------------------
+    # 5) Initialize environment
+    # ----------------------------------------------------------------
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
@@ -286,54 +308,84 @@ def imitate_trajectory_with_action_identifier(
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create envs
+    # Create environment for camera0
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
-    
-    
-    example_image = roots[0]["data"]['demo_0']["obs"]["frontview_image"][0]
+
+    # Grab an example image to figure out camera shape
+    example_image = roots[0]["data"]["demo_0"]["obs"]["frontview_image"][0]
     camera_height, camera_width = example_image.shape[:2]
 
-    # Now call robosuite functions:
-    K = get_camera_intrinsic_matrix(env_camera0.env.sim, camera_name="frontview",
-                                    camera_height=camera_height, camera_width=camera_width)
-    R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
-    
+    # Intrinsics, extrinsics from your script
+    K = get_camera_intrinsic_matrix(
+        env_camera0.env.sim,
+        camera_name="frontview",
+        camera_height=camera_height,
+        camera_width=camera_width,
+    )
+    R_4x4 = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
+
+    # Wrap environment with video
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='h264',  
-            input_pix_fmt='rgb24',
+            codec="h264",
+            input_pix_fmt="rgb24",
             crf=22,
-            thread_type='FRAME',
+            thread_type="FRAME",
             thread_count=1,
         ),
-        steps_per_render=1, width=camera_width, height=camera_height,
-        mode='rgb_array', camera_name=cameras[0].split('_')[0]
+        steps_per_render=1,
+        width=camera_width,
+        height=camera_height,
+        mode="rgb_array",
+        camera_name=cameras[0].split("_")[0],
     )
 
+    # Create environment for camera1
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
         env_camera1,
         video_recoder=VideoRecorder.create_h264(
             fps=20,
-            codec='h264',
-            input_pix_fmt='rgb24',
+            codec="h264",
+            input_pix_fmt="rgb24",
             crf=22,
-            thread_type='FRAME',
-            thread_count=1
+            thread_type="FRAME",
+            thread_count=1,
         ),
-        steps_per_render=1, width=camera_width, height=camera_height,
-        mode='rgb_array', camera_name=cameras[1].split('_')[0]
+        steps_per_render=1,
+        width=camera_width,
+        height=camera_height,
+        mode="rgb_array",
+        camera_name=cameras[1].split("_")[0],
+    )
+
+    # ----------------------------------------------------------------
+    # 6) Build the ActionIdentifierMegapose
+    # ----------------------------------------------------------------
+    # This will replicate the chunk-based approach in a simpler method call.
+    from action_extractor.megapose.action_identifier_megapose import ActionIdentifierMegapose
+
+    action_identifier = ActionIdentifierMegapose(
+        pose_estimator=hand_pose_estimator,
+        R=R_4x4,  # from get_camera_extrinsic_matrix
+        K=K,      # from get_camera_intrinsic_matrix
+        model_info=model_info,
+        batch_size=batch_size,   # chunk size
+        scale_translation=80.0,  # same 80 factor
     )
 
     n_success = 0
     total_n = 0
     results = []
 
-    # Loop over demos
-    for root in roots:
-        demos = list(root["data"].keys())[:num_demos] if num_demos else list(root["data"].keys())
+    # ----------------------------------------------------------------
+    # 7) Main loop over demos
+    # ----------------------------------------------------------------
+    for root_z in roots:
+        demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -342,10 +394,12 @@ def imitate_trajectory_with_action_identifier(
             lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
             combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
-            obs_group = root["data"][demo]["obs"]
+            obs_group = root_z["data"][demo]["obs"]
             num_samples = obs_group["frontview_image"].shape[0]
 
-            # Save the left videos
+            # ------------------------------
+            # Build the "left" videos
+            # ------------------------------
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
             lower_left_frames = [obs_group["sideview_image"][i]   for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
@@ -355,110 +409,41 @@ def imitate_trajectory_with_action_identifier(
                 for frame in lower_left_frames:
                     writer.append_data(frame)
 
-            # We'll store the final global pose for each frame
-            all_hand_poses_world = [None]*num_samples
-            all_fingers_distances = [0.0]*num_samples
+            # ------------------------------
+            # Use the new class to get poses + distances, then compute actions
+            # ------------------------------
+            frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
 
-            # We'll chunk frames by batch_size
-            for chunk_start in tqdm(range(0, num_samples, batch_size), desc=f"Processing frames in {demo}"):
-                chunk_end = min(chunk_start + batch_size, num_samples)
+            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(frames_list)
+            actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances)
 
-                #  gather images + bounding boxes for this chunk
-                images_chunk = []
-                bboxes_chunk = []
-                for i in range(chunk_start, chunk_end):
-                    rgb_image = obs_group["frontview_image"][i]
-                    
-                    # bounding box for "panda-hand"
-                    box_hand = find_color_bounding_box(rgb_image, color_name="green")
-                    # if None => no bounding box, so pass empty list
-                    if box_hand is not None:
-                        bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
-                    else:
-                        bboxes_chunk.append([])
-                    
-                    images_chunk.append(rgb_image)
+            # ------------------------------
+            # Roll out environment with these actions
+            # ------------------------------
+            initial_state = root_z["data"][demo]["states"][0]
 
-                # run batched hand pose estimation
-                chunk_hand_results = estimate_pose_batched(
-                    list_of_images=images_chunk,
-                    list_of_bboxes=bboxes_chunk,
-                    K=K,
-                    pose_estimator=hand_pose_estimator,
-                    model_info=model_info,
-                    depth_list=None
-                )
-
-                # also do finger bounding boxes + distances if needed
-                # We'll do a single pass for the finger distance:
-                finger_dist_chunk = []
-                for i in range(chunk_start, chunk_end):
-                    rgb_image = obs_group["frontview_image"][i]
-                    left_finger_bbox = find_color_bounding_box(rgb_image, color_name="cyan")
-                    right_finger_bbox = find_color_bounding_box(rgb_image, color_name="magenta")
-                    d = bounding_box_distance(left_finger_bbox, right_finger_bbox)
-                    finger_dist_chunk.append(d)
-
-                # store results
-                for offset, i in enumerate(range(chunk_start, chunk_end)):
-                    # chunk_hand_results[offset] is a PoseEstimatesType
-                    pose_est_for_frame = chunk_hand_results[offset]
-                    all_fingers_distances[i] = finger_dist_chunk[offset]
-                    if len(pose_est_for_frame) < 1:
-                        # no detection
-                        all_hand_poses_world[i] = None
-                    else:
-                        T_cam_hand = pose_est_for_frame.poses[0].cpu().numpy()
-                        # transform to world
-                        T_world_hand = R @ T_cam_hand
-                        all_hand_poses_world[i] = T_world_hand
-
-            # Now we have all_hand_poses_world + all_fingers_distances
-            # => compute actions
-            actions_for_demo = []
-            for i in range(num_samples - 1):
-                if (all_hand_poses_world[i] is None) or (all_hand_poses_world[i+1] is None):
-                    actions_for_demo.append(np.zeros(7, dtype=np.float32))
-                    continue
-                
-                pos_i  = all_hand_poses_world[i][:3, 3]
-                pos_i1 = all_hand_poses_world[i+1][:3, 3]
-                dp = 80.0 * (pos_i1 - pos_i)
-                
-                finger_distance1 = all_fingers_distances[i]
-                finger_distance2 = all_fingers_distances[i+1]
-                
-                action = np.zeros(7, dtype=np.float32)
-                action[:3] = dp
-                action[-1] = -np.sign(finger_distance2 - finger_distance1)
-                actions_for_demo.append(action)
-
-            # Roll out environment
-            initial_state = root["data"][demo]["states"][0]
+            # Right top video
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
-
             for act in actions_for_demo:
                 env_camera0.step(act)
-
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
 
+            # Right bottom video
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
             env_camera1.file_path = lower_right_video_path
             env_camera1.step_count = 0
-
             for act in actions_for_demo:
                 env_camera1.step(act)
-
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
 
             # success check
-            success = env_camera0.is_success()['task'] and env_camera1.is_success()['task']
+            success = env_camera0.is_success()["task"] and env_camera1.is_success()["task"]
             if success:
                 n_success += 1
             total_n += 1
@@ -477,18 +462,24 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
-    # final
+    # ----------------------------------------------------------------
+    # 8) Final summary
+    # ----------------------------------------------------------------
     success_rate = (n_success / total_n) * 100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
+
     with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
         f.write("\n".join(results))
 
-    # optionally convert mp4->webp
+    # ----------------------------------------------------------------
+    # 9) Optionally convert MP4 => WEBP
+    # ----------------------------------------------------------------
     if save_webp:
         print("Converting videos to webp format...")
+        from glob import glob
         mp4_files = glob(os.path.join(output_dir, "*.mp4"))
         for mp4_file in tqdm(mp4_files, desc="Converting to webp"):
-            webp_file = mp4_file.replace('.mp4', '.webp')
+            webp_file = mp4_file.replace(".mp4", ".webp")
             try:
                 convert_mp4_to_webp(mp4_file, webp_file)
                 os.remove(mp4_file)
