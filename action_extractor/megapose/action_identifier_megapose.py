@@ -31,26 +31,17 @@ logger = get_logger(__name__)
 # -----------------------------------------------------------------------------
 
 def make_object_dataset_from_folder(mesh_dir: Path) -> RigidObjectDataset:
-    """
-    Creates a RigidObjectDataset by scanning `mesh_dir`
-    for .obj or .ply mesh files.
-    
-    If there's only one mesh (panda_hand_new.ply), we give it label="panda-hand".
-    If there are multiple meshes, you can generate unique labels per file name.
-    """
+    """Creates a RigidObjectDataset by scanning mesh_dir for .obj or .ply mesh files."""
     rigid_objects = []
     mesh_units = "mm"
 
-    # Suppose you only have 1 or very few files in mesh_dir. 
-    # We will create a label from the filename stem or a fixed label.
     for fn in mesh_dir.glob("*"):
         if fn.suffix in {".obj", ".ply"}:
-            label = fn.stem  # e.g. "panda_hand_new"
-            # or just hardcode label="panda-hand" if you prefer
+            label = fn.stem  
             rigid_objects.append(
                 RigidObject(
                     label=label,
-                    mesh_path=fn,
+                    mesh_path=fn, 
                     mesh_units=mesh_units,
                 )
             )
@@ -65,13 +56,8 @@ def make_object_dataset_from_folder(mesh_dir: Path) -> RigidObjectDataset:
 # (Optional) Save predictions if needed
 # -----------------------------------------------------------------------------
 
-def save_predictions(
-    output_dir: Path,
-    pose_estimates: PoseEstimatesType,
-) -> None:
-    """
-    Saves the pose_estimates as an object_data.json in `output_dir / outputs`.
-    """
+def save_predictions(output_dir: Path, pose_estimates: PoseEstimatesType) -> None:
+    """Saves pose estimates as JSON in output_dir/outputs/object_data.json"""
     from megapose.datasets.scene_dataset import ObjectData
     labels = pose_estimates.infos["label"]
     poses = pose_estimates.poses.cpu().numpy()
@@ -80,7 +66,7 @@ def save_predictions(
     ]
     object_data_json = json.dumps([x.to_json() for x in object_data])
     output_fn = output_dir / "outputs" / "object_data.json"
-    output_fn.parent.mkdir(exist_ok=True)
+    output_fn.parent.mkdir(exist_ok=True) 
     output_fn.write_text(object_data_json)
     logger.info(f"Wrote predictions: {output_fn}")
 
@@ -89,65 +75,25 @@ def save_predictions(
 # Inference function that accepts in-memory image, K, detections, etc.
 # -----------------------------------------------------------------------------
 
-def estimate_pose(
-    image_rgb: np.ndarray,          # shape (H, W, 3), uint8
-    K: np.ndarray,                  # shape (3, 3) camera intrinsics
-    detections: DetectionsType,     # bounding boxes + labels, etc.
-    pose_estimator: PoseEstimator,
-    model_info: dict,
-    depth: Optional[np.ndarray] = None,   # shape (H, W) or None
-    output_dir: Optional[Path] = None,    # if you want to save predictions
-) -> PoseEstimatesType:
-    """
-    Runs the pose estimation pipeline on a single image + intrinsics + detections,
-    without reading from any 'example_dir'.
-    """
-    # 1) Construct an ObservationTensor
-    observation = ObservationTensor.from_numpy(
-        image_rgb,  # (H, W, 3)
-        depth,      # (H, W) or None
-        K           # (3, 3)
-    ).cuda()  # Move to GPU
-
-    # 2) Load the named model
-    # Done outside this function
-
-    # 3) Run inference
+def estimate_pose(image_rgb: np.ndarray, K: np.ndarray, detections: DetectionsType, 
+                 pose_estimator: PoseEstimator, model_info: dict,
+                 depth: Optional[np.ndarray] = None, 
+                 output_dir: Optional[Path] = None) -> PoseEstimatesType:
+    """Runs pose estimation on a single image with detections."""
+    observation = ObservationTensor.from_numpy(image_rgb, depth, K).cuda()
     output, _ = pose_estimator.run_inference_pipeline(
         observation,
         detections=detections.cuda(),
         **model_info["inference_parameters"],
     )
-
-    # 4) Optionally save predictions
     if output_dir is not None:
         save_predictions(output_dir, output)
-
     return output
 
-def estimate_pose_batched(
-    list_of_images: list[np.ndarray],     # each image is (H,W,3) in np.uint8
-    list_of_bboxes: list[list[dict]],     # bounding boxes per image
-    K: np.ndarray,                        # shape (3,3) camera intrinsics, same for all frames
-    pose_estimator: PoseEstimator,                       # A loaded PoseEstimator (hand_pose_estimator or finger_pose_estimator)
-    model_info: dict,
-    depth_list: list[np.ndarray] = None,  # optional depth images, each is (H,W) float
-) -> list[PoseEstimatesType]:
-    """
-    Runs batched pose estimation on multiple images in a single forward pass.
-    
-    :param list_of_images: list of (H,W,3) images (np.uint8) 
-    :param list_of_bboxes: for each image i, a list of dicts specifying bounding boxes:
-                           e.g. list_of_bboxes[i] = [
-                             {"label": "panda-hand", "bbox": [x1,y1,x2,y2], "instance_id": 0}, 
-                             ...
-                           ]
-    :param K: (3,3) intrinsics
-    :param pose_estimator: PoseEstimator instance
-    :param model_info: dict of inference_parameters
-    :param depth_list: optional list of (H,W) float depth maps, length = len(list_of_images)
-    :return: A list of PoseEstimatesType, one for each image.
-    """
+def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list[list[dict]],
+                         K: np.ndarray, pose_estimator: PoseEstimator, model_info: dict,
+                         depth_list: list[np.ndarray] = None) -> list[PoseEstimatesType]:
+    """Runs pose estimation on multiple images in a single forward pass."""
     assert len(list_of_images) == len(list_of_bboxes), (
         "list_of_images and list_of_bboxes must have same length"
     )
@@ -249,28 +195,10 @@ COLOR_RANGES = {
     "magenta": (np.array([140, 150, 50], dtype=np.uint8), np.array([170,255,255],  dtype=np.uint8)),
 }
 
-def find_color_bounding_box(
-    rgb_image: np.ndarray,
-    color_name: str = "green",
-    kernel_size: int = 3,
-    erode_iters: int = 1,
-    dilate_iters: int = 1
-) -> tuple:
-    """
-    Finds the largest bounding box for a contiguous region of a specified color
-    (by default, 'green') in an RGB image.
-
-    Args:
-        rgb_image: (H, W, 3) np.uint8 array in [0..255], representing an RGB image.
-        color_name: 'green', 'cyan', or 'magenta' (or any color you have in COLOR_RANGES).
-        kernel_size: size of morphological kernel for noise removal.
-        erode_iters: how many times to erode.
-        dilate_iters: how many times to dilate.
-
-    Returns:
-        bounding box as (x_min, y_min, x_max, y_max) around the largest
-        contiguous blob of that color, or None if no blob is found.
-    """
+def find_color_bounding_box(rgb_image: np.ndarray, color_name: str = "green",
+                          kernel_size: int = 3, erode_iters: int = 1,
+                          dilate_iters: int = 1) -> tuple:
+    """Finds largest bounding box for a specified color region in an RGB image."""
     # 1) Convert from RGB to HSV
     hsv = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
 
@@ -313,24 +241,18 @@ def find_color_bounding_box(
 
 
 def bounding_box_center(bbox):
-    """
-    Given a bbox = [x_min, y_min, x_max, y_max],
-    return its center (cx, cy).
-    """
+    """Calculates center point of a bounding box."""
     x_min, y_min, x_max, y_max = bbox
-    cx = (x_min + x_max) / 2.0
-    cy = (y_min + y_max) / 2.0
-    return cx, cy
+    return (x_min + x_max) / 2.0, (y_min + y_max) / 2.0
 
 def bounding_box_distance(bbox1, bbox2):
-    """
-    Compute the Euclidean distance between the centers of two bounding boxes.
-    """
+    """Computes Euclidean distance between centers of two bounding boxes."""
     cx1, cy1 = bounding_box_center(bbox1)
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
 class ActionIdentifierMegapose:
+    """Processes video frames to extract hand poses and finger distances."""
     """
     A drop-in class to replicate exactly the 'chunked' frame processing logic from your script:
     1) For each chunk of frames, we find bounding boxes for the 'panda-hand' color (green).
@@ -495,6 +417,7 @@ class ActionIdentifierMegapose:
 # -----------------------------------------------------------------------------
 
 def main():
+    """Demo showing basic usage of pose estimation pipeline."""
     """
     Example usage:
       python refactored_inference.py
