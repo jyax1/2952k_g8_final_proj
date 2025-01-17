@@ -252,15 +252,7 @@ def bounding_box_distance(bbox1, bbox2):
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
 class ActionIdentifierMegapose:
-    """Processes video frames to extract hand poses and finger distances."""
-    """
-    A drop-in class to replicate exactly the 'chunked' frame processing logic from your script:
-    1) For each chunk of frames, we find bounding boxes for the 'panda-hand' color (green).
-    2) We call estimate_pose_batched(...) to get PoseEstimatesType for each frame in that chunk.
-    3) We also measure finger distances by scanning for 'cyan' and 'magenta' bounding boxes.
-    4) We combine results into all_hand_poses_world, all_fingers_distances.
-    5) We optionally compute the final (n-1) actions with compute_actions(...).
-    """
+    """Processes video frames (optionally with depth) to extract hand poses and finger distances."""
 
     def __init__(
         self,
@@ -299,19 +291,23 @@ class ActionIdentifierMegapose:
     def get_all_hand_poses_finger_distances(
         self,
         frames_list: list[np.ndarray],
+        depth_list: Optional[list[np.ndarray]] = None,
     ) -> tuple[list[Optional[np.ndarray]], list[float]]:
         """
-        Given a list of frames (each shape [H,W,3] in np.uint8),
-        replicates your script logic to:
+        Given a list of frames (each shape [H,W,3] in np.uint8) and optionally a matching
+        list of depth images (each shape [H,W]), replicates your script logic to:
 
-          1) chunk the frames in 'batch_size' steps,
+          1) chunk the frames (and depth) in 'batch_size' steps,
           2) find bounding boxes for 'green' (the hand),
           3) call estimate_pose_batched for them,
-          4) measure finger distances (cyan vs magenta bounding boxes),
+          4) measure finger distances (cyan vs magenta),
           5) transform camera->object to world->object using R,
           6) Return:
                all_hand_poses_world : a list of length n, each an np.ndarray(4,4) or None
                all_fingers_distances: same length n, each a float with finger distance
+
+        :param frames_list: List of RGB frames, each shape (H,W,3).
+        :param depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
         """
         num_frames = len(frames_list)
         all_hand_poses_world = [None] * num_frames
@@ -322,6 +318,11 @@ class ActionIdentifierMegapose:
             chunk_end = min(chunk_start + self.batch_size, num_frames)
             images_chunk = []
             bboxes_chunk = []
+            depth_chunk = None
+
+            if depth_list is not None:
+                # Slice the depth frames for this batch
+                depth_chunk = depth_list[chunk_start:chunk_end]
 
             # Gather bounding boxes for 'panda-hand' (green)
             for idx in range(chunk_start, chunk_end):
@@ -334,14 +335,14 @@ class ActionIdentifierMegapose:
                     bboxes_chunk.append([])
                 images_chunk.append(img)
 
-            # Batched pose estimation for chunk
+            # Batched pose estimation for chunk (with optional depth)
             chunk_results = estimate_pose_batched(
                 list_of_images=images_chunk,
                 list_of_bboxes=bboxes_chunk,
                 K=self.K,
                 pose_estimator=self.pose_estimator,
                 model_info=self.model_info,
-                depth_list=None
+                depth_list=depth_chunk,
             )
 
             # measure finger distances (cyan vs magenta)
@@ -356,7 +357,7 @@ class ActionIdentifierMegapose:
                     d = bounding_box_distance(bbox_cyan, bbox_magenta)
                 finger_dist_chunk.append(d)
 
-            # store
+            # Store results in the global arrays
             for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
                 pose_est_for_frame = chunk_results[offset]
                 all_fingers_distances[global_idx] = finger_dist_chunk[offset]
@@ -395,7 +396,7 @@ class ActionIdentifierMegapose:
                 actions.append(np.zeros(7, dtype=np.float32))
                 continue
 
-            pos_i  = pose_i[:3, 3]
+            pos_i = pose_i[:3, 3]
             pos_i1 = pose_i1[:3, 3]
             dp = self.scale_translation * (pos_i1 - pos_i)
 

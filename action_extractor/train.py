@@ -16,6 +16,7 @@ else:
     dp = '/home/yilong/Documents/ae_data/random_processing/iiwa16168'
     dp = '/home/yilong/Documents/ae_data/random_processing/lift_1000'
     dp = '/home/yilong/Documents/policy_data/lift/raw/1736557347_6730564/test'
+    dp = '/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/'
     # dp = '/home/yilong/Documents/policy_data/lift/obs'
     # vp = '/home/yilong/Documents/ae_data/abs'
     # vp = '/home/yilong/Documents/ae_data/random_processing/obs_rel_color2'
@@ -103,7 +104,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--architecture', '-a', 
         type=str, 
-        default='direct_S_resnet_mlp', 
+        default='direct_resnet_mlp', 
         choices=ARCHITECTURES,
         help='Model architecture to train'
     )
@@ -215,7 +216,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--resnet_layers_num', '-rln',
         type=int,
-        default=0,
+        default=18,
         choices=[0, 18, 34, 50, 101, 152, 200],
         help='Number of layers if direct_resnet_mlp architecture is chosen'
     )

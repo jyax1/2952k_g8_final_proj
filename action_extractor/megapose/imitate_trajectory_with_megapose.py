@@ -285,7 +285,7 @@ def imitate_trajectory_with_action_identifier(
         ds_dir = seq_dir.replace(".hdf5", ".zarr")
         zarr_path = seq_dir.replace(".hdf5", ".zarr.zip")
         if not os.path.exists(zarr_path):
-            hdf5_to_zarr_parallel_with_progress(seq_dir)
+            hdf5_to_zarr_parallel_with_progress(seq_dir, max_workers=16)
             store = DirectoryStore(ds_dir)
             root_z = zarr.group(store, overwrite=False)
             store.close()
@@ -495,7 +495,7 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736989038_8197331/test",
+        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         num_demos=100,
