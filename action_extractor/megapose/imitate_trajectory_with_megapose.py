@@ -234,7 +234,6 @@ def bounding_box_distance(bbox1, bbox2):
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-    finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
@@ -476,7 +475,6 @@ def imitate_trajectory_with_action_identifier(
     # ----------------------------------------------------------------
     if save_webp:
         print("Converting videos to webp format...")
-        from glob import glob
         mp4_files = glob(os.path.join(output_dir, "*.mp4"))
         for mp4_file in tqdm(mp4_files, desc="Converting to webp"):
             webp_file = mp4_file.replace(".mp4", ".webp")
@@ -491,9 +489,8 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test",
+        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736989038_8197331/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        finger_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_finger_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
         num_demos=100,
         save_webp=False,
