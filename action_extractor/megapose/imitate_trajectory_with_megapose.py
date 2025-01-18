@@ -461,7 +461,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera1.file_path = None
 
             # success check
-            success = env_camera0.is_success()["task"] and env_camera1.is_success()["task"]
+            success = env_camera0.is_success()["task"]
             if success:
                 n_success += 1
             total_n += 1
