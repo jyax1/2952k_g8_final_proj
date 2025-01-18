@@ -403,11 +403,15 @@ class ActionIdentifierMegapose:
 
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
+            
+            delta_finger_distance = finger_distance2 - finger_distance1
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            # replicate your 'action[-1] = -np.sign(...)' logic
-            action[-1] = -np.sign(finger_distance2 - finger_distance1)
+            if finger_distance1 <= 19:
+                action[-1] = -1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
             actions.append(action)
 
         return actions
