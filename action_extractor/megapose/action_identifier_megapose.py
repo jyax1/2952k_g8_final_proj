@@ -483,13 +483,13 @@ class ActionIdentifierMegapose:
         """The x-axis actions in global frame are computed separately"""
         # First we compute the x-axis POSITIONS
         position_x = []
-        for i in range(len(side_frames_list)):
-            frame = side_frames_list[i]
-            bbox = find_color_bounding_box(frame, color_name="green")
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, color_name="green")
             u, v = bounding_box_center(bbox)
             pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
             point_depth = pose_sideview_frame[2, 3]
-            point_world = pixel_to_world(u, v, point_depth, self.sideview_R, self.sideview_K)
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
             position_x.append(point_world[0])
 
         actions = []
@@ -515,12 +515,11 @@ class ActionIdentifierMegapose:
             # Compute x-axis actions separately
             pos_x = position_x[i]
             pos_x_next = position_x[i + 1]
-            action_x = pos_x_next - pos_x
-            action[0] = action_x * 80
+            action_x = (pos_x_next - pos_x) * self.scale_translation * 1.001
+            action[0] = action_x
             
-            print('finger_distance:', finger_distance1)
-            if finger_distance1 <= 19:
-                action[-1] = -1
+            if finger_distance1 <= 0.056 and i > 0 and all_fingers_distances[i - 1] > finger_distance1:
+                action[-1] = 1
             else:
                 action[-1] = -np.sign(delta_finger_distance)
             actions.append(action)

@@ -32,10 +32,7 @@ import math
 from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
 from action_extractor.utils.dataset_utils import (
     hdf5_to_zarr_parallel_with_progress,
-    preprocess_data_parallel,
     directorystore_to_zarr_zip,
-    frontview_K, frontview_R, sideview_K, sideview_R,
-    agentview_K, agentview_R, sideagentview_K, sideagentview_R,
     pose_inv
 )
 import robomimic.utils.obs_utils as ObsUtils
@@ -324,20 +321,21 @@ def imitate_trajectory_with_action_identifier(
     camera_height, camera_width = example_image.shape[:2]
 
     # Intrinsics, extrinsics from your script
-    K = get_camera_intrinsic_matrix(
+    frontview_K = get_camera_intrinsic_matrix(
         env_camera0.env.sim,
         camera_name="frontview",
         camera_height=camera_height,
         camera_width=camera_width,
     )
-    K_side = get_camera_intrinsic_matrix(
+    sideview_K = get_camera_intrinsic_matrix(
         env_camera0.env.sim,
         camera_name="sideview",
         camera_height=camera_height,
         camera_width=camera_width,
     )
-    R_4x4 = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
-    R_side = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
+    
+    frontview_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
+    sideview_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
 
     # Wrap environment with video
     env_camera0 = VideoRecordingWrapper(
@@ -384,9 +382,9 @@ def imitate_trajectory_with_action_identifier(
 
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
-        frontview_R=R_4x4,  # from get_camera_extrinsic_matrix
-        frontview_K=K,      # from get_camera_intrinsic_matrix
-        sideview_R=R_side,  # from get_camera_extrinsic_matrix
+        frontview_R=frontview_R,  # from get_camera_extrinsic_matrix
+        frontview_K=frontview_K,      # from get_camera_intrinsic_matrix
+        sideview_R=sideview_R,  # from get_camera_extrinsic_matrix
         sideview_K=sideview_K,  # from get_camera_intrinsic_matrix
         model_info=model_info,
         batch_size=batch_size,   # chunk size
@@ -458,7 +456,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera1.file_path = lower_right_video_path
             env_camera1.step_count = 0
             for action in actions_for_demo:
-                env_camera0.step(action)
+                env_camera1.step(action)
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
 
