@@ -408,6 +408,7 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
+            print('finger_distance:', finger_distance1)
             if finger_distance1 <= 19:
                 action[-1] = -1
             else:
