@@ -356,23 +356,10 @@ class ActionIdentifierMegapose:
         self.model_info = model_info
         self.batch_size = batch_size
         self.scale_translation = scale_translation
-
-        # Ensure R is at least 4×4 if user gave 3×3 or 3×4
-        if frontview_R.shape == (4, 4) and sideview_K.shape == (4, 4):
-            self.frontview_R = frontview_R
-            self.sideview_R = sideview_R
-        else:
-            # minimal fix if the user only provided a rotation or 3×4
-            R_4x4 = np.eye(4, dtype=np.float32)
-            R_4x4[:frontview_R.shape[0], :frontview_R.shape[1]] = frontview_R
-            self.frontview_R = R_4x4
-            
-            R_4x4 = np.eye(4, dtype=np.float32)
-            R_4x4[:sideview_R.shape[0], :sideview_R.shape[1]] = sideview_R
-            self.sideview_R = R_4x4
-
         self.frontview_K = frontview_K
         self.sideview_K = sideview_K
+        self.frontview_R = frontview_R
+        self.sideview_R = sideview_R
 
     def get_all_hand_poses_finger_distances(
         self,
