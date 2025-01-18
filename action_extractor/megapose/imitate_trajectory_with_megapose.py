@@ -56,6 +56,7 @@ from action_extractor.utils.dataset_utils import (
 
 from action_extractor.megapose.action_identifier_megapose import (
     make_object_dataset_from_folder,
+    find_color_bounding_box
 )
 
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
@@ -236,6 +237,59 @@ def bounding_box_distance(bbox1, bbox2):
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
+def pixel_to_world(u: float,
+                   v: float,
+                   depth: float,
+                   K: np.ndarray,
+                   R: np.ndarray) -> np.ndarray:
+    """
+    Converts a pixel coordinate (u, v) at a given 'depth' from camera coordinates
+    into a 3D point in the 'world' coordinate system.
+
+    Args:
+        u, v          : The 2D pixel coordinates in the image (origin at top-left).
+        depth         : Depth value (distance along the camera's optical axis).
+        K             : 3×3 camera intrinsics matrix.
+                        Typically:  [[fx,  0, cx],
+                                     [ 0, fy, cy],
+                                     [ 0,  0,  1]]
+        R             : 4×4 matrix that transforms a point from
+                        camera coordinates to world coordinates.
+                        i.e. X_world = R @ X_cam_homogeneous
+
+    Returns:
+        A 3D point (numpy array of shape (3,)) in world coordinates.
+    """
+    # 1) Unproject pixel (u, v, depth) to camera coordinates (x_cam, y_cam, z_cam).
+    #    Using the pinhole camera model:  [u]   [fx  0  cx] [x_cam]
+    #                                     [v] = [ 0  fy  cy] [y_cam]
+    #                                     [1]   [ 0   0   1] [z_cam]
+    #
+    #  => [x_cam]   = inv(K) * [u, v, 1]^T * depth
+    #     [y_cam]
+    #     [z_cam]
+
+    fx = K[0, 0]
+    fy = K[1, 1]
+    cx = K[0, 2]
+    cy = K[1, 2]
+
+    # Convert (u, v, depth) to 3D in camera space
+    x_cam = (u - cx) / fx * depth
+    y_cam = (v - cy) / fy * depth
+    z_cam = depth
+
+    # 2) Form a homogeneous 4-vector [x_cam, y_cam, z_cam, 1]
+    point_cam_h = np.array([x_cam, y_cam, z_cam, 1.0], dtype=np.float64)
+
+    # 3) Transform from camera coords to world coords
+    point_world_h = R @ point_cam_h  # shape (4,)
+
+    # 4) Return the 3D world coordinate (x_w, y_w, z_w)
+    x_w, y_w, z_w, _ = point_world_h
+    return np.array([x_w, y_w, z_w], dtype=np.float64)
+
+
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -267,6 +321,7 @@ def imitate_trajectory_with_action_identifier(
     # 2) Load the model once
     # ----------------------------------------------------------------
     model_name = "megapose-1.0-RGB-multi-hypothesis"
+    model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
 
     from megapose.utils.logging import get_logger
@@ -327,7 +382,14 @@ def imitate_trajectory_with_action_identifier(
         camera_height=camera_height,
         camera_width=camera_width,
     )
+    K_side = get_camera_intrinsic_matrix(
+        env_camera0.env.sim,
+        camera_name="sideview",
+        camera_height=camera_height,
+        camera_width=camera_width,
+    )
     R_4x4 = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
+    R_side = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
 
     # Wrap environment with video
     env_camera0 = VideoRecordingWrapper(
@@ -380,6 +442,15 @@ def imitate_trajectory_with_action_identifier(
         batch_size=batch_size,   # chunk size
         scale_translation=80.0,  # same 80 factor
     )
+    
+    action_identifier_side = ActionIdentifierMegapose(
+        pose_estimator=hand_pose_estimator,
+        R=R_side,  # from get_camera_extrinsic_matrix
+        K=K_side,      # from get_camera_intrinsic_matrix
+        model_info=model_info,
+        batch_size=batch_size,   # chunk size
+        scale_translation=80.0,  # same 80 factor
+    )
 
     n_success = 0
     total_n = 0
@@ -406,7 +477,7 @@ def imitate_trajectory_with_action_identifier(
             # Build the "left" videos
             # ------------------------------
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
-            lower_left_frames = [obs_group["sideview_image"][i]   for i in range(num_samples)]
+            lower_left_frames = [obs_group["sideview_image"][i] for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
                 for frame in upper_left_frames:
                     writer.append_data(frame)
@@ -418,9 +489,20 @@ def imitate_trajectory_with_action_identifier(
             # Use the new class to get poses + distances, then compute actions
             # ------------------------------
             frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
+            depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
 
-            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(frames_list)
+            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(frames_list, depth_list=depth_list)
             actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances)
+            
+            frames_list_sideview = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            # depth_list_sideview = [obs_group["sideview_depth"][i] for i in range(num_samples)]
+            # all_hand_poses_world_sideview, all_fingers_distances_sideview = action_identifier_side.get_all_hand_poses_finger_distances(frames_list_sideview, depth_list=depth_list_sideview)
+            # actions_for_demo_sideview = action_identifier_side.compute_actions(all_hand_poses_world_sideview, all_fingers_distances_sideview)
+            
+            side_view_hand_bbox = []
+            for frame in frames_list_sideview:
+                bbox = find_color_bounding_box(frame, color_name="green")
+                side_view_hand_bbox.append(bbox)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -432,8 +514,10 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
-            for act in actions_for_demo:
-                env_camera0.step(act)
+            for i in range(len(actions_for_demo)):
+                action = actions_for_demo[i]
+                action[1] = actions_for_demo_sideview[i][1]
+                env_camera0.step(action)
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
 
@@ -442,8 +526,10 @@ def imitate_trajectory_with_action_identifier(
             env_camera1.reset_to({"states": initial_state})
             env_camera1.file_path = lower_right_video_path
             env_camera1.step_count = 0
-            for act in actions_for_demo:
-                env_camera1.step(act)
+            for i in range(len(actions_for_demo)):
+                action = actions_for_demo[i]
+                action[1] = actions_for_demo_sideview[i][1]
+                env_camera1.step(action)
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
 

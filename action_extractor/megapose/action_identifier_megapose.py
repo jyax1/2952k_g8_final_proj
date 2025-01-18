@@ -114,7 +114,8 @@ def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list
 
         if depth_list is not None:
             depth_np = depth_list[i]  # shape (H,W)
-            depth_torch = torch.from_numpy(depth_np).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+            depth_torch = torch.from_numpy(depth_np).float() / 255.0  # (1,1,H,W)
+            depth_torch = depth_torch.permute(2,0,1).unsqueeze(0) # (1,1,H,W)
             img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)  # shape (1,4,H,W)
             images_torch.append(img_4ch)
         else:
