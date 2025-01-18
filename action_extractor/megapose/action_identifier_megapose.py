@@ -515,7 +515,7 @@ class ActionIdentifierMegapose:
             # Compute x-axis actions separately
             pos_x = position_x[i]
             pos_x_next = position_x[i + 1]
-            action_x = (pos_x_next - pos_x) * self.scale_translation * 1.01
+            action_x = (pos_x_next - pos_x) * self.scale_translation * 1.1
             action[0] = action_x
             
             if finger_distance1 <= 0.056 and i > 0 and all_fingers_distances[i - 1] > finger_distance1:
