@@ -443,15 +443,6 @@ def imitate_trajectory_with_action_identifier(
         batch_size=batch_size,   # chunk size
         scale_translation=80.0,  # same 80 factor
     )
-    
-    action_identifier_side = ActionIdentifierMegapose(
-        pose_estimator=hand_pose_estimator,
-        R=R_side,  # from get_camera_extrinsic_matrix
-        K=K_side,      # from get_camera_intrinsic_matrix
-        model_info=model_info,
-        batch_size=batch_size,   # chunk size
-        scale_translation=80.0,  # same 80 factor
-    )
 
     n_success = 0
     total_n = 0
@@ -496,9 +487,6 @@ def imitate_trajectory_with_action_identifier(
             actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances)
             
             frames_list_sideview = [obs_group["sideview_image"][i] for i in range(num_samples)]
-            # depth_list_sideview = [obs_group["sideview_depth"][i] for i in range(num_samples)]
-            # all_hand_poses_world_sideview, all_fingers_distances_sideview = action_identifier_side.get_all_hand_poses_finger_distances(frames_list_sideview, depth_list=depth_list_sideview)
-            # actions_for_demo_sideview = action_identifier_side.compute_actions(all_hand_poses_world_sideview, all_fingers_distances_sideview)
             
             position_x = []
             for i in range(len(frames_list_sideview)):
