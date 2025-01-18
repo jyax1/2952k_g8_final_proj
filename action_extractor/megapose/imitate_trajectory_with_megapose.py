@@ -58,6 +58,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     make_object_dataset_from_folder,
     find_color_bounding_box,
     bounding_box_center,
+    pixel_to_world
 )
 
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
@@ -238,60 +239,6 @@ def bounding_box_distance(bbox1, bbox2):
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
-def pixel_to_world(u: float,
-                   v: float,
-                   depth: float,
-                   K: np.ndarray,
-                   R: np.ndarray) -> np.ndarray:
-    """
-    Converts a pixel coordinate (u, v) at a given 'depth' from camera coordinates
-    into a 3D point in the 'world' coordinate system.
-
-    Args:
-        u, v          : The 2D pixel coordinates in the image (origin at top-left).
-        depth         : Depth value (distance along the camera's optical axis).
-        K             : 3×3 camera intrinsics matrix.
-                        Typically:  [[fx,  0, cx],
-                                     [ 0, fy, cy],
-                                     [ 0,  0,  1]]
-        R             : 4×4 matrix that transforms a point from
-                        camera coordinates to world coordinates.
-                        i.e. X_world = R @ X_cam_homogeneous
-
-    Returns:
-        A 3D point (numpy array of shape (3,)) in world coordinates.
-    """
-    # 1) Unproject pixel (u, v, depth) to camera coordinates (x_cam, y_cam, z_cam).
-    #    Using the pinhole camera model:  [u]   [fx  0  cx] [x_cam]
-    #                                     [v] = [ 0  fy  cy] [y_cam]
-    #                                     [1]   [ 0   0   1] [z_cam]
-    #
-    #  => [x_cam]   = inv(K) * [u, v, 1]^T * depth
-    #     [y_cam]
-    #     [z_cam]
-
-    fx = K[0, 0]
-    fy = K[1, 1]
-    cx = K[0, 2]
-    cy = K[1, 2]
-
-    # Convert (u, v, depth) to 3D in camera space
-    x_cam = (u - cx) / fx * depth
-    y_cam = (v - cy) / fy * depth
-    z_cam = depth
-
-    # 2) Form a homogeneous 4-vector [x_cam, y_cam, z_cam, 1]
-    point_cam_h = np.array([x_cam, y_cam, z_cam, 1.0], dtype=np.float64)
-
-    # 3) Transform from camera coords to world coords
-    point_world_h = R @ point_cam_h  # shape (4,)
-
-    # 4) Return the 3D world coordinate (x_w, y_w, z_w)
-    x_w, y_w, z_w, _ = point_world_h
-    return np.array([x_w, y_w, z_w], dtype=np.float64)
-
-
-
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
@@ -437,8 +384,10 @@ def imitate_trajectory_with_action_identifier(
 
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
-        R=R_4x4,  # from get_camera_extrinsic_matrix
-        K=K,      # from get_camera_intrinsic_matrix
+        frontview_R=R_4x4,  # from get_camera_extrinsic_matrix
+        frontview_K=K,      # from get_camera_intrinsic_matrix
+        sideview_R=R_side,  # from get_camera_extrinsic_matrix
+        sideview_K=sideview_K,  # from get_camera_intrinsic_matrix
         model_info=model_info,
         batch_size=batch_size,   # chunk size
         scale_translation=80.0,  # same 80 factor
@@ -480,30 +429,13 @@ def imitate_trajectory_with_action_identifier(
             # ------------------------------
             # Use the new class to get poses + distances, then compute actions
             # ------------------------------
-            frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
-            depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
+            front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
+            front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
+            
+            side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
 
-            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(frames_list, depth_list=depth_list)
+            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(front_frames_list, front_depth_list=front_depth_list)
             actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances)
-            
-            frames_list_sideview = [obs_group["sideview_image"][i] for i in range(num_samples)]
-            
-            position_x = []
-            for i in range(len(frames_list_sideview)):
-                frame = frames_list_sideview[i]
-                bbox = find_color_bounding_box(frame, color_name="green")
-                u, v = bounding_box_center(bbox)
-                pose_sideview_frame = np.linalg.inv(R_side) @ all_hand_poses_world[i]
-                point_depth = pose_sideview_frame[2, 3]
-                point_world = pixel_to_world(u, v, point_depth, K_side, R_side)
-                position_x.append(point_world[0])
-                
-            actions_x = []
-            for i in range(len(position_x) - 1):
-                pos_x = position_x[i]
-                pos_x_next = position_x[i + 1]
-                action_x = pos_x_next - pos_x
-                actions_x.append(action_x * 80)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -515,9 +447,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
-            for i in range(len(actions_for_demo)):
-                action = actions_for_demo[i]
-                action[0] = actions_x[i]
+            for action in actions_for_demo:
                 env_camera0.step(action)
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
@@ -527,10 +457,8 @@ def imitate_trajectory_with_action_identifier(
             env_camera1.reset_to({"states": initial_state})
             env_camera1.file_path = lower_right_video_path
             env_camera1.step_count = 0
-            for i in range(len(actions_for_demo)):
-                action = actions_for_demo[i]
-                action[0] = actions_x[i]
-                env_camera1.step(action)
+            for action in actions_for_demo:
+                env_camera0.step(action)
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
 

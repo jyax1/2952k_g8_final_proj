@@ -252,14 +252,93 @@ def bounding_box_distance(bbox1, bbox2):
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
+def pixel_to_world(u: float,
+                   v: float,
+                   depth: float,
+                   K: np.ndarray,
+                   R: np.ndarray) -> np.ndarray:
+    """
+    Converts a pixel coordinate (u, v) at a given 'depth' from camera coordinates
+    into a 3D point in the 'world' coordinate system.
+
+    Args:
+        u, v          : The 2D pixel coordinates in the image (origin at top-left).
+        depth         : Depth value (distance along the camera's optical axis).
+        K             : 3×3 camera intrinsics matrix.
+                        Typically:  [[fx,  0, cx],
+                                     [ 0, fy, cy],
+                                     [ 0,  0,  1]]
+        R             : 4×4 matrix that transforms a point from
+                        camera coordinates to world coordinates.
+                        i.e. X_world = R @ X_cam_homogeneous
+
+    Returns:
+        A 3D point (numpy array of shape (3,)) in world coordinates.
+    """
+    # 1) Unproject pixel (u, v, depth) to camera coordinates (x_cam, y_cam, z_cam).
+    #    Using the pinhole camera model:  [u]   [fx  0  cx] [x_cam]
+    #                                     [v] = [ 0  fy  cy] [y_cam]
+    #                                     [1]   [ 0   0   1] [z_cam]
+    #
+    #  => [x_cam]   = inv(K) * [u, v, 1]^T * depth
+    #     [y_cam]
+    #     [z_cam]
+
+    fx = K[0, 0]
+    fy = K[1, 1]
+    cx = K[0, 2]
+    cy = K[1, 2]
+
+    # Convert (u, v, depth) to 3D in camera space
+    x_cam = (u - cx) / fx * depth
+    y_cam = (v - cy) / fy * depth
+    z_cam = depth
+
+    # 2) Form a homogeneous 4-vector [x_cam, y_cam, z_cam, 1]
+    point_cam_h = np.array([x_cam, y_cam, z_cam, 1.0], dtype=np.float64)
+
+    # 3) Transform from camera coords to world coords
+    point_world_h = R @ point_cam_h  # shape (4,)
+
+    # 4) Return the 3D world coordinate (x_w, y_w, z_w)
+    x_w, y_w, z_w, _ = point_world_h
+    return np.array([x_w, y_w, z_w], dtype=np.float64)
+
+def finger_distance_in_world(
+    bbox_cyan,
+    bbox_magenta,
+    depth: float,
+    K: np.ndarray,
+    R: np.ndarray
+) -> float:
+    """
+    Compute the 3D distance between two bounding box centers in world space.
+    Requires a depth_map for unprojection.
+    """
+    if bbox_cyan is None or bbox_magenta is None:
+        return 0.0
+
+    # Get bounding box centers (u, v)
+    uc, vc = bounding_box_center(bbox_cyan)  # e.g. int pixel coords
+    um, vm = bounding_box_center(bbox_magenta)
+
+    # Unproject each center to world coords
+    p_cyan_world = pixel_to_world(uc, vc, depth, K, T_cam_to_world)
+    p_magenta_world = pixel_to_world(um, vm, depth, K, T_cam_to_world)
+
+    # Euclidean distance in world
+    return float(np.linalg.norm(p_cyan_world - p_magenta_world))
+
 class ActionIdentifierMegapose:
     """Processes video frames (optionally with depth) to extract hand poses and finger distances."""
 
     def __init__(
         self,
         pose_estimator,
-        R: np.ndarray,         # extrinsics from get_camera_extrinsic_matrix
-        K: np.ndarray,         # intrinsics from get_camera_intrinsic_matrix
+        frontview_R: np.ndarray,         # extrinsics from get_camera_extrinsic_matrix
+        frontview_K: np.ndarray,         # intrinsics from get_camera_intrinsic_matrix
+        sideview_R: np.ndarray,          # extrinsics from get_camera_extrinsic_matrix
+        sideview_K: np.ndarray,          # intrinsics from get_camera_intrinsic_matrix
         model_info: dict,      # from NAMED_MODELS[model_name]
         batch_size: int = 40,
         scale_translation: float = 80.0,
@@ -279,20 +358,26 @@ class ActionIdentifierMegapose:
         self.scale_translation = scale_translation
 
         # Ensure R is at least 4×4 if user gave 3×3 or 3×4
-        if R.shape == (4, 4):
-            self.R = R
+        if frontview_R.shape == (4, 4) and sideview_K.shape == (4, 4):
+            self.frontview_R = frontview_R
+            self.sideview_R = sideview_R
         else:
             # minimal fix if the user only provided a rotation or 3×4
             R_4x4 = np.eye(4, dtype=np.float32)
-            R_4x4[:R.shape[0], :R.shape[1]] = R
-            self.R = R_4x4
+            R_4x4[:frontview_R.shape[0], :frontview_R.shape[1]] = frontview_R
+            self.frontview_R = R_4x4
+            
+            R_4x4 = np.eye(4, dtype=np.float32)
+            R_4x4[:sideview_R.shape[0], :sideview_R.shape[1]] = sideview_R
+            self.sideview_R = R_4x4
 
-        self.K = K
+        self.frontview_K = frontview_K
+        self.sideview_K = sideview_K
 
     def get_all_hand_poses_finger_distances(
         self,
-        frames_list: list[np.ndarray],
-        depth_list: Optional[list[np.ndarray]] = None,
+        front_frames_list: list[np.ndarray],
+        front_depth_list: Optional[list[np.ndarray]] = None,
     ) -> tuple[list[Optional[np.ndarray]], list[float]]:
         """
         Given a list of frames (each shape [H,W,3] in np.uint8) and optionally a matching
@@ -307,10 +392,10 @@ class ActionIdentifierMegapose:
                all_hand_poses_world : a list of length n, each an np.ndarray(4,4) or None
                all_fingers_distances: same length n, each a float with finger distance
 
-        :param frames_list: List of RGB frames, each shape (H,W,3).
-        :param depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
+        :param front_frames_list: List of RGB frames, each shape (H,W,3).
+        :param front_depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
         """
-        num_frames = len(frames_list)
+        num_frames = len(front_frames_list)
         all_hand_poses_world = [None] * num_frames
         all_fingers_distances = [0.0] * num_frames
 
@@ -321,13 +406,13 @@ class ActionIdentifierMegapose:
             bboxes_chunk = []
             depth_chunk = None
 
-            if depth_list is not None:
+            if front_depth_list is not None:
                 # Slice the depth frames for this batch
-                depth_chunk = depth_list[chunk_start:chunk_end]
+                depth_chunk = front_depth_list[chunk_start:chunk_end]
 
             # Gather bounding boxes for 'panda-hand' (green)
             for idx in range(chunk_start, chunk_end):
-                img = frames_list[idx]
+                img = front_frames_list[idx]
                 box_hand = find_color_bounding_box(img, color_name="green")
                 if box_hand is not None:
                     # instance_id=0 for single object
@@ -347,15 +432,33 @@ class ActionIdentifierMegapose:
             )
 
             # measure finger distances (cyan vs magenta)
-            finger_dist_chunk = []
+            finger_dist_chunk = []                
             for idx in range(chunk_start, chunk_end):
-                img = frames_list[idx]
-                bbox_cyan = find_color_bounding_box(img, color_name="cyan")
-                bbox_magenta = find_color_bounding_box(img, color_name="magenta")
+                img = front_frames_list[idx]
+                bbox_cyan = find_color_bounding_box(img, "cyan")
+                bbox_magenta = find_color_bounding_box(img, "magenta")
                 d = 0.0
-                # If bounding boxes are None => bounding_box_distance would fail
-                if (bbox_cyan is not None) and (bbox_magenta is not None):
-                    d = bounding_box_distance(bbox_cyan, bbox_magenta)
+
+                offset = idx - chunk_start  # position within this chunk
+                pose_est_for_frame = chunk_results[offset]
+
+                if (bbox_cyan is not None) and (bbox_magenta is not None) and (len(pose_est_for_frame) > 0):
+                    # Get the transform from the *front camera* to the object
+                    # (assuming your 'pose_est_for_frame.poses[0]' is T_cam_obj)
+                    pose_frontview_frame = pose_est_for_frame.poses[0].cpu().numpy()
+
+                    # The 'depth' is just the z-translation of this frontview frame
+                    point_depth = pose_frontview_frame[2, 3]
+
+                    # Then compute the finger distance in world, or do a pixel_to_world, etc.
+                    d = finger_distance_in_world(
+                        bbox_cyan,
+                        bbox_magenta,
+                        point_depth,
+                        self.frontview_K,
+                        self.frontview_R
+                    )
+
                 finger_dist_chunk.append(d)
 
             # Store results in the global arrays
@@ -368,7 +471,7 @@ class ActionIdentifierMegapose:
                 else:
                     # get the first detection
                     T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
-                    T_world_obj = self.R @ T_cam_obj
+                    T_world_obj = self.frontview_R @ T_cam_obj
                     all_hand_poses_world[global_idx] = T_world_obj
 
         return all_hand_poses_world, all_fingers_distances
@@ -377,6 +480,7 @@ class ActionIdentifierMegapose:
         self,
         all_hand_poses_world: list[Optional[np.ndarray]],
         all_fingers_distances: list[float],
+        side_frames_list: list[np.ndarray],
     ) -> list[np.ndarray]:
         """
         Replicates your script's logic to produce (n-1) actions in shape (7,).
@@ -388,6 +492,18 @@ class ActionIdentifierMegapose:
         num_frames = len(all_hand_poses_world)
         if num_frames < 2:
             return []
+
+        """The x-axis actions in global frame are computed separately"""
+        # First we compute the x-axis POSITIONS
+        position_x = []
+        for i in range(len(side_frames_list)):
+            frame = side_frames_list[i]
+            bbox = find_color_bounding_box(frame, color_name="green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2, 3]
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_R, self.sideview_K)
+            position_x.append(point_world[0])
 
         actions = []
         for i in range(num_frames - 1):
@@ -408,6 +524,13 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
+            
+            # Compute x-axis actions separately
+            pos_x = position_x[i]
+            pos_x_next = position_x[i + 1]
+            action_x = pos_x_next - pos_x
+            action[0] = action_x * 80
+            
             print('finger_distance:', finger_distance1)
             if finger_distance1 <= 19:
                 action[-1] = -1
