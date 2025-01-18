@@ -323,8 +323,8 @@ def finger_distance_in_world(
     um, vm = bounding_box_center(bbox_magenta)
 
     # Unproject each center to world coords
-    p_cyan_world = pixel_to_world(uc, vc, depth, K, T_cam_to_world)
-    p_magenta_world = pixel_to_world(um, vm, depth, K, T_cam_to_world)
+    p_cyan_world = pixel_to_world(uc, vc, depth, K, R)
+    p_magenta_world = pixel_to_world(um, vm, depth, K, R)
 
     # Euclidean distance in world
     return float(np.linalg.norm(p_cyan_world - p_magenta_world))
@@ -425,7 +425,7 @@ class ActionIdentifierMegapose:
             chunk_results = estimate_pose_batched(
                 list_of_images=images_chunk,
                 list_of_bboxes=bboxes_chunk,
-                K=self.K,
+                K=self.frontview_K,
                 pose_estimator=self.pose_estimator,
                 model_info=self.model_info,
                 depth_list=depth_chunk,
