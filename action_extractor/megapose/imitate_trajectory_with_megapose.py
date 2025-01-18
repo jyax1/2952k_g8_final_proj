@@ -56,7 +56,8 @@ from action_extractor.utils.dataset_utils import (
 
 from action_extractor.megapose.action_identifier_megapose import (
     make_object_dataset_from_folder,
-    find_color_bounding_box
+    find_color_bounding_box,
+    bounding_box_center,
 )
 
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
@@ -499,10 +500,22 @@ def imitate_trajectory_with_action_identifier(
             # all_hand_poses_world_sideview, all_fingers_distances_sideview = action_identifier_side.get_all_hand_poses_finger_distances(frames_list_sideview, depth_list=depth_list_sideview)
             # actions_for_demo_sideview = action_identifier_side.compute_actions(all_hand_poses_world_sideview, all_fingers_distances_sideview)
             
-            side_view_hand_bbox = []
-            for frame in frames_list_sideview:
+            position_x = []
+            for i in range(len(frames_list_sideview)):
+                frame = frames_list_sideview[i]
                 bbox = find_color_bounding_box(frame, color_name="green")
-                side_view_hand_bbox.append(bbox)
+                u, v = bounding_box_center(bbox)
+                pose_sideview_frame = np.linalg.inv(R_side) @ all_hand_poses_world[i]
+                point_depth = pose_sideview_frame[2, 3]
+                point_world = pixel_to_world(u, v, point_depth, K_side, R_side)
+                position_x.append(point_world[0])
+                
+            actions_x = []
+            for i in range(len(position_x) - 1):
+                pos_x = position_x[i]
+                pos_x_next = position_x[i + 1]
+                action_x = pos_x_next - pos_x
+                actions_x.append(action_x * 80)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -516,7 +529,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.step_count = 0
             for i in range(len(actions_for_demo)):
                 action = actions_for_demo[i]
-                action[1] = actions_for_demo_sideview[i][1]
+                action[0] = actions_x[i]
                 env_camera0.step(action)
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
@@ -528,7 +541,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera1.step_count = 0
             for i in range(len(actions_for_demo)):
                 action = actions_for_demo[i]
-                action[1] = actions_for_demo_sideview[i][1]
+                action[0] = actions_x[i]
                 env_camera1.step(action)
             env_camera1.video_recoder.stop()
             env_camera1.file_path = None
