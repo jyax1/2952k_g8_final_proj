@@ -1,6 +1,9 @@
-'''
-Script that copies the first n demonstrations from a source HDF5 file to a new HDF5 file.
-'''
+#!/usr/bin/env python3
+"""
+Script that copies the first n demonstrations from a source HDF5 file to a specified target HDF5 file.
+Usage:
+    python copy_n_demos.py /path/to/source.hdf5 /path/to/target.hdf5 100
+"""
 
 import os
 import h5py
@@ -8,15 +11,12 @@ import numpy as np
 from tqdm import tqdm
 import shutil
 
-def copy_n_demos(source_path, n):
-    # Extract n from source path and create target path
-    dirname = os.path.dirname(source_path)
-    filename = os.path.basename(source_path)
-    base_name = filename.split('panda')[0]
-    suffix = filename.split('panda')[1].split('_', 1)[1]
-    target_path = os.path.join(dirname, f"{base_name}panda{n}_{suffix}")
-    
-    print(f"Copying {source_path} to {target_path}")
+def copy_n_demos(source_path, target_path, n):
+    """
+    Copies the first n demos from 'source_path' HDF5 file into a new HDF5 file at 'target_path'.
+    Any demos with index >= n are deleted from the copy.
+    """
+    print(f"Copying from:\n  {source_path}\nto:\n  {target_path}")
     
     # Copy entire file first
     shutil.copy2(source_path, target_path)
@@ -29,6 +29,7 @@ def copy_n_demos(source_path, n):
         # Find demos with index >= n
         for demo in all_demos:
             try:
+                # typically "demo_0", "demo_1", etc.
                 demo_idx = int(demo.split('_')[1])
                 if demo_idx >= n:
                     demos_to_delete.append(demo)
@@ -38,20 +39,20 @@ def copy_n_demos(source_path, n):
         if demos_to_delete:
             print(f"Deleting {len(demos_to_delete)} demos with index >= {n}")
             
-            # Delete excess demos
             for demo in tqdm(demos_to_delete, desc="Deleting excess demos"):
                 del target['data'][demo]
     
-    print(f"Successfully created dataset with demos 0 to {n-1} at {target_path}")
+    print(f"Successfully created dataset with demos [0..{n-1}] at:\n  {target_path}")
+
 
 if __name__ == "__main__":
     import argparse
-    import shutil
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument('source_path', type=str, help='Path to source HDF5 file')
-    parser.add_argument('n', type=int, help='Number of demos to keep')
+    parser = argparse.ArgumentParser(description="Copy first N demos from source HDF5 to a new HDF5 file.")
+    parser.add_argument('--source_path', type=str, help='Path to the source HDF5 file')
+    parser.add_argument('--target_path', type=str, help='Path to the target HDF5 file')
+    parser.add_argument('-n', type=int, help='Number of demos to keep')
     
     args = parser.parse_args()
     
-    copy_n_demos(args.source_path, args.n)
+    copy_n_demos(args.source_path, args.target_path, args.n)

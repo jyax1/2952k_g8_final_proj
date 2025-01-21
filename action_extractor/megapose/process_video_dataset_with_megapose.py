@@ -164,7 +164,7 @@ def process_video_dataset_with_megapose(
             # 3A) get poses + finger distances
             all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(
                 front_frames_list,
-                depth_list=front_depth_list,
+                front_depth_list=front_depth_list,
             )
 
             # 3B) compute actions
@@ -178,11 +178,6 @@ def process_video_dataset_with_megapose(
             # 3C) Overwrite the existing actions
             old_shape = f_out["data"][demo]["actions"].shape
             new_shape = actions_for_demo.shape
-            if new_shape != old_shape:
-                logger.warning(
-                    f"[{demo}] existing actions shape={old_shape}, new={new_shape}. "
-                    "Will do partial overwrite if shapes differ."
-                )
             min_frames = min(new_shape[0], old_shape[0])
             min_dim    = min(new_shape[1], old_shape[1])
             f_out["data"][demo]["actions"][:min_frames, :min_dim] = actions_for_demo[:min_frames, :min_dim]
@@ -194,11 +189,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file", type=str, default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_1000_obs.hdf5",
                         help="Path to the original HDF5 file")
-    parser.add_argument("--output-file", type=str, default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_1000_obs_megapose.hdf5",
+    parser.add_argument("--output-file", type=str, default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_300_obs_megapose.hdf5",
                         help="Where to save the new HDF5 file with updated actions")
     parser.add_argument("--hand-mesh-dir", type=str, default="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
                         help="Folder with .obj or .ply mesh for the 'panda-hand'")
-    parser.add_argument("--num-demos", type=int, default=100, help="Max demos per file; 0 => all demos")
+    parser.add_argument("--num-demos", type=int, default=300, help="Max demos per file; 0 => all demos")
     parser.add_argument("--batch-size", type=int, default=40, help="Chunk size for Megapose inference")
     args = parser.parse_args()
 
