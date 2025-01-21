@@ -518,10 +518,8 @@ class ActionIdentifierMegapose:
             action_x = (pos_x_next - pos_x) * self.scale_translation
             action[0] = action_x
             
-            print(finger_distance1)
             if i > 20 and delta_finger_distance < 0.02:
                 # Gripping
-                print('set to 1')
                 action[-1] = 1
             else:
                 action[-1] = -np.sign(delta_finger_distance)
