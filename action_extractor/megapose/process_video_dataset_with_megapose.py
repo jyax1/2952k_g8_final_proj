@@ -46,30 +46,6 @@ from action_extractor.utils.dataset_utils import (
 )
 from robosuite.utils.camera_utils import get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
 
-
-###############################################################################
-# Additional local helper functions (optional)
-###############################################################################
-
-def bounding_box_center(bbox):
-    """
-    Given a bbox = [x_min, y_min, x_max, y_max],
-    return its center (cx, cy).
-    """
-    x_min, y_min, x_max, y_max = bbox
-    cx = (x_min + x_max) / 2.0
-    cy = (y_min + y_max) / 2.0
-    return cx, cy
-
-def bounding_box_distance(bbox1, bbox2):
-    """
-    Compute the Euclidean distance between the centers of two bounding boxes.
-    """
-    cx1, cy1 = bounding_box_center(bbox1)
-    cx2, cy2 = bounding_box_center(bbox2)
-    return math.hypot(cx2 - cx1, cy2 - cy1)
-
-
 ###############################################################################
 # Main script function
 ###############################################################################
