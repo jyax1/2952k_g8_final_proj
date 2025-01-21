@@ -502,7 +502,7 @@ class ActionIdentifierMegapose:
 
             pos_i = pose_i[:3, 3]
             pos_i1 = pose_i1[:3, 3]
-            dp = self.scale_translation * (pos_i1 - pos_i)
+            dp = (pos_i1 - pos_i) * self.scale_translation
 
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
@@ -515,10 +515,13 @@ class ActionIdentifierMegapose:
             # Compute x-axis actions separately
             pos_x = position_x[i]
             pos_x_next = position_x[i + 1]
-            action_x = (pos_x_next - pos_x) * self.scale_translation * 1.1
+            action_x = (pos_x_next - pos_x) * self.scale_translation
             action[0] = action_x
             
-            if finger_distance1 <= 0.056 and i > 0 and all_fingers_distances[i - 1] > finger_distance1:
+            print(finger_distance1)
+            if i > 20 and delta_finger_distance < 0.02:
+                # Gripping
+                print('set to 1')
                 action[-1] = 1
             else:
                 action[-1] = -np.sign(delta_finger_distance)

@@ -266,7 +266,7 @@ def imitate_trajectory_with_action_identifier(
     # 2) Load the model once
     # ----------------------------------------------------------------
     model_name = "megapose-1.0-RGB-multi-hypothesis"
-    model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
+    # model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
 
     from megapose.utils.logging import get_logger
@@ -432,7 +432,7 @@ def imitate_trajectory_with_action_identifier(
             
             side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
 
-            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(front_frames_list, front_depth_list=front_depth_list)
+            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(front_frames_list, front_depth_list=None)
             actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances, side_frames_list)
 
             # ------------------------------
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_RGB+bbox_lift_smaller_2000",
         num_demos=100,
         save_webp=False,
         batch_size=40
