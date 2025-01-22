@@ -24,6 +24,8 @@ from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger
 from megapose.inference.pose_estimator import PoseEstimator
 
+from scipy.spatial.transform import Rotation
+
 logger = get_logger(__name__)
 
 # -----------------------------------------------------------------------------
@@ -503,6 +505,16 @@ class ActionIdentifierMegapose:
             pos_i = pose_i[:3, 3]
             pos_i1 = pose_i1[:3, 3]
             dp = (pos_i1 - pos_i) * self.scale_translation
+            
+            delta_pose = np.linalg.inv(pose_i) @ pose_i1
+
+            # 2) Extract the 3×3 rotation from delta_pose
+            R_delta = delta_pose[:3, :3]
+
+            # 3) Convert rotation matrix to axis-angle
+            #    as_rotvec() returns a 3D vector whose direction is the rotation axis
+            #    and whose magnitude is the rotation angle (in radians).
+            axis_angle_vec = Rotation.from_matrix(R_delta).as_rotvec()
 
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
@@ -511,6 +523,7 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
+            action[:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
             pos_x = position_x[i]
