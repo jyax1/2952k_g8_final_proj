@@ -508,9 +508,9 @@ if __name__ == "__main__":
     # Now you won't see the model reloaded every time, 
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_RGB+bbox_lift_smaller_2000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_RGB+bbox_square_smaller_2000",
         num_demos=100,
         save_webp=False,
         batch_size=40

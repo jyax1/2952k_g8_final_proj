@@ -66,6 +66,36 @@ from mpl_toolkits.mplot3d import Axes3D
 import multiprocessing
 multiprocessing.set_start_method('spawn', force=True)
 
+
+import re
+def recolor_gripper(xml_string: str) -> str:
+    """
+    Given a MuJoCo XML string, replace the RGBA for:
+      - gripper0_hand_visual => green (0 1 0 1)
+      - gripper0_finger1_visual => cyan (0 1 1 1)
+      - gripper0_finger2_visual => magenta (1 0 1 1)
+    Returns a new XML string with the updated RGBA.
+    """
+
+    # Regex patterns with 3 capturing groups:
+    #   (1) The part up to and including rgba="
+    #   (2) The old color contents (we'll overwrite)
+    #   (3) The closing quote "
+    pattern_hand = r'(geom\s+name="gripper0_hand_visual".*?rgba=")([^"]*)(")'
+    pattern_left_finger = r'(geom\s+name="gripper0_finger1_visual".*?rgba=")([^"]*)(")'
+    pattern_right_finger = r'(geom\s+name="gripper0_finger2_visual".*?rgba=")([^"]*)(")'
+
+    # Use \g<1> and \g<3> so we don't accidentally invoke \10
+    replacement_hand = r'\g<1>0 1 0 1\g<3>'
+    replacement_left_finger = r'\g<1>0 1 1 1\g<3>'
+    replacement_right_finger = r'\g<1>1 0 1 1\g<3>'
+
+    xml_string = re.sub(pattern_hand, replacement_hand, xml_string, flags=re.DOTALL)
+    xml_string = re.sub(pattern_left_finger, replacement_left_finger, xml_string, flags=re.DOTALL)
+    xml_string = re.sub(pattern_right_finger, replacement_right_finger, xml_string, flags=re.DOTALL)
+
+    return xml_string
+
 def find_index_after_pattern(text, pattern, after_pattern):
         # Find the index of the first occurrence of after_pattern
         start_index = text.find(after_pattern)
@@ -320,7 +350,7 @@ def dataset_states_to_obs(args):
             states = f["data/{}/states".format(ep)][()]
             initial_state = dict(states=states[0])
             if is_robosuite_env:
-                initial_state["model"] = f["data/{}".format(ep)].attrs["model_file"]
+                initial_state["model"] = recolor_gripper(f["data/{}".format(ep)].attrs["model_file"])
             actions = f["data/{}/actions".format(ep)][()]
 
             initial_state_list.append(initial_state)
