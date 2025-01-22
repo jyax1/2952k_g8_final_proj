@@ -432,7 +432,7 @@ def imitate_trajectory_with_action_identifier(
             
             side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
 
-            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(front_frames_list, front_depth_list=None)
+            all_hand_poses_world, all_fingers_distances = action_identifier.get_all_hand_poses_finger_distances(front_frames_list, front_depth_list=None, side_frames_list=side_frames_list)
             actions_for_demo = action_identifier.compute_actions(all_hand_poses_world, all_fingers_distances, side_frames_list)
 
             # ------------------------------
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_RGB+bbox_square_smaller_2000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_smallrot_RGB+bbox_square_2000",
         num_demos=100,
         save_webp=False,
         batch_size=40

@@ -331,6 +331,24 @@ def finger_distance_in_world(
     # Euclidean distance in world
     return float(np.linalg.norm(p_cyan_world - p_magenta_world))
 
+
+def add_angle_to_axis_angle(rvec, delta_theta):
+    """
+    rvec: 3D axis-angle vector from e.g. as_rotvec() [rx, ry, rz]
+    delta_theta: amount in radians you want to add to the original angle
+    returns: new 3D axis-angle vector with the same axis but angle + delta_theta
+    """
+    angle = np.linalg.norm(rvec)
+    if angle < 1e-12:
+        # Edge case: zero rotation => choose any axis
+        axis = np.array([1.0, 0.0, 0.0])
+    else:
+        axis = rvec / angle
+
+    angle_new = angle + delta_theta
+    rvec_new = axis * angle_new
+    return rvec_new
+
 class ActionIdentifierMegapose:
     """Processes video frames (optionally with depth) to extract hand poses and finger distances."""
 
@@ -367,6 +385,7 @@ class ActionIdentifierMegapose:
         self,
         front_frames_list: list[np.ndarray],
         front_depth_list: Optional[list[np.ndarray]] = None,
+        side_frames_list: Optional[list[np.ndarray]] = None,
     ) -> tuple[list[Optional[np.ndarray]], list[float]]:
         """
         Given a list of frames (each shape [H,W,3] in np.uint8) and optionally a matching
@@ -506,7 +525,7 @@ class ActionIdentifierMegapose:
             pos_i1 = pose_i1[:3, 3]
             dp = (pos_i1 - pos_i) * self.scale_translation
             
-            delta_pose = np.linalg.inv(pose_i) @ pose_i1
+            delta_pose = np.linalg.inv(pose_i1) @ pose_i
 
             # 2) Extract the 3×3 rotation from delta_pose
             R_delta = delta_pose[:3, :3]
@@ -514,7 +533,7 @@ class ActionIdentifierMegapose:
             # 3) Convert rotation matrix to axis-angle
             #    as_rotvec() returns a 3D vector whose direction is the rotation axis
             #    and whose magnitude is the rotation angle (in radians).
-            axis_angle_vec = Rotation.from_matrix(R_delta).as_rotvec()
+            axis_angle_vec = Rotation.from_matrix(R_delta).as_rotvec() 
 
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
@@ -523,7 +542,8 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            action[:-1] = axis_angle_vec
+            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, np.deg2rad(20))
+            # action[3:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
             pos_x = position_x[i]
