@@ -332,10 +332,10 @@ def finger_distance_in_world(
     return float(np.linalg.norm(p_cyan_world - p_magenta_world))
 
 
-def add_angle_to_axis_angle(rvec, deg=np.deg2rad(15.0)):
+def add_angle_to_axis_angle(rvec, deg=15.0):
     """
     rvec: 3D axis-angle vector from e.g. as_rotvec() [rx, ry, rz]
-    deg: amount in radians you want to add to the original angle
+    deg: amount in degrees you want to add to the original angle
     returns: new 3D axis-angle vector with the same axis but angle + deg
     """
     angle = np.linalg.norm(rvec)
@@ -345,7 +345,7 @@ def add_angle_to_axis_angle(rvec, deg=np.deg2rad(15.0)):
     else:
         axis = rvec / angle
 
-    angle_new = angle + deg
+    angle_new = angle + np.deg2rad(deg)
     rvec_new = axis * angle_new
     return rvec_new
 
@@ -940,8 +940,8 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=np.deg2rad(15.0))
-            # action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=np.deg2rad(15.0))
+            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
+            # action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=15.0)
             # action[3:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
