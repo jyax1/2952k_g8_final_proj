@@ -332,11 +332,11 @@ def finger_distance_in_world(
     return float(np.linalg.norm(p_cyan_world - p_magenta_world))
 
 
-def add_angle_to_axis_angle(rvec, delta_theta):
+def add_angle_to_axis_angle(rvec, deg=np.deg2rad(15.0)):
     """
     rvec: 3D axis-angle vector from e.g. as_rotvec() [rx, ry, rz]
-    delta_theta: amount in radians you want to add to the original angle
-    returns: new 3D axis-angle vector with the same axis but angle + delta_theta
+    deg: amount in radians you want to add to the original angle
+    returns: new 3D axis-angle vector with the same axis but angle + deg
     """
     angle = np.linalg.norm(rvec)
     if angle < 1e-12:
@@ -345,8 +345,40 @@ def add_angle_to_axis_angle(rvec, delta_theta):
     else:
         axis = rvec / angle
 
-    angle_new = angle + delta_theta
+    angle_new = angle + deg
     rvec_new = axis * angle_new
+    return rvec_new
+
+def add_angle_to_dominant_axis(rvec: np.ndarray, deg=15.0) -> np.ndarray:
+    """
+    Takes an axis-angle vector `rvec = (rx, ry, rz)` (in radians).
+    1) Determine the normalized axis direction: axis = rvec / ||rvec||.
+    2) Find which coordinate of that axis has the largest absolute value => "dominant axis"
+    3) Snap that axis to ±ex, ±ey, or ±ez.
+    4) Add +deg degrees to the rotation about that axis.
+
+    Returns the new axis-angle vector (rx', ry', rz').
+    """
+    angle = np.linalg.norm(rvec)
+    if angle < 1e-12:
+        # No meaningful rotation => optionally pick x-axis by default
+        axis_cardinal = np.array([1.0, 0.0, 0.0])
+        angle_new = np.deg2rad(deg)
+        return axis_cardinal * angle_new
+
+    # Normalize
+    axis = rvec / angle
+    # Find which component is largest in absolute value
+    idx = np.argmax(np.abs(axis))    # 0 => x, 1 => y, 2 => z
+    sign_ = np.sign(axis[idx])       # +1 or -1
+    # Construct the "dominant cardinal axis"
+    axis_cardinal = np.zeros(3)
+    axis_cardinal[idx] = sign_
+
+    # Add deg degrees
+    angle_new = angle + np.deg2rad(deg)
+    # Rebuild rvec
+    rvec_new = axis_cardinal * angle_new
     return rvec_new
 
 class ActionIdentifierMegapose:
@@ -380,8 +412,110 @@ class ActionIdentifierMegapose:
         self.sideview_K = sideview_K
         self.frontview_R = frontview_R
         self.sideview_R = sideview_R
-
+    
     def get_all_hand_poses_finger_distances(
+        self,
+        front_frames_list: list[np.ndarray],
+        front_depth_list: Optional[list[np.ndarray]] = None,
+    ) -> tuple[list[Optional[np.ndarray]], list[float]]:
+        """
+        Given a list of frames (each shape [H,W,3] in np.uint8) and optionally a matching
+        list of depth images (each shape [H,W]), replicates your script logic to:
+
+          1) chunk the frames (and depth) in 'batch_size' steps,
+          2) find bounding boxes for 'green' (the hand),
+          3) call estimate_pose_batched for them,
+          4) measure finger distances (cyan vs magenta),
+          5) transform camera->object to world->object using R,
+          6) Return:
+               all_hand_poses_world : a list of length n, each an np.ndarray(4,4) or None
+               all_fingers_distances: same length n, each a float with finger distance
+
+        :param front_frames_list: List of RGB frames, each shape (H,W,3).
+        :param front_depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
+        """
+        num_frames = len(front_frames_list)
+        all_hand_poses_world = [None] * num_frames
+        all_fingers_distances = [0.0] * num_frames
+
+        # Process in chunks
+        for chunk_start in range(0, num_frames, self.batch_size):
+            chunk_end = min(chunk_start + self.batch_size, num_frames)
+            images_chunk = []
+            bboxes_chunk = []
+            depth_chunk = None
+
+            if front_depth_list is not None:
+                # Slice the depth frames for this batch
+                depth_chunk = front_depth_list[chunk_start:chunk_end]
+
+            # Gather bounding boxes for 'panda-hand' (green)
+            for idx in range(chunk_start, chunk_end):
+                img = front_frames_list[idx]
+                box_hand = find_color_bounding_box(img, color_name="green")
+                if box_hand is not None:
+                    # instance_id=0 for single object
+                    bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
+                else:
+                    bboxes_chunk.append([])
+                images_chunk.append(img)
+
+            # Batched pose estimation for chunk (with optional depth)
+            chunk_results = estimate_pose_batched(
+                list_of_images=images_chunk,
+                list_of_bboxes=bboxes_chunk,
+                K=self.frontview_K,
+                pose_estimator=self.pose_estimator,
+                model_info=self.model_info,
+                depth_list=depth_chunk,
+            )
+
+            # measure finger distances (cyan vs magenta)
+            finger_dist_chunk = []                
+            for idx in range(chunk_start, chunk_end):
+                img = front_frames_list[idx]
+                bbox_cyan = find_color_bounding_box(img, "cyan")
+                bbox_magenta = find_color_bounding_box(img, "magenta")
+                d = 0.0
+
+                offset = idx - chunk_start  # position within this chunk
+                pose_est_for_frame = chunk_results[offset]
+
+                if (bbox_cyan is not None) and (bbox_magenta is not None) and (len(pose_est_for_frame) > 0):
+                    # Get the transform from the *front camera* to the object
+                    # (assuming your 'pose_est_for_frame.poses[0]' is T_cam_obj)
+                    pose_frontview_frame = pose_est_for_frame.poses[0].cpu().numpy()
+
+                    # The 'depth' is just the z-translation of this frontview frame
+                    point_depth = pose_frontview_frame[2, 3]
+
+                    # Then compute the finger distance in world, or do a pixel_to_world, etc.
+                    d = finger_distance_in_world(
+                        bbox_cyan,
+                        bbox_magenta,
+                        point_depth,
+                        self.frontview_K,
+                        self.frontview_R
+                    )
+
+                finger_dist_chunk.append(d)
+
+            # Store results in the global arrays
+            for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
+                pose_est_for_frame = chunk_results[offset]
+                all_fingers_distances[global_idx] = finger_dist_chunk[offset]
+                if len(pose_est_for_frame) < 1:
+                    # no detection => None
+                    all_hand_poses_world[global_idx] = None
+                else:
+                    # get the first detection
+                    T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
+                    T_world_obj = self.frontview_R @ T_cam_obj
+                    all_hand_poses_world[global_idx] = T_world_obj
+
+        return all_hand_poses_world, all_fingers_distances    
+
+    def get_all_hand_poses_finger_distances_with_side(
         self,
         front_frames_list: list[np.ndarray],
         front_depth_list: Optional[list[np.ndarray]] = None,
@@ -612,7 +746,7 @@ class ActionIdentifierMegapose:
             axis_angle_vec = R_fused.as_rotvec()
 
             # As in your code, add 20 deg (0.349 rad) to the total angle
-            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, np.deg2rad(20))
+            axis_angle_vec = add_angle_to_dominant_axis(axis_angle_vec, deg=15.0)
 
             # -----------------------------------------------------------------
             # Rest of your code: finger distance logic, x-axis, etc.
@@ -752,7 +886,6 @@ class ActionIdentifierMegapose:
         self,
         all_hand_poses_world: list[np.ndarray],
         all_fingers_distances: list[float],
-        all_hand_poses_world_from_side: list[np.ndarray],
         side_frames_list: list[np.ndarray],
     ) -> list[np.ndarray]:
         """
@@ -807,7 +940,8 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, np.deg2rad(20))
+            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=np.deg2rad(15.0))
+            # action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=np.deg2rad(15.0))
             # action[3:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
