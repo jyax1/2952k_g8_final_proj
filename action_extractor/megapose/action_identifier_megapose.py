@@ -386,39 +386,48 @@ class ActionIdentifierMegapose:
         front_frames_list: list[np.ndarray],
         front_depth_list: Optional[list[np.ndarray]] = None,
         side_frames_list: Optional[list[np.ndarray]] = None,
-    ) -> tuple[list[Optional[np.ndarray]], list[float]]:
+    ) -> tuple[list[Optional[np.ndarray]], list[float], list[Optional[np.ndarray]]]:
         """
-        Given a list of frames (each shape [H,W,3] in np.uint8) and optionally a matching
-        list of depth images (each shape [H,W]), replicates your script logic to:
+        Given a list of *front* frames (each shape [H,W,3] in np.uint8) and optionally a matching
+        list of depth images (each shape [H,W]), plus an optional list of *side* frames:
 
-          1) chunk the frames (and depth) in 'batch_size' steps,
-          2) find bounding boxes for 'green' (the hand),
-          3) call estimate_pose_batched for them,
-          4) measure finger distances (cyan vs magenta),
-          5) transform camera->object to world->object using R,
-          6) Return:
-               all_hand_poses_world : a list of length n, each an np.ndarray(4,4) or None
-               all_fingers_distances: same length n, each a float with finger distance
+          1) Chunk the front frames (and optional front-depth) in 'batch_size' steps,
+          2) Find bounding boxes for 'green' (the hand) in the front frames,
+          3) Call estimate_pose_batched for them (front camera) => front poses,
+          4) Measure finger distances (using the front frames, 'cyan' vs 'magenta'),
+          5) Transform front camera->object to world->object using frontview_R,
+          6) Do the same logic for the side frames if provided, using sideview_R and sideview_K,
+          7) Return three lists (all length n):
+               all_hand_poses_world        : np.ndarray(4,4) or None
+               all_fingers_distances       : float
+               all_hand_poses_world_from_side : np.ndarray(4,4) or None
 
-        :param front_frames_list: List of RGB frames, each shape (H,W,3).
+        :param front_frames_list: List of RGB frames from the front camera, each shape (H,W,3).
         :param front_depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
+        :param side_frames_list:  Optional list of side-camera frames, each shape (H,W,3). If None, side poses are not computed.
+        :return: (all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side)
         """
         num_frames = len(front_frames_list)
         all_hand_poses_world = [None] * num_frames
         all_fingers_distances = [0.0] * num_frames
+        
+        # Prepare a list for side poses (will remain all None if side_frames_list is None)
+        all_hand_poses_world_from_side = [None] * num_frames
 
-        # Process in chunks
+        # -----------------
+        # FRONT FRAMES LOGIC
+        # -----------------
         for chunk_start in range(0, num_frames, self.batch_size):
             chunk_end = min(chunk_start + self.batch_size, num_frames)
             images_chunk = []
             bboxes_chunk = []
             depth_chunk = None
 
+            # Slice the depth frames for this batch if provided
             if front_depth_list is not None:
-                # Slice the depth frames for this batch
                 depth_chunk = front_depth_list[chunk_start:chunk_end]
 
-            # Gather bounding boxes for 'panda-hand' (green)
+            # Gather bounding boxes for 'panda-hand' (green) in front frames
             for idx in range(chunk_start, chunk_end):
                 img = front_frames_list[idx]
                 box_hand = find_color_bounding_box(img, color_name="green")
@@ -439,8 +448,8 @@ class ActionIdentifierMegapose:
                 depth_list=depth_chunk,
             )
 
-            # measure finger distances (cyan vs magenta)
-            finger_dist_chunk = []                
+            # measure finger distances (cyan vs magenta) using front frames
+            finger_dist_chunk = []
             for idx in range(chunk_start, chunk_end):
                 img = front_frames_list[idx]
                 bbox_cyan = find_color_bounding_box(img, "cyan")
@@ -469,7 +478,7 @@ class ActionIdentifierMegapose:
 
                 finger_dist_chunk.append(d)
 
-            # Store results in the global arrays
+            # Store results for front
             for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
                 pose_est_for_frame = chunk_results[offset]
                 all_fingers_distances[global_idx] = finger_dist_chunk[offset]
@@ -482,12 +491,268 @@ class ActionIdentifierMegapose:
                     T_world_obj = self.frontview_R @ T_cam_obj
                     all_hand_poses_world[global_idx] = T_world_obj
 
-        return all_hand_poses_world, all_fingers_distances
+        # ----------------
+        # SIDE FRAMES LOGIC
+        # ----------------
+        if side_frames_list is not None:
+            # Process side frames in chunks (same approach)
+            for chunk_start in range(0, num_frames, self.batch_size):
+                chunk_end = min(chunk_start + self.batch_size, num_frames)
+                side_images_chunk = side_frames_list[chunk_start:chunk_end]
+                side_bboxes_chunk = []
+
+                # Gather bounding boxes in side frames
+                for idx in range(chunk_start, chunk_end):
+                    side_img = side_frames_list[idx]
+                    box_hand_side = find_color_bounding_box(side_img, color_name="green")
+                    if box_hand_side is not None:
+                        side_bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand_side, "instance_id": 0}])
+                    else:
+                        side_bboxes_chunk.append([])
+
+                # Batched pose estimation for side chunk
+                side_chunk_results = estimate_pose_batched(
+                    list_of_images=side_images_chunk,
+                    list_of_bboxes=side_bboxes_chunk,
+                    K=self.sideview_K,
+                    pose_estimator=self.pose_estimator,
+                    model_info=self.model_info,
+                    depth_list=None,  # we don't have side-depth in your code
+                )
+
+                # Store results for side
+                for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
+                    pose_est_for_frame_side = side_chunk_results[offset]
+                    if len(pose_est_for_frame_side) < 1:
+                        all_hand_poses_world_from_side[global_idx] = None
+                    else:
+                        T_cam_obj_side = pose_est_for_frame_side.poses[0].cpu().numpy()
+                        T_world_obj_side = self.sideview_R @ T_cam_obj_side
+                        all_hand_poses_world_from_side[global_idx] = T_world_obj_side
+
+        return all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side
+
+    def compute_actions_simple_euler(
+        self,
+        all_hand_poses_world: list[np.ndarray],
+        all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
+        side_frames_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        (Version 1) Simple "Euler-pick" fusion for rotations.
+
+        Exactly like your original method, but at rotation-computation time:
+        - We get delta from front and from side,
+        - Convert each to Euler("xyz"),
+        - Pick y from side, x and z from front,
+        - Then build axis-angle from that fused rotation.
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        # ------------------------------------------------
+        # 1) Compute position_x array (unchanged from your script)
+        # ------------------------------------------------
+        position_x = []
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, color_name="green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2, 3]
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
+            position_x.append(point_world[0])
+
+        actions = []
+        for i in range(num_frames - 1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i + 1]
+
+            # side-camera-based poses
+            pose_i_side = all_hand_poses_world_from_side[i]
+            pose_i1_side = all_hand_poses_world_from_side[i + 1]
+
+            # If either is None => zero action, as in your code
+            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+                actions.append(np.zeros(7, dtype=np.float32))
+                continue
+
+            # Translation: same as your code
+            pos_i = pose_i[:3, 3]
+            pos_i1 = pose_i1[:3, 3]
+            dp = (pos_i1 - pos_i) * self.scale_translation
+
+            # -----------------------------------------------------------------
+            # Fused rotation: Euler approach
+            # -----------------------------------------------------------------
+
+            # Front rotation: "delta" is pose_{i+1}^{-1} * pose_i (per your code)
+            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            R_front_delta = delta_pose_front[:3, :3]
+
+            # Side rotation: same idea, but from side poses
+            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
+            R_side_delta = delta_pose_side[:3, :3]
+
+            # Convert each to Euler angles in the SAME order
+            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+
+            # Example policy: pick y from side, x and z from front
+            fused_euler = [
+                euler_front[0],   # roll (x-rotation)
+                euler_side[1],    # pitch (y-rotation) from side
+                euler_front[2],   # yaw (z-rotation)
+            ]
+
+            # Convert fused Euler back to a rotation
+            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            axis_angle_vec = R_fused.as_rotvec()
+
+            # As in your code, add 20 deg (0.349 rad) to the total angle
+            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, np.deg2rad(20))
+
+            # -----------------------------------------------------------------
+            # Rest of your code: finger distance logic, x-axis, etc.
+            # -----------------------------------------------------------------
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i + 1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            action = np.zeros(7, dtype=np.float32)
+            action[:3] = dp
+            action[3:-1] = axis_angle_vec
+
+            # Overwrite x with sideview-based position
+            pos_x = position_x[i]
+            pos_x_next = position_x[i + 1]
+            action_x = (pos_x_next - pos_x) * self.scale_translation
+            action[0] = action_x
+
+            # Gripper sign logic
+            if i > 20 and delta_finger_distance < 0.02:
+                # Gripping
+                action[-1] = 1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
+
+            actions.append(action)
+
+        return actions
+
+    def compute_actions_weighted_manifold(
+        self,
+        all_hand_poses_world: list[np.ndarray],
+        all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
+        side_frames_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        (Version 2) Weighted manifold fusion in axis-angle space.
+
+        Everything else is kept the same, except we:
+        - Compute delta rotations from front + side
+        - Convert each to a rotation vector (r_front, r_side)
+        - Weighted-average them in R^3
+        - Rebuild the final axis-angle.
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        # ------------------------------------------------
+        # 1) Compute position_x array (identical to your script)
+        # ------------------------------------------------
+        position_x = []
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, color_name="green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2, 3]
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
+            position_x.append(point_world[0])
+
+        actions = []
+        for i in range(num_frames - 1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i + 1]
+
+            # side-camera-based poses
+            pose_i_side = all_hand_poses_world_from_side[i]
+            pose_i1_side = all_hand_poses_world_from_side[i + 1]
+
+            # If either is None => zero action
+            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+                actions.append(np.zeros(7, dtype=np.float32))
+                continue
+
+            # Translation as usual
+            pos_i = pose_i[:3, 3]
+            pos_i1 = pose_i1[:3, 3]
+            dp = (pos_i1 - pos_i) * self.scale_translation
+
+            # -----------------------------------------------------------------
+            # Fused rotation: Weighted axis-angle approach
+            # -----------------------------------------------------------------
+
+            # 1) Front rotation
+            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            R_front_delta = delta_pose_front[:3, :3]
+            r_front = Rotation.from_matrix(R_front_delta).as_rotvec()
+
+            # 2) Side rotation
+            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
+            R_side_delta = delta_pose_side[:3, :3]
+            r_side = Rotation.from_matrix(R_side_delta).as_rotvec()
+
+            # 3) Weighted average in tangent space
+            #    Example: front is good for x,z -> large weights there, weaker for y
+            #             side is good for y     -> large weight there, smaller for x,z
+            W_front = np.diag([1.0, 0.2, 1.0])  # you can tweak these
+            W_side  = np.diag([0.2, 1.0, 0.2])  # you can tweak these
+
+            A = W_front.T @ W_front + W_side.T @ W_side  # for diag => sum of squares
+            b = (W_front.T @ W_front) @ r_front + (W_side.T @ W_side) @ r_side
+            r_combined = np.linalg.inv(A) @ b
+
+            # 4) Possibly add +20° to the angle
+            axis_angle_vec = add_angle_to_axis_angle(r_combined, np.deg2rad(20))
+
+            # -----------------------------------------------------------------
+            # Remainder: finger distances, x-axis, etc. (unchanged)
+            # -----------------------------------------------------------------
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i + 1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            action = np.zeros(7, dtype=np.float32)
+            action[:3] = dp
+            action[3:-1] = axis_angle_vec
+
+            # Overwrite x with sideview-based position
+            pos_x = position_x[i]
+            pos_x_next = position_x[i + 1]
+            action_x = (pos_x_next - pos_x) * self.scale_translation
+            action[0] = action_x
+
+            # Gripper logic
+            if i > 20 and delta_finger_distance < 0.02:
+                action[-1] = 1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
+
+            actions.append(action)
+
+        return actions
 
     def compute_actions(
         self,
-        all_hand_poses_world: list[Optional[np.ndarray]],
+        all_hand_poses_world: list[np.ndarray],
         all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
         side_frames_list: list[np.ndarray],
     ) -> list[np.ndarray]:
         """
