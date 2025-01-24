@@ -5,8 +5,9 @@ process_video_dataset_with_megapose.py
 
 1) Copies your original HDF5 file to a new file (so the original is untouched).
 2) Loads the Megapose-based ActionIdentifierMegapose.
-3) Iterates over each demo in the new file, infers actions from frames, 
-   and overwrites the `root["data"][demo]["actions"]` dataset in place.
+3) Iterates over each demo in the new file, infers actions from frames,
+   **and appends one final action** so that #actions == #frames.
+4) Overwrites the `root["data"][demo]["actions"]` dataset in place.
 
 Example usage:
   python process_video_dataset_with_megapose.py \
@@ -67,7 +68,9 @@ def process_video_dataset_with_megapose(
     # 0) Copy the original file to a new file so we can overwrite it
     # ----------------------------------------------------------------
     if os.path.abspath(input_file) == os.path.abspath(output_file):
-        raise ValueError("Output file must differ from input file, so we can safely copy.")
+        raise ValueError(
+            "Output file must differ from input file, so we can safely copy."
+        )
     logger.info(f"Copying {input_file} => {output_file}")
     shutil.copy(input_file, output_file)
 
@@ -144,6 +147,7 @@ def process_video_dataset_with_megapose(
         logger.info(f"Processing {len(demos)} demos in {output_file} ...")
         for demo in tqdm(demos, desc="Updating actions"):
             obs_group = f_out["data"][demo]["obs"]
+            # Number of frames for this demo
             num_samples = obs_group["frontview_image"].shape[0]
 
             # Gather front frames
@@ -166,20 +170,27 @@ def process_video_dataset_with_megapose(
                 front_frames_list,
                 front_depth_list=front_depth_list,
             )
-
-            # 3B) compute actions
+            # Typically "compute_actions" yields shape (N-1, 7)
             actions_for_demo = action_identifier.compute_actions(
                 all_hand_poses_world,
                 all_fingers_distances,
                 side_frames_list
             )
-            actions_for_demo = np.array(actions_for_demo, dtype=np.float32)  # shape (N-1, 7) typically
+            actions_for_demo = np.array(actions_for_demo, dtype=np.float32)
+
+            # 3B) Ensure we have #actions == #frames
+            # If we originally get (N-1,7) for N frames, we replicate
+            # the last action to get shape (N,7).
+            if actions_for_demo.shape[0] < num_samples:
+                final_action = actions_for_demo[-1].copy()  # last row
+                actions_for_demo = np.vstack([actions_for_demo, final_action])
+                # Now actions_for_demo has shape (N, 7)
 
             # 3C) Overwrite the existing actions
             old_shape = f_out["data"][demo]["actions"].shape
             new_shape = actions_for_demo.shape
             min_frames = min(new_shape[0], old_shape[0])
-            min_dim    = min(new_shape[1], old_shape[1])
+            min_dim = min(new_shape[1], old_shape[1])
             f_out["data"][demo]["actions"][:min_frames, :min_dim] = actions_for_demo[:min_frames, :min_dim]
 
     logger.info(f"Done. Overwrote actions in {output_file}.")
@@ -187,14 +198,19 @@ def process_video_dataset_with_megapose(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-file", type=str, default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_1000_obs.hdf5",
+    parser.add_argument("--input-file", type=str,
+                        default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_1000_obs.hdf5",
                         help="Path to the original HDF5 file")
-    parser.add_argument("--output-file", type=str, default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_300_obs_megapose.hdf5",
+    parser.add_argument("--output-file", type=str,
+                        default="/home/yilong/Documents/policy_data/lift/raw/1736991916_9054875/test/lift_300_obs_megapose.hdf5",
                         help="Where to save the new HDF5 file with updated actions")
-    parser.add_argument("--hand-mesh-dir", type=str, default="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+    parser.add_argument("--hand-mesh-dir", type=str,
+                        default="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
                         help="Folder with .obj or .ply mesh for the 'panda-hand'")
-    parser.add_argument("--num-demos", type=int, default=300, help="Max demos per file; 0 => all demos")
-    parser.add_argument("--batch-size", type=int, default=40, help="Chunk size for Megapose inference")
+    parser.add_argument("--num-demos", type=int, default=300,
+                        help="Max demos per file; 0 => all demos")
+    parser.add_argument("--batch-size", type=int, default=40,
+                        help="Chunk size for Megapose inference")
     args = parser.parse_args()
 
     process_video_dataset_with_megapose(

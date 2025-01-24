@@ -746,7 +746,7 @@ class ActionIdentifierMegapose:
             axis_angle_vec = R_fused.as_rotvec()
 
             # As in your code, add 20 deg (0.349 rad) to the total angle
-            axis_angle_vec = add_angle_to_dominant_axis(axis_angle_vec, deg=15.0)
+            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
 
             # -----------------------------------------------------------------
             # Rest of your code: finger distance logic, x-axis, etc.
@@ -940,8 +940,8 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
-            # action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=15.0)
+            # action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
+            action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=20.0)
             # action[3:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
