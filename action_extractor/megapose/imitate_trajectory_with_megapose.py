@@ -394,6 +394,43 @@ def imitate_trajectory_with_action_identifier(
     n_success = 0
     total_n = 0
     results = []
+    
+    def load_hand_poses_in_world(obs_group):
+        from scipy.spatial.transform import Rotation as R
+        """
+        Builds a list of homogeneous transforms (4×4) from 
+        'robot0_eef_pos' [N, 3] and 'robot0_eef_quat' [N, 4].
+        """
+
+        # 1) Read all positions and quaternions from the HDF5 group
+        #    shapes: (N, 3) and (N, 4) respectively
+        pos_array = obs_group["robot0_eef_pos"][:]   # shape (N, 3)
+        quat_array = obs_group["robot0_eef_quat"][:] # shape (N, 4)
+
+        num_samples = pos_array.shape[0]
+        all_hand_poses_world = []
+
+        for i in range(num_samples):
+            # (a) position
+            pos = pos_array[i]  # [x, y, z]
+
+            # (b) quaternion
+            #   If your dataset is [qx, qy, qz, qw], we can use it directly.
+            #   If it's [qw, qx, qy, qz], reorder before using:
+            quat = quat_array[i]  # [qx, qy, qz, qw] (assumed)
+
+            # (c) Convert quaternion to a 3×3 rotation matrix
+            #   Rotation.from_quat expects [x, y, z, w]
+            rot_mat_3x3 = R.from_quat(quat).as_matrix()
+
+            # (d) Build a 4×4 homogeneous transform
+            T = np.eye(4)
+            T[:3, :3] = rot_mat_3x3
+            T[:3, 3] = pos
+
+            all_hand_poses_world.append(T)
+
+        return all_hand_poses_world
 
     # ----------------------------------------------------------------
     # 7) Main loop over demos
@@ -432,8 +469,12 @@ def imitate_trajectory_with_action_identifier(
             
             side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
 
-            all_hand_poses_world, all_fingers_distances, all_hand_poses_world_side = action_identifier.get_all_hand_poses_finger_distances_with_side(front_frames_list, front_depth_list=None, side_frames_list=side_frames_list)
-            actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world_side, side_frames_list)
+            # all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side = action_identifier.get_all_hand_poses_finger_distances_with_side(front_frames_list, front_depth_list=None, side_frames_list=side_frames_list)
+            
+            all_hand_poses_world = load_hand_poses_in_world(obs_group)
+            all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
+            
+            actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world, side_frames_list)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -512,7 +553,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_simple_euler",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_baseline",
         num_demos=100,
         save_webp=False,
         batch_size=40

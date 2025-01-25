@@ -737,8 +737,8 @@ class ActionIdentifierMegapose:
             # Example policy: pick y from side, x and z from front
             fused_euler = [
                 euler_front[0],   # roll (x-rotation)
-                euler_side[1],    # pitch (y-rotation) from side
-                euler_front[2],   # yaw (z-rotation)
+                euler_front[1],    # pitch (y-rotation) from side
+                euler_side[2],   # yaw (z-rotation)
             ]
 
             # Convert fused Euler back to a rotation
@@ -746,7 +746,7 @@ class ActionIdentifierMegapose:
             axis_angle_vec = R_fused.as_rotvec()
 
             # As in your code, add 20 deg (0.349 rad) to the total angle
-            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
+            axis_angle_vec *= 9.5
 
             # -----------------------------------------------------------------
             # Rest of your code: finger distance logic, x-axis, etc.
@@ -940,8 +940,8 @@ class ActionIdentifierMegapose:
 
             action = np.zeros(7, dtype=np.float32)
             action[:3] = dp
-            # action[3:-1] = add_angle_to_axis_angle(axis_angle_vec, deg=15.0)
-            action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=20.0)
+            action[3:-1] = axis_angle_vec * 9.5
+            # action[3:-1] = add_angle_to_dominant_axis(axis_angle_vec, deg=15.0)
             # action[3:-1] = axis_angle_vec
             
             # Compute x-axis actions separately
