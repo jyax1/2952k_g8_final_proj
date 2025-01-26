@@ -990,85 +990,210 @@ class ActionIdentifierMegapose:
         all_fingers_distances: list[float],
         all_hand_poses_world_from_side: list[np.ndarray],
         side_frames_list: list[np.ndarray],
+        skip_n: int = 3,
     ) -> list[np.ndarray]:
         """
-        (Version 1) Simple "Euler-pick" fusion for rotations.
+        Modified compute_actions_simple_euler with skipping & interpolation.
 
-        Exactly like your original method, but at rotation-computation time:
-        - We get delta from front and from side,
-        - Convert each to Euler("xyz"),
-        - Pick y from side, x and z from front,
-        - Then build axis-angle from that fused rotation.
+        1) We choose 'unskipped' frames at intervals of (skip_n+1), plus
+        always include the last frame.
+        e.g. if skip_n=2 and we have 10 frames, we keep frames [0,3,6,9].
+        Then from the last unskipped=9 to final=9 anyway => done.
+        If final was 9 but we had 10 frames => we keep 0,3,6,9,9? Actually 9 is the last,
+        so it's not repeated. If the last unskipped < num_frames-1, we add num_frames-1.
+
+        2) For each consecutive pair (i, j) of unskipped frames:
+        - We "slerp" (or axis-angle interpolate) from T_i to T_j in
+            (j - i + 1) steps, filling the new, "interpolated" list for frames i..j.
+            That means each intermediate frame is a fraction of the big pose difference.
+        - Similarly for 'all_hand_poses_world_from_side'.
+
+        3) Then we apply the original Euler-fusion logic to this new
+        "interpolated" pose list for front and side, producing (num_frames-1) actions.
+
+        So the final action list is the *same length* as original (one action
+        per step), but the actual poses used for the steps are smoothed or
+        subdivided between key frames.
+
+        :param skip_n: how many frames to skip between “key frames”.
+                    0 => old behavior (use every frame). 2 => use frames
+                    i, i+3, i+6, etc. and interpolate the in-betweens.
         """
+
+        import numpy as np
+        from scipy.spatial.transform import Rotation as R
+
         num_frames = len(all_hand_poses_world)
         if num_frames < 2:
             return []
 
-        # ------------------------------------------------
-        # 1) Compute position_x array (unchanged from your script)
-        # ------------------------------------------------
+        # ----------------------------------------------------------------
+        # Helper: SLERP or axis-angle interpolation between two 4x4 poses
+        # ----------------------------------------------------------------
+        def interpolate_pose(T1, T2, frac: float):
+            """
+            Interpolate between T1, T2 in SE(3) using linear translation + quaternion slerp.
+            T1, T2 are (4,4) or possibly None.
+            frac in [0..1].
+            Returns a new (4,4) transform or None if T1 or T2 is None.
+            """
+            if T1 is None or T2 is None:
+                return None
+            p1 = T1[:3, 3]
+            p2 = T2[:3, 3]
+            # linear interpolation for translation
+            p_interp = p1 + frac * (p2 - p1)
+
+            R1 = T1[:3, :3]
+            R2 = T2[:3, :3]
+            q1 = R.from_matrix(R1).as_quat()  # x,y,z,w
+            q2 = R.from_matrix(R2).as_quat()
+            # slerp
+            # There's no direct built-in "one-step slerp" in newer scipy, so we do manual:
+            #   R_slerp(frac) = R1 * (R1.inv * R2)^frac
+            # Or we can do an "squad" approach. But let's do a simpler "single-step"
+            # using from_quat => as_quat to get the fraction:
+            # We'll do a custom function or we rely on "R.slerp".
+            # But to keep no external code, let's do a single-step function:
+
+            # normalized dot
+            dot = np.dot(q1, q2)
+            if dot < 0.0:
+                q2 = -q2
+                dot = -dot
+            dot = np.clip(dot, -1.0, 1.0)
+
+            if dot > 0.9995:
+                # nearly identical => linear
+                q_interp = q1 + frac*(q2 - q1)
+                q_interp /= np.linalg.norm(q_interp)
+            else:
+                theta_0 = np.arccos(dot)
+                theta = theta_0 * frac
+                sin_theta = np.sin(theta)
+                sin_theta_0 = np.sin(theta_0)
+                s1 = np.cos(theta) - dot * sin_theta / sin_theta_0
+                s2 = sin_theta / sin_theta_0
+                q_interp = (s1 * q1) + (s2 * q2)
+
+            # build final rotation
+            R_interp = R.from_quat(q_interp).as_matrix()
+
+            T_out = np.eye(4)
+            T_out[:3, :3] = R_interp
+            T_out[:3, 3] = p_interp
+            return T_out
+
+        # ----------------------------------------------------------------
+        # 1) Identify "unskipped" key frames
+        # ----------------------------------------------------------------
+        unskipped = []
+        i = 0
+        step = skip_n + 1
+        while i < num_frames:
+            unskipped.append(i)
+            i += step
+        # if the last key frame isn't num_frames-1, force it:
+        if unskipped[-1] != num_frames - 1:
+            unskipped[-1] = num_frames - 1  # ensure last pose is used
+
+        # ----------------------------------------------------------------
+        # 2) Build new "interpolated" lists for front and side
+        # ----------------------------------------------------------------
+        new_front = [None]*num_frames
+        new_side  = [None]*num_frames
+
+        for k in range(len(unskipped)-1):
+            idxA = unskipped[k]
+            idxB = unskipped[k+1]
+            # T_A => T_B
+            T_Af = all_hand_poses_world[idxA]
+            T_Bf = all_hand_poses_world[idxB]
+            T_As = all_hand_poses_world_from_side[idxA]
+            T_Bs = all_hand_poses_world_from_side[idxB]
+
+            length = idxB - idxA
+            # fill frames from idxA..idxB
+            for local_i in range(length+1):
+                frac = 0.0 if length==0 else (local_i / float(length))
+                # front
+                new_front[idxA + local_i] = interpolate_pose(T_Af, T_Bf, frac)
+                # side
+                new_side[idxA + local_i]  = interpolate_pose(T_As, T_Bs, frac)
+
+        # If there's only 1 "unskipped" => do nothing or just copy
+        if len(unskipped) == 1:
+            # trivial => all are the same pose or None
+            new_front[0] = all_hand_poses_world[0]
+            new_side[0]  = all_hand_poses_world_from_side[0]
+
+        # Now we have 'new_front', 'new_side' as interpolated poses
+        # We'll do the EXACT same loop as your original code, but referencing these new lists.
+
+        # 3) Precompute "position_x" from side_frames_list
         position_x = []
         for i in range(num_frames):
             side_frame = side_frames_list[i]
             bbox = find_color_bounding_box(side_frame, color_name="green")
             u, v = bounding_box_center(bbox)
-            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            # be sure to reference new_front or new_side for the transform
+            # According to your code, you used "all_hand_poses_world[i]" for the sideview_R transform
+            # We'll keep the same approach, but now using new_front[i] (the "primary"???)
+            # Actually you used "all_hand_poses_world[i]", but let's remain consistent:
+            # if the logic is the same, we do that. Or we might want new_front. We'll do new_front.
+            # Because that means we consistently handle the newly interpolated front pose for extrinsic?
+            # But your original code used sideview_R * all_hand_poses_world[i] as a partial? Actually it did:
+            #   pose_sideview_frame = inv(sideview_R) @ all_hand_poses_world[i]
+            # We'll replicate the same. So:
+            if new_front[i] is None:
+                position_x.append(0.0)
+                continue
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ new_front[i]
             point_depth = pose_sideview_frame[2, 3]
             point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
             position_x.append(point_world[0])
 
+        # 4) Build actions
         actions = []
         for i in range(num_frames - 1):
-            pose_i = all_hand_poses_world[i]
-            pose_i1 = all_hand_poses_world[i + 1]
+            pose_i_front = new_front[i]
+            pose_i1_front = new_front[i + 1]
+            pose_i_side = new_side[i]
+            pose_i1_side = new_side[i + 1]
 
-            # side-camera-based poses
-            pose_i_side = all_hand_poses_world_from_side[i]
-            pose_i1_side = all_hand_poses_world_from_side[i + 1]
-
-            # If either is None => zero action, as in your code
-            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+            if (pose_i_front is None) or (pose_i1_front is None) or \
+            (pose_i_side is None) or (pose_i1_side is None):
                 actions.append(np.zeros(7, dtype=np.float32))
                 continue
 
-            # Translation: same as your code
-            pos_i = pose_i[:3, 3]
-            pos_i1 = pose_i1[:3, 3]
+            # translation
+            pos_i = pose_i_front[:3, 3]
+            pos_i1 = pose_i1_front[:3, 3]
             dp = (pos_i1 - pos_i) * self.scale_translation
 
-            # -----------------------------------------------------------------
-            # Fused rotation: Euler approach
-            # -----------------------------------------------------------------
-
-            # Front rotation: "delta" is pose_{i+1}^{-1} * pose_i (per your code)
-            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            # fused rotation
+            delta_pose_front = np.linalg.inv(pose_i1_front) @ pose_i_front
             R_front_delta = delta_pose_front[:3, :3]
 
-            # Side rotation: same idea, but from side poses
             delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
             R_side_delta = delta_pose_side[:3, :3]
 
-            # Convert each to Euler angles in the SAME order
-            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
-            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+            euler_front = R.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = R.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
 
-            # Example policy: pick y from side, x and z from front
+            # x,z from front, y from side
             fused_euler = [
-                euler_front[0],   # roll (x-rotation)
-                euler_front[1],    # pitch (y-rotation) from side
-                euler_side[2],   # yaw (z-rotation)
+                euler_front[0],
+                euler_front[1],
+                euler_side[2],
             ]
-
-            # Convert fused Euler back to a rotation
-            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            R_fused = R.from_euler('xyz', fused_euler, degrees=False)
             axis_angle_vec = R_fused.as_rotvec()
 
-            # As in your code, add 20 deg (0.349 rad) to the total angle
-            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, 5)
+            # multiply angle
+            axis_angle_vec *= 9.5
 
-            # -----------------------------------------------------------------
-            # Rest of your code: finger distance logic, x-axis, etc.
-            # -----------------------------------------------------------------
+            # finger distance
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
             delta_finger_distance = finger_distance2 - finger_distance1
@@ -1077,120 +1202,12 @@ class ActionIdentifierMegapose:
             action[:3] = dp
             action[3:-1] = axis_angle_vec
 
-            # Overwrite x with sideview-based position
+            # Overwrite x with side-based position
             pos_x = position_x[i]
             pos_x_next = position_x[i + 1]
             action_x = (pos_x_next - pos_x) * self.scale_translation
             action[0] = action_x
 
-            # Gripper sign logic
-            if i > 20 and delta_finger_distance < 0.02:
-                # Gripping
-                action[-1] = 1
-            else:
-                action[-1] = -np.sign(delta_finger_distance)
-
-            actions.append(action)
-
-        return actions
-
-    def compute_actions_weighted_manifold(
-        self,
-        all_hand_poses_world: list[np.ndarray],
-        all_fingers_distances: list[float],
-        all_hand_poses_world_from_side: list[np.ndarray],
-        side_frames_list: list[np.ndarray],
-    ) -> list[np.ndarray]:
-        """
-        (Version 2) Weighted manifold fusion in axis-angle space.
-
-        Everything else is kept the same, except we:
-        - Compute delta rotations from front + side
-        - Convert each to a rotation vector (r_front, r_side)
-        - Weighted-average them in R^3
-        - Rebuild the final axis-angle.
-        """
-        num_frames = len(all_hand_poses_world)
-        if num_frames < 2:
-            return []
-
-        # ------------------------------------------------
-        # 1) Compute position_x array (identical to your script)
-        # ------------------------------------------------
-        position_x = []
-        for i in range(num_frames):
-            side_frame = side_frames_list[i]
-            bbox = find_color_bounding_box(side_frame, color_name="green")
-            u, v = bounding_box_center(bbox)
-            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
-            point_depth = pose_sideview_frame[2, 3]
-            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
-            position_x.append(point_world[0])
-
-        actions = []
-        for i in range(num_frames - 1):
-            pose_i = all_hand_poses_world[i]
-            pose_i1 = all_hand_poses_world[i + 1]
-
-            # side-camera-based poses
-            pose_i_side = all_hand_poses_world_from_side[i]
-            pose_i1_side = all_hand_poses_world_from_side[i + 1]
-
-            # If either is None => zero action
-            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
-                actions.append(np.zeros(7, dtype=np.float32))
-                continue
-
-            # Translation as usual
-            pos_i = pose_i[:3, 3]
-            pos_i1 = pose_i1[:3, 3]
-            dp = (pos_i1 - pos_i) * self.scale_translation
-
-            # -----------------------------------------------------------------
-            # Fused rotation: Weighted axis-angle approach
-            # -----------------------------------------------------------------
-
-            # 1) Front rotation
-            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
-            R_front_delta = delta_pose_front[:3, :3]
-            r_front = Rotation.from_matrix(R_front_delta).as_rotvec()
-
-            # 2) Side rotation
-            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
-            R_side_delta = delta_pose_side[:3, :3]
-            r_side = Rotation.from_matrix(R_side_delta).as_rotvec()
-
-            # 3) Weighted average in tangent space
-            #    Example: front is good for x,z -> large weights there, weaker for y
-            #             side is good for y     -> large weight there, smaller for x,z
-            W_front = np.diag([1.0, 0.2, 1.0])  # you can tweak these
-            W_side  = np.diag([0.2, 1.0, 0.2])  # you can tweak these
-
-            A = W_front.T @ W_front + W_side.T @ W_side  # for diag => sum of squares
-            b = (W_front.T @ W_front) @ r_front + (W_side.T @ W_side) @ r_side
-            r_combined = np.linalg.inv(A) @ b
-
-            # 4) Possibly add +20° to the angle
-            axis_angle_vec = add_angle_to_axis_angle(r_combined, np.deg2rad(20))
-
-            # -----------------------------------------------------------------
-            # Remainder: finger distances, x-axis, etc. (unchanged)
-            # -----------------------------------------------------------------
-            finger_distance1 = all_fingers_distances[i]
-            finger_distance2 = all_fingers_distances[i + 1]
-            delta_finger_distance = finger_distance2 - finger_distance1
-
-            action = np.zeros(7, dtype=np.float32)
-            action[:3] = dp
-            action[3:-1] = axis_angle_vec
-
-            # Overwrite x with sideview-based position
-            pos_x = position_x[i]
-            pos_x_next = position_x[i + 1]
-            action_x = (pos_x_next - pos_x) * self.scale_translation
-            action[0] = action_x
-
-            # Gripper logic
             if i > 20 and delta_finger_distance < 0.02:
                 action[-1] = 1
             else:
@@ -1199,6 +1216,7 @@ class ActionIdentifierMegapose:
             actions.append(action)
 
         return actions
+
 
     def compute_actions(
         self,

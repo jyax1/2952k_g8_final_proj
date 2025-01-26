@@ -58,6 +58,8 @@ from action_extractor.megapose.action_identifier_megapose import (
     pixel_to_world
 )
 
+from scipy.spatial.transform import Rotation as R
+
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
 
 #####################################################################
@@ -280,6 +282,159 @@ def smooth_action_sequence(actions, window_length=5, polyorder=2):
     
     return smoothed
 
+def compare_poses_and_actions(
+    all_hand_poses_world: list[np.ndarray],
+    all_actions: np.ndarray,
+    print_details: bool = True
+):
+    """
+    Given:
+      - all_hand_poses_world: list of length N, each a 4×4 homogeneous transform T_i
+      - all_actions: np.ndarray shape (N,7) or (N,6), the action at each step
+                    (we assume the i-th action took us from T_i to T_{i+1}).
+    
+    We compare the measured deltas in the pose data to the stored actions.
+
+    Steps:
+    1) For i in [0..N-2], compute:
+       - p_i => T_i[:3,3]
+       - p_i+1 => T_{i+1}[:3,3]
+       => delta_p = p_i+1 - p_i
+    2) Also compute rotation delta in axis-angle:
+       => R_delta = R_i^T * R_{i+1}  (or vice versa, if you suspect a different order)
+       => rvec_delta = as_rotvec(R_delta)
+    3) Compare with action_i[:3] for position, action_i[3:6] for orientation.
+    4) Possibly compute ratio or difference.
+
+    print_details: if True, prints debug info. Otherwise, you might collect results in arrays.
+
+    Returns:
+        A dictionary summarizing average scale factors or differences, e.g.:
+        {
+          'pos_scale_mean': ...,
+          'pos_scale_std': ...,
+          'rot_scale_mean': ...,
+          'rot_scale_std': ...
+        }
+        or something similar, so you can see the typical ratio used in your environment.
+    """
+    num_poses = len(all_hand_poses_world)
+    num_actions = all_actions.shape[0]
+
+    # we assume the environment uses the i-th action to go from pose i to pose i+1
+    # so we only compare up to min(num_poses - 1, num_actions)
+    max_i = min(num_poses - 1, num_actions)
+
+    pos_scales = []
+    rot_scales = []
+    for i in range(max_i):
+        T_i = all_hand_poses_world[i]
+        T_i1 = all_hand_poses_world[i+1]
+        action_i = all_actions[i]
+
+        # 1) Extract position from T_i
+        p_i = T_i[:3, 3]
+        p_i1 = T_i1[:3, 3]
+        delta_p = p_i1 - p_i  # "actual" translation in world
+
+        # 2) Extract R_i
+        R_i = T_i[:3, :3]
+        R_i1 = T_i1[:3, :3]
+        # often we do R_delta = R_i^T * R_i1 if the action is "from i to i+1"
+        R_delta = R_i.T @ R_i1
+        # convert to axis-angle
+        rvec_delta = R.from_matrix(R_delta).as_rotvec()  # shape (3,)
+
+        # 3) Compare with action
+        # Suppose action_i = [dx, dy, dz, rx, ry, rz, (gripper)] => shape(7,)
+        dxdydz = action_i[:3]  # position deltas
+        rxryrz = action_i[3:6] if action_i.shape[0] >= 6 else np.zeros(3)
+
+        # 4) We'll attempt ratio = action_i[:3] / delta_p
+        # but watch out for zero or near-zero. We'll do a norm ratio or each component
+        norm_p = np.linalg.norm(delta_p)
+        norm_action_p = np.linalg.norm(dxdydz)
+        pos_scale = np.nan
+        if norm_p > 1e-12:
+            pos_scale = norm_action_p / norm_p
+        pos_scales.append(pos_scale)
+
+        # For rotation, do a norm ratio too
+        norm_r = np.linalg.norm(rvec_delta)
+        norm_action_r = np.linalg.norm(rxryrz)
+        rot_scale = np.nan
+        if norm_r > 1e-12:
+            rot_scale = norm_action_r / norm_r
+        rot_scales.append(rot_scale)
+
+        if print_details:
+            print(f"Step {i}:")
+            print(f"  Pose delta p_i => p_{i+1}: {delta_p},  norm={norm_p:.4f}")
+            print(f"  Action pos: {dxdydz},  norm={norm_action_p:.4f}, ratio~={pos_scale:.4f}")
+            print(f"  Rot delta (axis-angle): {rvec_delta}, norm={norm_r:.4f}")
+            print(f"  Action rot: {rxryrz}, norm={norm_action_r:.4f}, ratio~={rot_scale:.4f}")
+            print("")
+
+    # Summarize
+    pos_scales_np = np.array(pos_scales)
+    rot_scales_np = np.array(rot_scales)
+    summary = {
+        'pos_scale_mean': np.nanmean(pos_scales_np),
+        'pos_scale_std':  np.nanstd(pos_scales_np),
+        'rot_scale_mean': np.nanmean(rot_scales_np),
+        'rot_scale_std':  np.nanstd(rot_scales_np),
+        'num_samples':    max_i
+    }
+    return summary
+
+
+def poses_to_absolute_actions(poses: list[np.ndarray]) -> np.ndarray:
+    """
+    Converts a list of 4×4 homogeneous transforms (SE(3)) into 
+    7D vectors [px, py, pz, rx, ry, rz, 1],
+    then *corrects* each orientation by a +90° rotation about z.
+    
+    That is, we do:  R_corrected = R_original @ Rz_90,
+    so if your environment has a 90° offset frame, this may fix the
+    initial "spin" issue.
+
+    Args:
+        poses (list[np.ndarray]): length N, each a 4×4 pose in SE(3).
+
+    Returns:
+        np.ndarray of shape (N, 7), each row = [px, py, pz, rx, ry, rz, 1].
+    """
+
+    # 1) Build rotation matrix for +90° about z
+    #    If you need -90°, just set angles=[-90]
+    z_90 = R.from_euler('z', 90, degrees=True).as_matrix()
+
+    num_poses = len(poses)
+    actions = np.zeros((num_poses, 7), dtype=np.float32)
+
+    for i, T in enumerate(poses):
+        # (A) Position is the last column (3-vector)
+        pos = T[:3, 3]
+
+        # (B) Original rotation
+        rot_mat_orig = T[:3, :3]
+
+        # (C) Multiply by +90° about z
+        #     If your environment's eef is behind by 90°, do 'rot_mat_orig @ z_90'
+        #     If you find it's the other direction, do 'z_90 @ rot_mat_orig' or
+        #     use -90°, whichever yields the correct alignment.
+        rot_mat_corrected = rot_mat_orig @ z_90
+
+        # (D) Convert corrected rotation to axis-angle
+        rvec = R.from_matrix(rot_mat_corrected).as_rotvec()
+
+        # (E) Place results in array
+        actions[i, 0:3] = pos  # px, py, pz
+        actions[i, 3:6] = rvec # rx, ry, rz
+        actions[i, 6] = 1.0    # last dimension always 1
+
+    return actions
+
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
@@ -349,6 +504,9 @@ def imitate_trajectory_with_action_identifier(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
+    
+    env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+    
     obs_modality_specs = {
         "obs": {
             "rgb": cameras,
@@ -440,7 +598,6 @@ def imitate_trajectory_with_action_identifier(
     results = []
     
     def load_hand_poses_in_world(obs_group):
-        from scipy.spatial.transform import Rotation as R
         """
         Builds a list of homogeneous transforms (4×4) from 
         'robot0_eef_pos' [N, 3] and 'robot0_eef_quat' [N, 4].
@@ -475,6 +632,19 @@ def imitate_trajectory_with_action_identifier(
             all_hand_poses_world.append(T)
 
         return all_hand_poses_world
+    
+    def load_actions(obs_group):
+        """
+        Loads a (N,7) array of action vectors from obs_group["actions"].
+        Each row is presumably [dx, dy, dz, rx, ry, rz, gripper],
+        but you can adapt as needed if you only have 6D actions without gripper.
+
+        Returns:
+            actions_array (np.ndarray): shape (N, 7)
+        """
+        actions_array = obs_group["actions"][:]  # shape (N,7)
+        return actions_array
+
 
     # ----------------------------------------------------------------
     # 7) Main loop over demos
@@ -521,42 +691,51 @@ def imitate_trajectory_with_action_identifier(
             # actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side, side_frames_list)
 
             # Cache file where we store the three variables
-            cache_file = "hand_poses_cache.npz"
+            # cache_file = "hand_poses_cache.npz"
 
-            if os.path.exists(cache_file):
-                # Load from disk
-                print(f"Loading cached poses from {cache_file} ...")
-                data = np.load(cache_file, allow_pickle=True)
-                all_hand_poses_world = data["all_hand_poses_world"]
-                all_fingers_distances = data["all_fingers_distances"]
-                all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
-            else:
-                # No cache => run the expensive inference once
-                print("No cache found. Running inference to get all_hand_poses_world...")
-                (all_hand_poses_world,
-                all_fingers_distances,
-                all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
-                    front_frames_list,
-                    front_depth_list=None,
-                    side_frames_list=side_frames_list
-                )
-                # Save to disk for future runs
-                np.savez(
-                    cache_file,
-                    all_hand_poses_world=all_hand_poses_world,
-                    all_fingers_distances=all_fingers_distances,
-                    all_hand_poses_world_from_side=all_hand_poses_world_from_side
-                )
-
-            # Now we have the three arrays. We can compute actions right away
-            actions_for_demo = action_identifier.compute_actions_simple_euler(
-                all_hand_poses_world,
-                all_fingers_distances,
-                all_hand_poses_world_from_side,
-                side_frames_list
-            )
+            # if os.path.exists(cache_file):
+            #     # Load from disk
+            #     print(f"Loading cached poses from {cache_file} ...")
+            #     data = np.load(cache_file, allow_pickle=True)
+            #     all_hand_poses_world = data["all_hand_poses_world"]
+            #     all_fingers_distances = data["all_fingers_distances"]
+            #     all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
+            # else:
+            #     # No cache => run the expensive inference once
+            #     print("No cache found. Running inference to get all_hand_poses_world...")
+            #     (all_hand_poses_world,
+            #     all_fingers_distances,
+            #     all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
+            #         front_frames_list,
+            #         front_depth_list=None,
+            #         side_frames_list=side_frames_list
+            #     )
+            #     # Save to disk for future runs
+            #     np.savez(
+            #         cache_file,
+            #         all_hand_poses_world=all_hand_poses_world,
+            #         all_fingers_distances=all_fingers_distances,
+            #         all_hand_poses_world_from_side=all_hand_poses_world_from_side
+            #     )
+                
+            all_hand_poses_world = load_hand_poses_in_world(obs_group)
+            # # all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
             
-            actions_for_demo = smooth_action_sequence(actions_for_demo, window_length=5, polyorder=2)
+            # # all_actions = load_actions(root_z["data"][demo])
+            # # summary = compare_poses_and_actions(all_hand_poses_world, all_actions, print_details=True)
+            # # print("Summary:", summary)
+            
+            # # exit()
+
+            # # Now we have the three arrays. We can compute actions right away
+            # actions_for_demo = action_identifier.compute_actions_simple_euler(
+            #     all_hand_poses_world,
+            #     all_fingers_distances,
+            #     all_hand_poses_world_from_side,
+            #     side_frames_list
+            # )
+            
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -634,8 +813,9 @@ if __name__ == "__main__":
     # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
+        # dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_euler+5",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_absolute_ground_truth",
         num_demos=100,
         save_webp=False,
         batch_size=40
