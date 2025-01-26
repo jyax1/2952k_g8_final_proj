@@ -381,6 +381,64 @@ def add_angle_to_dominant_axis(rvec: np.ndarray, deg=15.0) -> np.ndarray:
     rvec_new = axis_cardinal * angle_new
     return rvec_new
 
+# ------------------------
+# APPROACHES FOR SCALING AXIS-ANGLE
+# ------------------------
+MAX_ANGLE_PER_STEP = np.deg2rad(30)
+
+def rotate_in_small_increments(rvec, scale):
+    """
+    Approach A: multiply the axis-angle 'rvec' by 'scale'
+    in multiple smaller steps so we never exceed ±pi in one shot.
+    """
+    from scipy.spatial.transform import Rotation as R
+    angle = np.linalg.norm(rvec)
+    if angle < 1e-8:
+        return rvec * scale
+
+    axis = rvec / angle
+    angle_target = angle * scale
+    n_increments = int(np.ceil(abs(angle_target) / MAX_ANGLE_PER_STEP))
+    angle_incr = angle_target / n_increments
+
+    rot_accum = R.from_quat([0,0,0,1])  # identity
+    rot_step = R.from_rotvec(axis * angle_incr)
+    for _ in range(n_increments):
+        rot_accum = rot_step * rot_accum
+    return rot_accum.as_rotvec()
+
+def rotate_using_quaternion_exp(rvec, scale):
+    """
+    Approach B: single-step log/exp. 
+    If scale*angle > pi, might still jump, but ensures we re-wrap final angle.
+    """
+    from scipy.spatial.transform import Rotation as R
+    angle = np.linalg.norm(rvec)
+    if angle < 1e-8:
+        return rvec * scale
+    axis = rvec / angle
+    angle_new = angle * scale
+    r_new = axis * angle_new
+    # re-wrap
+    R1 = R.from_rotvec(r_new).as_matrix()
+    return R.from_matrix(R1).as_rotvec()
+
+def rotate_with_unwrap(rvec, scale):
+    """
+    Approach C: direct multiply then unwrap angle to (-pi, pi].
+    """
+    angle = np.linalg.norm(rvec)
+    if angle < 1e-8:
+        return rvec * scale
+    axis = rvec / angle
+    angle_new = angle * scale
+    while angle_new > np.pi:
+        angle_new -= 2*np.pi
+    while angle_new <= -np.pi:
+        angle_new += 2*np.pi
+    return axis * angle_new
+
+
 class ActionIdentifierMegapose:
     """Processes video frames (optionally with depth) to extract hand poses and finger distances."""
 
@@ -666,6 +724,266 @@ class ActionIdentifierMegapose:
 
         return all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  APPROACH A: small increments
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def compute_actions_simple_euler_small_increments(
+        self,
+        all_hand_poses_world: list[np.ndarray],
+        all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
+        side_frames_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        Identical logic to 'compute_actions_simple_euler', but we call
+        'axis_angle_vec = rotate_in_small_increments(axis_angle_vec, 9.5)'
+        instead of 'axis_angle_vec *= 9.5'.
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        # 1) position_x array
+        position_x = []
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, color_name="green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2, 3]
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
+            position_x.append(point_world[0])
+
+        actions = []
+        for i in range(num_frames - 1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i+1]
+            pose_i_side = all_hand_poses_world_from_side[i]
+            pose_i1_side = all_hand_poses_world_from_side[i+1]
+            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+                actions.append(np.zeros(7,dtype=np.float32))
+                continue
+
+            pos_i = pose_i[:3,3]
+            pos_i1 = pose_i1[:3,3]
+            dp = (pos_i1 - pos_i)*self.scale_translation
+
+            # front => R_front_delta
+            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            R_front_delta = delta_pose_front[:3,:3]
+
+            # side => R_side_delta
+            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
+            R_side_delta = delta_pose_side[:3,:3]
+
+            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+
+            fused_euler = [
+                euler_front[0],
+                euler_front[1],
+                euler_side[2],
+            ]
+            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            axis_angle_vec = R_fused.as_rotvec()
+
+            # approach A
+            axis_angle_vec = rotate_in_small_increments(axis_angle_vec, 9.5)
+
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i+1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            action = np.zeros(7,dtype=np.float32)
+            action[:3] = dp
+            action[3:-1] = axis_angle_vec
+
+            # Overwrite x with sideview-based position
+            pos_x = position_x[i]
+            pos_x_next = position_x[i+1]
+            action_x = (pos_x_next - pos_x)*self.scale_translation
+            action[0] = action_x
+
+            if i>20 and delta_finger_distance<0.02:
+                action[-1] = 1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
+
+            actions.append(action)
+        return actions
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  APPROACH B: quaternion log/exp
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def compute_actions_simple_euler_quat_exp(
+        self,
+        all_hand_poses_world: list[np.ndarray],
+        all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
+        side_frames_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        Same logic as simple_euler, but we do:
+        axis_angle_vec = rotate_using_quaternion_exp(axis_angle_vec, 9.5)
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        position_x = []
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, "green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2, 3]
+            point_world = pixel_to_world(u, v, point_depth, self.sideview_K, self.sideview_R)
+            position_x.append(point_world[0])
+
+        actions = []
+        for i in range(num_frames-1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i+1]
+            pose_i_side = all_hand_poses_world_from_side[i]
+            pose_i1_side = all_hand_poses_world_from_side[i+1]
+            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+                actions.append(np.zeros(7,dtype=np.float32))
+                continue
+
+            pos_i = pose_i[:3,3]
+            pos_i1 = pose_i1[:3,3]
+            dp = (pos_i1 - pos_i)*self.scale_translation
+
+            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            R_front_delta = delta_pose_front[:3,:3]
+
+            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
+            R_side_delta = delta_pose_side[:3,:3]
+
+            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+
+            fused_euler = [
+                euler_front[0],
+                euler_front[1],
+                euler_side[2],
+            ]
+            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            axis_angle_vec = R_fused.as_rotvec()
+
+            # approach B
+            axis_angle_vec = rotate_using_quaternion_exp(axis_angle_vec, 9.5)
+
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i+1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            action = np.zeros(7,dtype=np.float32)
+            action[:3] = dp
+            action[3:-1] = axis_angle_vec
+
+            pos_x = position_x[i]
+            pos_x_next = position_x[i+1]
+            action_x = (pos_x_next - pos_x)*self.scale_translation
+            action[0] = action_x
+
+            if i>20 and delta_finger_distance<0.02:
+                action[-1] = 1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
+
+            actions.append(action)
+        return actions
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  APPROACH C: multiply and unwrap
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def compute_actions_simple_euler_unwrap(
+        self,
+        all_hand_poses_world: list[np.ndarray],
+        all_fingers_distances: list[float],
+        all_hand_poses_world_from_side: list[np.ndarray],
+        side_frames_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        Same logic as simple_euler, but do direct multiply then unwrap angle to (-pi, pi].
+        """
+        num_frames = len(all_hand_poses_world)
+        if num_frames < 2:
+            return []
+
+        position_x = []
+        for i in range(num_frames):
+            side_frame = side_frames_list[i]
+            bbox = find_color_bounding_box(side_frame, "green")
+            u, v = bounding_box_center(bbox)
+            pose_sideview_frame = np.linalg.inv(self.sideview_R) @ all_hand_poses_world[i]
+            point_depth = pose_sideview_frame[2,3]
+            point_world = pixel_to_world(u,v, point_depth, self.sideview_K, self.sideview_R)
+            position_x.append(point_world[0])
+
+        actions = []
+        for i in range(num_frames-1):
+            pose_i = all_hand_poses_world[i]
+            pose_i1 = all_hand_poses_world[i+1]
+            pose_i_side = all_hand_poses_world_from_side[i]
+            pose_i1_side = all_hand_poses_world_from_side[i+1]
+            if (pose_i is None) or (pose_i1 is None) or (pose_i_side is None) or (pose_i1_side is None):
+                actions.append(np.zeros(7,dtype=np.float32))
+                continue
+
+            pos_i = pose_i[:3,3]
+            pos_i1 = pose_i1[:3,3]
+            dp = (pos_i1 - pos_i)*self.scale_translation
+
+            delta_pose_front = np.linalg.inv(pose_i1) @ pose_i
+            R_front_delta = delta_pose_front[:3,:3]
+
+            delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
+            R_side_delta = delta_pose_side[:3,:3]
+
+            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+
+            fused_euler = [ euler_front[0], euler_front[1], euler_side[2] ]
+            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            axis_angle_vec = R_fused.as_rotvec()
+
+            # approach C: multiply, then unwrap
+            angle = np.linalg.norm(axis_angle_vec)
+            if angle<1e-8:
+                axis_angle_vec *= 9.5
+            else:
+                axis = axis_angle_vec/angle
+                angle_new = angle*9.5
+                while angle_new>np.pi:
+                    angle_new -= 2*np.pi
+                while angle_new<=-np.pi:
+                    angle_new += 2*np.pi
+                axis_angle_vec = axis*angle_new
+
+            finger_distance1 = all_fingers_distances[i]
+            finger_distance2 = all_fingers_distances[i+1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            action = np.zeros(7,dtype=np.float32)
+            action[:3] = dp
+            action[3:-1] = axis_angle_vec
+
+            pos_x = position_x[i]
+            pos_x_next = position_x[i+1]
+            action_x = (pos_x_next - pos_x)*self.scale_translation
+            action[0] = action_x
+
+            if i>20 and delta_finger_distance<0.02:
+                action[-1] = 1
+            else:
+                action[-1] = -np.sign(delta_finger_distance)
+
+            actions.append(action)
+        return actions
+
+
     def compute_actions_simple_euler(
         self,
         all_hand_poses_world: list[np.ndarray],
@@ -746,7 +1064,7 @@ class ActionIdentifierMegapose:
             axis_angle_vec = R_fused.as_rotvec()
 
             # As in your code, add 20 deg (0.349 rad) to the total angle
-            axis_angle_vec *= 9.5
+            axis_angle_vec = add_angle_to_axis_angle(axis_angle_vec, 5)
 
             # -----------------------------------------------------------------
             # Rest of your code: finger distance logic, x-axis, etc.

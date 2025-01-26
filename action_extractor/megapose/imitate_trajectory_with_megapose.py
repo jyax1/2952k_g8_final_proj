@@ -236,6 +236,50 @@ def bounding_box_distance(bbox1, bbox2):
     cx2, cy2 = bounding_box_center(bbox2)
     return math.hypot(cx2 - cx1, cy2 - cy1)
 
+from scipy.signal import savgol_filter
+
+def smooth_action_sequence(actions, window_length=5, polyorder=2):
+    """
+    Smooths a list (or array) of 7D actions via Savitzky–Golay filtering.
+    
+    Args:
+        actions (np.ndarray): shape (N, 7), 
+            each row = [dx, dy, dz, ax, ay, az, gripper].
+        window_length (int): size of the Savitzky–Golay filter window.
+            Must be odd and <= number of data points.
+        polyorder (int): polynomial order to fit within each window.
+            Must be < window_length.
+    
+    Returns:
+        np.ndarray of shape (N, 7), the smoothed actions.
+    
+    Raises:
+        ValueError if there are not enough frames to apply the filter,
+        or if window_length is invalid for the data size.
+    """
+    actions = np.asarray(actions)
+    num_frames, dim = actions.shape
+    if dim != 7:
+        raise ValueError(f"Expected actions with shape (N, 7), got (N, {dim})!")
+    if window_length > num_frames:
+        raise ValueError("window_length cannot exceed the number of frames!")
+    if window_length % 2 == 0:
+        raise ValueError("window_length must be odd for Savitzky–Golay filter!")
+    
+    # Prepare array to hold smoothed results
+    smoothed = np.zeros_like(actions)
+    
+    # Smooth each dimension independently
+    for c in range(dim):
+        smoothed[:, c] = savgol_filter(
+            actions[:, c],
+            window_length=window_length,
+            polyorder=polyorder,
+            mode='nearest'   # 'mirror' or 'nearest' boundary handling
+        )
+    
+    return smoothed
+
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
@@ -471,10 +515,48 @@ def imitate_trajectory_with_action_identifier(
 
             # all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side = action_identifier.get_all_hand_poses_finger_distances_with_side(front_frames_list, front_depth_list=None, side_frames_list=side_frames_list)
             
-            all_hand_poses_world = load_hand_poses_in_world(obs_group)
-            all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
+            # # all_hand_poses_world = load_hand_poses_in_world(obs_group)
+            # # all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
             
-            actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world, side_frames_list)
+            # actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side, side_frames_list)
+
+            # Cache file where we store the three variables
+            cache_file = "hand_poses_cache.npz"
+
+            if os.path.exists(cache_file):
+                # Load from disk
+                print(f"Loading cached poses from {cache_file} ...")
+                data = np.load(cache_file, allow_pickle=True)
+                all_hand_poses_world = data["all_hand_poses_world"]
+                all_fingers_distances = data["all_fingers_distances"]
+                all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
+            else:
+                # No cache => run the expensive inference once
+                print("No cache found. Running inference to get all_hand_poses_world...")
+                (all_hand_poses_world,
+                all_fingers_distances,
+                all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
+                    front_frames_list,
+                    front_depth_list=None,
+                    side_frames_list=side_frames_list
+                )
+                # Save to disk for future runs
+                np.savez(
+                    cache_file,
+                    all_hand_poses_world=all_hand_poses_world,
+                    all_fingers_distances=all_fingers_distances,
+                    all_hand_poses_world_from_side=all_hand_poses_world_from_side
+                )
+
+            # Now we have the three arrays. We can compute actions right away
+            actions_for_demo = action_identifier.compute_actions_simple_euler(
+                all_hand_poses_world,
+                all_fingers_distances,
+                all_hand_poses_world_from_side,
+                side_frames_list
+            )
+            
+            actions_for_demo = smooth_action_sequence(actions_for_demo, window_length=5, polyorder=2)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -553,7 +635,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_baseline",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_euler+5",
         num_demos=100,
         save_webp=False,
         batch_size=40
