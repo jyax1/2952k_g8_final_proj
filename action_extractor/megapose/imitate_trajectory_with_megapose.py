@@ -16,63 +16,52 @@ p3d.load_prc_file_data("", "notify-level-gsg fatal\n")
 # Normal imports
 #####################################################################
 import os
-import h5py
 import numpy as np
 import torch
-from tqdm import tqdm
+import math
 import imageio
 import cv2
 import zarr
-from glob import glob
-from einops import rearrange
-from zarr import DirectoryStore, ZipStore
 import shutil
-import math
+from glob import glob
+from tqdm import tqdm
+from pathlib import Path
+from zarr import DirectoryStore, ZipStore
 
-from action_extractor.action_identifier import load_action_identifier, VariationalEncoder
-from action_extractor.utils.dataset_utils import (
-    hdf5_to_zarr_parallel_with_progress,
-    directorystore_to_zarr_zip,
-    pose_inv
-)
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 
-from pathlib import Path
+# Megapose
+from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger
 logger = get_logger(__name__)
 
-from megapose.utils.load_model import NAMED_MODELS, load_named_model
+# Our local imports
 from action_extractor.utils.dataset_utils import (
     hdf5_to_zarr_parallel_with_progress,
     directorystore_to_zarr_zip,
 )
-
 from action_extractor.megapose.action_identifier_megapose import (
     make_object_dataset_from_folder,
+    bounding_box_center,   # might be unused
     find_color_bounding_box,
-    bounding_box_center,
-    pixel_to_world
+    pixel_to_world,
+    ActionIdentifierMegapose
+)
+from robosuite.utils.camera_utils import (
+    get_camera_extrinsic_matrix,
+    get_camera_intrinsic_matrix,
 )
 
 from scipy.spatial.transform import Rotation as R
 
-from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
-
-#####################################################################
-# Instead of from action_extractor.megapose.action_identifier_megapose 
-# we STILL import the same run_inference_on_data, but we will pass 
-# our pre-loaded model to it so it doesn't re-load. We'll define 
-# a small wrapper or local approach for that.
-#####################################################################
-from action_extractor.megapose.action_identifier_megapose import make_object_dataset_from_folder
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, 
-                           bottom_left_video_path, bottom_right_video_path, 
-                           output_path):
+                             bottom_left_video_path, bottom_right_video_path, 
+                             output_path):
     """Combines four videos into a single quadrant layout video."""
     import imageio
 
@@ -107,24 +96,6 @@ def combine_videos_quadrants(top_left_video_path, top_right_video_path,
     bottom_right_reader.close()
 
 
-def quaternion_to_rotation_matrix(q):
-    """Converts quaternion [w,x,y,z] to 3x3 rotation matrix."""
-    w, x, y, z = q
-    return np.array([
-        [1 - 2*(y**2 + z**2),     2*(x*y - z*w),         2*(x*z + y*w)],
-        [2*(x*y + z*w),           1 - 2*(x**2 + z**2),   2*(y*z - x*w)],
-        [2*(x*z - y*w),           2*(y*z + x*w),         1 - 2*(x**2 + y**2)]
-    ], dtype=np.float32)
-
-
-def pose_vector_to_matrix(translation, quaternion):
-    """Combines translation vector and quaternion into 4x4 transformation matrix."""
-    T = np.eye(4, dtype=np.float32)
-    T[:3, :3] = quaternion_to_rotation_matrix(quaternion)
-    T[:3, 3]  = translation
-    return T
-
-
 def convert_mp4_to_webp(input_path, output_path, quality=80):
     """Converts MP4 video to WebP format using ffmpeg."""
     import subprocess
@@ -149,398 +120,118 @@ def convert_mp4_to_webp(input_path, output_path, quality=80):
         output_path
     ]
     subprocess.run(cmd, check=True)
-    
 
-COLOR_RANGES = {
-    "green":   (np.array([50, 150, 50],  dtype=np.uint8), np.array([70, 255, 255], dtype=np.uint8)),
-    "cyan":    (np.array([80, 150, 50],  dtype=np.uint8), np.array([100,255,255],  dtype=np.uint8)),
-    "magenta": (np.array([140, 150, 50], dtype=np.uint8), np.array([170,255,255],  dtype=np.uint8)),
-}
 
-def find_color_bounding_box(
-    rgb_image: np.ndarray,
-    color_name: str = "green",
-    kernel_size: int = 3,
-    erode_iters: int = 1,
-    dilate_iters: int = 1
-) -> tuple:
+def axisangle2quat(axis_angle):
     """
-    Finds the largest bounding box for a contiguous region of a specified color
-    (by default, 'green') in an RGB image.
-
-    Args:
-        rgb_image: (H, W, 3) np.uint8 array in [0..255], representing an RGB image.
-        color_name: 'green', 'cyan', or 'magenta' (or any color you have in COLOR_RANGES).
-        kernel_size: size of morphological kernel for noise removal.
-        erode_iters: how many times to erode.
-        dilate_iters: how many times to dilate.
-
-    Returns:
-        bounding box as (x_min, y_min, x_max, y_max) around the largest
-        contiguous blob of that color, or None if no blob is found.
+    Converts an axis-angle vector [rx, ry, rz] into a quaternion [x, y, z, w].
     """
-    # 1) Convert from RGB to HSV
-    hsv = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+    angle = np.linalg.norm(axis_angle)
+    if angle < 1e-12:
+        # nearly zero rotation
+        return np.array([0, 0, 0, 1], dtype=np.float32)
+    axis = axis_angle / angle
+    half = angle * 0.5
+    return np.concatenate([
+        axis * np.sin(half),
+        [np.cos(half)]
+    ]).astype(np.float32)
 
-    # 2) Retrieve the lower & upper HSV bounds for the desired color.
-    #    If color_name not in dict, raise error or handle it somehow
-    if color_name not in COLOR_RANGES:
-        raise ValueError(f"Unknown color '{color_name}'. Choose from {list(COLOR_RANGES.keys())}.")
-
-    lower_hsv, upper_hsv = COLOR_RANGES[color_name]
-
-    # 3) Create a mask for pixels within this HSV range
-    mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
-
-    # 4) Morphological operations to remove small noise
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    mask = cv2.erode(mask, kernel, iterations=erode_iters)
-    mask = cv2.dilate(mask, kernel, iterations=dilate_iters)
-
-    # 5) Find connected components (largest color blob)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    # stats shape: (num_labels, 5) => [label, left, top, width, height, area]
-    # label=0 is background
-
-    if num_labels <= 1:
-        # No colored component found
-        return None
-
-    # 6) Identify the largest non-background component by area
-    #    np.argmax(stats[1:, cv2.CC_STAT_AREA]) gives the largest blob among labels [1..]
-    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-
-    # 7) Extract bounding box of that largest component
-    x = stats[largest_label, cv2.CC_STAT_LEFT]
-    y = stats[largest_label, cv2.CC_STAT_TOP]
-    w = stats[largest_label, cv2.CC_STAT_WIDTH]
-    h = stats[largest_label, cv2.CC_STAT_HEIGHT]
-
-    # Return in (x_min, y_min, x_max, y_max)
-    return (x, y, x + w, y + h)
-
-
-def bounding_box_center(bbox):
-    """
-    Given a bbox = [x_min, y_min, x_max, y_max],
-    return its center (cx, cy).
-    """
-    x_min, y_min, x_max, y_max = bbox
-    cx = (x_min + x_max) / 2.0
-    cy = (y_min + y_max) / 2.0
-    return cx, cy
-
-def bounding_box_distance(bbox1, bbox2):
-    """
-    Compute the Euclidean distance between the centers of two bounding boxes.
-    """
-    cx1, cy1 = bounding_box_center(bbox1)
-    cx2, cy2 = bounding_box_center(bbox2)
-    return math.hypot(cx2 - cx1, cy2 - cy1)
-
-from scipy.signal import savgol_filter
-
-def smooth_action_sequence(actions, window_length=5, polyorder=2):
-    """
-    Smooths a list (or array) of 7D actions via Savitzky–Golay filtering.
-    
-    Args:
-        actions (np.ndarray): shape (N, 7), 
-            each row = [dx, dy, dz, ax, ay, az, gripper].
-        window_length (int): size of the Savitzky–Golay filter window.
-            Must be odd and <= number of data points.
-        polyorder (int): polynomial order to fit within each window.
-            Must be < window_length.
-    
-    Returns:
-        np.ndarray of shape (N, 7), the smoothed actions.
-    
-    Raises:
-        ValueError if there are not enough frames to apply the filter,
-        or if window_length is invalid for the data size.
-    """
-    actions = np.asarray(actions)
-    num_frames, dim = actions.shape
-    if dim != 7:
-        raise ValueError(f"Expected actions with shape (N, 7), got (N, {dim})!")
-    if window_length > num_frames:
-        raise ValueError("window_length cannot exceed the number of frames!")
-    if window_length % 2 == 0:
-        raise ValueError("window_length must be odd for Savitzky–Golay filter!")
-    
-    # Prepare array to hold smoothed results
-    smoothed = np.zeros_like(actions)
-    
-    # Smooth each dimension independently
-    for c in range(dim):
-        smoothed[:, c] = savgol_filter(
-            actions[:, c],
-            window_length=window_length,
-            polyorder=polyorder,
-            mode='nearest'   # 'mirror' or 'nearest' boundary handling
-        )
-    
-    return smoothed
-
-def compare_poses_and_actions(
-    all_hand_poses_world: list[np.ndarray],
-    all_actions: np.ndarray,
-    print_details: bool = True
-):
-    """
-    Given:
-      - all_hand_poses_world: list of length N, each a 4×4 homogeneous transform T_i
-      - all_actions: np.ndarray shape (N,7) or (N,6), the action at each step
-                    (we assume the i-th action took us from T_i to T_{i+1}).
-    
-    We compare the measured deltas in the pose data to the stored actions.
-
-    Steps:
-    1) For i in [0..N-2], compute:
-       - p_i => T_i[:3,3]
-       - p_i+1 => T_{i+1}[:3,3]
-       => delta_p = p_i+1 - p_i
-    2) Also compute rotation delta in axis-angle:
-       => R_delta = R_i^T * R_{i+1}  (or vice versa, if you suspect a different order)
-       => rvec_delta = as_rotvec(R_delta)
-    3) Compare with action_i[:3] for position, action_i[3:6] for orientation.
-    4) Possibly compute ratio or difference.
-
-    print_details: if True, prints debug info. Otherwise, you might collect results in arrays.
-
-    Returns:
-        A dictionary summarizing average scale factors or differences, e.g.:
-        {
-          'pos_scale_mean': ...,
-          'pos_scale_std': ...,
-          'rot_scale_mean': ...,
-          'rot_scale_std': ...
-        }
-        or something similar, so you can see the typical ratio used in your environment.
-    """
-    num_poses = len(all_hand_poses_world)
-    num_actions = all_actions.shape[0]
-
-    # we assume the environment uses the i-th action to go from pose i to pose i+1
-    # so we only compare up to min(num_poses - 1, num_actions)
-    max_i = min(num_poses - 1, num_actions)
-
-    pos_scales = []
-    rot_scales = []
-    for i in range(max_i):
-        T_i = all_hand_poses_world[i]
-        T_i1 = all_hand_poses_world[i+1]
-        action_i = all_actions[i]
-
-        # 1) Extract position from T_i
-        p_i = T_i[:3, 3]
-        p_i1 = T_i1[:3, 3]
-        delta_p = p_i1 - p_i  # "actual" translation in world
-
-        # 2) Extract R_i
-        R_i = T_i[:3, :3]
-        R_i1 = T_i1[:3, :3]
-        # often we do R_delta = R_i^T * R_i1 if the action is "from i to i+1"
-        R_delta = R_i.T @ R_i1
-        # convert to axis-angle
-        rvec_delta = R.from_matrix(R_delta).as_rotvec()  # shape (3,)
-
-        # 3) Compare with action
-        # Suppose action_i = [dx, dy, dz, rx, ry, rz, (gripper)] => shape(7,)
-        dxdydz = action_i[:3]  # position deltas
-        rxryrz = action_i[3:6] if action_i.shape[0] >= 6 else np.zeros(3)
-
-        # 4) We'll attempt ratio = action_i[:3] / delta_p
-        # but watch out for zero or near-zero. We'll do a norm ratio or each component
-        norm_p = np.linalg.norm(delta_p)
-        norm_action_p = np.linalg.norm(dxdydz)
-        pos_scale = np.nan
-        if norm_p > 1e-12:
-            pos_scale = norm_action_p / norm_p
-        pos_scales.append(pos_scale)
-
-        # For rotation, do a norm ratio too
-        norm_r = np.linalg.norm(rvec_delta)
-        norm_action_r = np.linalg.norm(rxryrz)
-        rot_scale = np.nan
-        if norm_r > 1e-12:
-            rot_scale = norm_action_r / norm_r
-        rot_scales.append(rot_scale)
-
-        if print_details:
-            print(f"Step {i}:")
-            print(f"  Pose delta p_i => p_{i+1}: {delta_p},  norm={norm_p:.4f}")
-            print(f"  Action pos: {dxdydz},  norm={norm_action_p:.4f}, ratio~={pos_scale:.4f}")
-            print(f"  Rot delta (axis-angle): {rvec_delta}, norm={norm_r:.4f}")
-            print(f"  Action rot: {rxryrz}, norm={norm_action_r:.4f}, ratio~={rot_scale:.4f}")
-            print("")
-
-    # Summarize
-    pos_scales_np = np.array(pos_scales)
-    rot_scales_np = np.array(rot_scales)
-    summary = {
-        'pos_scale_mean': np.nanmean(pos_scales_np),
-        'pos_scale_std':  np.nanstd(pos_scales_np),
-        'rot_scale_mean': np.nanmean(rot_scales_np),
-        'rot_scale_std':  np.nanstd(rot_scales_np),
-        'num_samples':    max_i
-    }
-    return summary
-
-
-def poses_to_absolute_actions(poses: list[np.ndarray]) -> np.ndarray:
-    """
-    Converts a list of 4×4 homogeneous transforms (SE(3)) into 
-    7D vectors [px, py, pz, rx, ry, rz, 1],
-    then *corrects* each orientation by a +90° rotation about z.
-    
-    That is, we do:  R_corrected = R_original @ Rz_90,
-    so if your environment has a 90° offset frame, this may fix the
-    initial "spin" issue.
-
-    Args:
-        poses (list[np.ndarray]): length N, each a 4×4 pose in SE(3).
-
-    Returns:
-        np.ndarray of shape (N, 7), each row = [px, py, pz, rx, ry, rz, 1].
-    """
-
-    # 1) Build rotation matrix for +90° about z
-    #    If you need -90°, just set angles=[-90]
-    z_90 = R.from_euler('z', 90, degrees=True).as_matrix()
-
-    num_poses = len(poses)
-    actions = np.zeros((num_poses, 7), dtype=np.float32)
-
-    for i, T in enumerate(poses):
-        # (A) Position is the last column (3-vector)
-        pos = T[:3, 3]
-
-        # (B) Original rotation
-        rot_mat_orig = T[:3, :3]
-
-        # (C) Multiply by +90° about z
-        #     If your environment's eef is behind by 90°, do 'rot_mat_orig @ z_90'
-        #     If you find it's the other direction, do 'z_90 @ rot_mat_orig' or
-        #     use -90°, whichever yields the correct alignment.
-        rot_mat_corrected = rot_mat_orig @ z_90
-
-        # (D) Convert corrected rotation to axis-angle
-        rvec = R.from_matrix(rot_mat_corrected).as_rotvec()
-
-        # (E) Place results in array
-        actions[i, 0:3] = pos  # px, py, pz
-        actions[i, 3:6] = rvec # rx, ry, rz
-        actions[i, 6] = 1.0    # last dimension always 1
-
-    return actions
-
-def quat2axisangle(quat):
-    """
-    Converts quaternion to axis-angle format.
-    Returns a unit vector direction scaled by its angle in radians.
-
-    Args:
-        quat (np.array): (x,y,z,w) vec4 float angles
-
-    Returns:
-        np.array: (ax,ay,az) axis-angle exponential coordinates
-    """
-    # clip quaternion
-    if quat[3] > 1.0:
-        quat[3] = 1.0
-    elif quat[3] < -1.0:
-        quat[3] = -1.0
-
-    den = np.sqrt(1.0 - quat[3] * quat[3])
-    if math.isclose(den, 0.0):
-        # This is (close to) a zero degree rotation
-        return np.zeros(3)
-
-    return (quat[:3] * 2.0 * math.acos(quat[3])) / den
-
-def quat_multiply(quaternion1, quaternion0):
-    """
-    Return multiplication of two quaternions (q1 * q0).
-    
-    Args:
-        quaternion1 (np.array): (x,y,z,w) quaternion
-        quaternion0 (np.array): (x,y,z,w) quaternion
-    """
-    x0, y0, z0, w0 = quaternion0
-    x1, y1, z1, w1 = quaternion1
-    return np.array(
-        (
-            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
-            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
-            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0,
-            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
-        ),
-        dtype=np.float32,
-    )
-    
-def quat_invert(quat):
-    """
-    Invert a normalized quaternion [x,y,z,w].
-    For a unit quaternion, the inverse is just the conjugate => [-x, -y, -z, w].
-    """
-    x, y, z, w = quat
-    return np.array([-x, -y, -z, w], dtype=np.float32)
-
-def mat_to_quat(mat_3x3):
-    """
-    Convert a 3x3 rotation matrix to a quaternion [x, y, z, w].
-    We'll use a standard approach, or you can rely on e.g. scipy.spatial.transform.
-    """
-    # Using a direct approach or from e.g. Rotation.from_matrix(mat_3x3).as_quat()
-    # but let's do it explicitly here for completeness:
-    from scipy.spatial.transform import Rotation as R
-    return R.from_matrix(mat_3x3).as_quat()
-
-def quat_invert(quat_xyzw):
-    """
-    Invert a normalized quaternion [x, y, z, w].
-    For unit quaternions, inverse = conjugate => [-x, -y, -z, w].
-    """
-    x, y, z, w = quat_xyzw
-    return np.array([-x, -y, -z, w], dtype=np.float32)
-
-def quat_multiply(q1_xyzw, q0_xyzw):
-    """
-    Quaternion multiply: q1 * q0, each in [x, y, z, w] format.
-    Returns [x, y, z, w].
-    """
-    x0, y0, z0, w0 = q0_xyzw
-    x1, y1, z1, w1 = q1_xyzw
-    return np.array(
-        [
-            x1*w0 + y1*z0 - z1*y0 + w1*x0,   # x
-            -x1*z0 + y1*w0 + z1*x0 + w1*y0, # y
-            x1*y0 - y1*x0 + z1*w0 + w1*z0,  # z
-            -x1*x0 - y1*y0 - z1*z0 + w1*w0, # w
-        ],
-        dtype=np.float32
-    )
 
 def quat2axisangle(quat):
     """
     Convert quaternion [x, y, z, w] to axis-angle [rx, ry, rz].
-    The direction is the rotation axis, magnitude is rotation angle (radians).
     """
     w = quat[3]
-    # clamp w into [-1,1] to avoid numerical blowups
+    # clamp w
     if w > 1.0:
         w = 1.0
     elif w < -1.0:
         w = -1.0
 
-    den = math.sqrt(1.0 - w*w)
-    if math.isclose(den, 0.0):
+    angle = 2.0 * math.acos(w)
+    den = math.sqrt(1.0 - w * w)
+    if den < 1e-12:
         return np.zeros(3, dtype=np.float32)
 
-    angle = 2.0 * math.acos(w)
-    axis = quat[:3].copy() / den
+    axis = quat[:3] / den
     return axis * angle
+
+
+def quat_multiply(q1, q0):
+    """
+    Multiply two quaternions q1 * q0 in xyzw form => xyzw
+    """
+    x0, y0, z0, w0 = q0
+    x1, y1, z1, w1 = q1
+    return np.array([
+        x1*w0 + y1*z0 - z1*y0 + w1*x0,
+        -x1*z0 + y1*w0 + z1*x0 + w1*y0,
+        x1*y0 - y1*x0 + z1*w0 + w1*z0,
+        -x1*x0 - y1*y0 - z1*z0 + w1*w0,
+    ], dtype=np.float32)
+
+
+def quat_inv(q):
+    """
+    Inverse of unit quaternion [x, y, z, w] is the conjugate => [-x, -y, -z, w].
+    """
+    return np.array([-q[0], -q[1], -q[2], q[3]], dtype=np.float32)
+
+
+def load_ground_truth_poses_as_actions(obs_group, env_camera0):
+    """
+    Convert the dataset's end-effector poses (in world frame) into the orientation
+    that OSC_POSE with absolute control actually wants, i.e. the "eef_site" frame orientation.
+
+    1) We read robot0_eef_pos, robot0_eef_quat  => these are presumably world-frame
+       orientation of the end effector.
+
+    2) The environment's absolute action expects orientation in the "eef_site" coordinate system.
+
+       Let q_offset = env_camera0.env.env.robots[0].eef_rot_offset
+         (the rotation offset between link7 and eef site)
+       Possibly also link7 orientation if needed, but typically we can do:
+         q_site = q_world * inv(q_offset)     (assuming q_offset transforms link7->eef_site)
+
+       Adjust as needed if your dataset is truly "world->gripper" vs "world->eef_site."
+
+    3) Convert to axis-angle and unify sign if you want (optional).
+
+    4) Return (N, 7) actions => [px, py, pz, rx, ry, rz, 1].
+    """
+    pos_array = obs_group["robot0_eef_pos"][:]    # shape (N,3)
+    quat_array = obs_group["robot0_eef_quat"][:]  # shape (N,4) => [qx, qy, qz, qw] (world)
+    num_samples = pos_array.shape[0]
+
+    # eef_rot_offset is typically [x, y, z, w].  We want to transform the dataset's world orientation
+    # into the "eef_site frame" orientation that the controller needs.
+    q_offset = env_camera0.env.env._eef_xquat  # shape (4,)
+
+    all_actions = np.zeros((num_samples, 7), dtype=np.float32)
+
+    # optional: unify sign across consecutive frames
+    prev_rvec = None
+
+    for i in range(num_samples):
+        px, py, pz = pos_array[i]
+
+        q_world = quat_array[i]  # [x, y, z, w]
+        # orientation for eef_site = multiply(q_world, inv(q_offset))
+        q_eef_site = quat_multiply(q_offset, q_world)
+        # convert to axis-angle
+        rvec = quat2axisangle(q_eef_site)
+
+        # unify sign across consecutive frames to avoid ± axis flips
+        if (prev_rvec is not None) and (np.dot(rvec, prev_rvec) < 0):
+            rvec = -rvec
+        prev_rvec = rvec
+
+        all_actions[i, :3] = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i, 6] = 1.0  # keep gripper=1 as "open," or do your logic
+
+    return all_actions
 
 
 def imitate_trajectory_with_action_identifier(
@@ -552,41 +243,19 @@ def imitate_trajectory_with_action_identifier(
     cameras=["frontview_image", "sideview_image"],
     batch_size=40,
 ):
-    """
-    - Only loads the Megapose model once (caching).
-    - Suppresses Panda3D logging noise.
-    - Uses the ActionIdentifierMegapose class to infer (n-1) actions from a sequence of frames,
-      preserving exactly the same final logic (rolled-out environment, quadrant videos, etc.).
-    """
-
-    # ----------------------------------------------------------------
-    # 0) Prepare output directory
-    # ----------------------------------------------------------------
+    # 0) Output dir
     os.makedirs(output_dir, exist_ok=True)
 
-    # ----------------------------------------------------------------
-    # 1) Build object_dataset from mesh_dir
-    # ----------------------------------------------------------------
+    # 1) Build object dataset
     hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
 
-    # ----------------------------------------------------------------
-    # 2) Load the model once
-    # ----------------------------------------------------------------
+    # 2) Load model once
     model_name = "megapose-1.0-RGB-multi-hypothesis"
-    # model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
-
-    from megapose.utils.logging import get_logger
-    logger = get_logger(__name__)
     logger.info(f"Loading model {model_name} once at script start.")
-
     hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
-    # In your old code, you also loaded finger_pose_estimator but you are only
-    # using bounding boxes for fingers. That’s unchanged if you wish.
 
-    # ----------------------------------------------------------------
-    # 3) Preprocess dataset if needed (HDF5 -> Zarr)
-    # ----------------------------------------------------------------
+    # 3) Preprocess dataset => zarr
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
         ds_dir = seq_dir.replace(".hdf5", ".zarr")
@@ -599,23 +268,16 @@ def imitate_trajectory_with_action_identifier(
             directorystore_to_zarr_zip(ds_dir, zarr_path)
             shutil.rmtree(ds_dir)
 
-    # ----------------------------------------------------------------
-    # 4) Collect the Zarr files
-    # ----------------------------------------------------------------
+    # 4) Collect Zarr files
     zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
     stores = [ZipStore(zarr_file, mode="r") for zarr_file in zarr_files]
     roots = [zarr.group(store) for store in stores]
 
-    # ----------------------------------------------------------------
-    # 5) Initialize environment
-    # ----------------------------------------------------------------
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    # 5) Create environment
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
-    
     env_meta['env_kwargs']['controller_configs']['control_delta'] = False
     env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
-    
+
     obs_modality_specs = {
         "obs": {
             "rgb": cameras,
@@ -624,41 +286,25 @@ def imitate_trajectory_with_action_identifier(
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create environment for camera0
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
 
-    # Grab an example image to figure out camera shape
     example_image = roots[0]["data"]["demo_0"]["obs"]["frontview_image"][0]
     camera_height, camera_width = example_image.shape[:2]
 
-    # Intrinsics, extrinsics from your script
-    frontview_K = get_camera_intrinsic_matrix(
-        env_camera0.env.sim,
-        camera_name="frontview",
-        camera_height=camera_height,
-        camera_width=camera_width,
-    )
-    sideview_K = get_camera_intrinsic_matrix(
-        env_camera0.env.sim,
-        camera_name="sideview",
-        camera_height=camera_height,
-        camera_width=camera_width,
-    )
-    
-    frontview_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
-    sideview_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
+    frontview_K = get_camera_intrinsic_matrix(env_camera0.env.sim,
+                                              camera_name="frontview",
+                                              camera_height=camera_height,
+                                              camera_width=camera_width)
+    sideview_K   = get_camera_intrinsic_matrix(env_camera0.env.sim,
+                                               camera_name="sideview",
+                                               camera_height=camera_height,
+                                               camera_width=camera_width)
+    frontview_R  = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
+    sideview_R   = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
 
-    # Wrap environment with video
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
-        video_recoder=VideoRecorder.create_h264(
-            fps=20,
-            codec="h264",
-            input_pix_fmt="rgb24",
-            crf=22,
-            thread_type="FRAME",
-            thread_count=1,
-        ),
+        video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
         steps_per_render=1,
         width=camera_width,
         height=camera_height,
@@ -666,18 +312,10 @@ def imitate_trajectory_with_action_identifier(
         camera_name=cameras[0].split("_")[0],
     )
 
-    # Create environment for camera1
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
         env_camera1,
-        video_recoder=VideoRecorder.create_h264(
-            fps=20,
-            codec="h264",
-            input_pix_fmt="rgb24",
-            crf=22,
-            thread_type="FRAME",
-            thread_count=1,
-        ),
+        video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
         steps_per_render=1,
         width=camera_width,
         height=camera_height,
@@ -685,124 +323,25 @@ def imitate_trajectory_with_action_identifier(
         camera_name=cameras[1].split("_")[0],
     )
 
-    # ----------------------------------------------------------------
-    # 6) Build the ActionIdentifierMegapose
-    # ----------------------------------------------------------------
-    # This will replicate the chunk-based approach in a simpler method call.
-    from action_extractor.megapose.action_identifier_megapose import ActionIdentifierMegapose
-
+    # 6) Optionally build the ActionIdentifierMegapose
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
-        frontview_R=frontview_R,  # from get_camera_extrinsic_matrix
-        frontview_K=frontview_K,      # from get_camera_intrinsic_matrix
-        sideview_R=sideview_R,  # from get_camera_extrinsic_matrix
-        sideview_K=sideview_K,  # from get_camera_intrinsic_matrix
+        frontview_R=frontview_R,
+        frontview_K=frontview_K,
+        sideview_R=sideview_R,
+        sideview_K=sideview_K,
         model_info=model_info,
-        batch_size=batch_size,   # chunk size
-        scale_translation=80.0,  # same 80 factor
+        batch_size=batch_size,
+        scale_translation=80.0,
     )
 
     n_success = 0
     total_n = 0
     results = []
-    
-    def load_ground_truth_poses_as_actions(obs_group):
-        """
-        Returns an (N, 7) array, each row = [px, py, pz, rx, ry, rz, 1].
-        Where pos = 'robot0_eef_pos' and orientation = axis-angle from 'robot0_eef_quat'.
-        We assume 'robot0_eef_quat' is shape (N,4) in order [x, y, z, w].
 
-        We also unify consecutive axis-angles so there's no sudden sign flip.
-        """
-        # 1) Read positions and quaternions
-        pos_array = obs_group["robot0_eef_pos"][:]   # shape (N, 3)
-        quat_array = obs_group["robot0_eef_quat"][:] # shape (N, 4)
-        num_samples = pos_array.shape[0]
-
-        # 2) Convert each quaternion to axis-angle
-        rvec_list = []
-        for i in range(num_samples):
-            quat = quat_array[i]  # [qx, qy, qz, qw]
-            rvec = quat2axisangle(
-                    quat_multiply(
-                        env_camera0.env.env._eef_xquat,
-                        quat
-                    )
-                )
-            rvec_list.append(rvec)
-            
-        # if num_samples > 0:
-        #     rvec_list[0] = - rvec_list[0]
-
-        # 3) Unify sign across consecutive frames to avoid mirror flips
-        for i in range(1, num_samples):
-            dot_ = np.dot(rvec_list[i], rvec_list[i-1])
-            if dot_ < 0.0:
-                rvec_list[i] = -rvec_list[i]
-
-        # 4) Build final (N, 7) array
-        all_hand_abs = np.zeros((num_samples, 7), dtype=np.float32)
-        for i in range(num_samples):
-            pos = pos_array[i]
-            rvec = rvec_list[i]
-            all_hand_abs[i, 0:3] = pos
-            all_hand_abs[i, 3:6] = rvec
-            all_hand_abs[i, 6]   = 1.0
-
-        return all_hand_abs
-    
-    def load_ground_truth_positions_as_actions(obs_group):
-        """
-        Returns an (N, 7) array, each row = [px, py, pz, rx, ry, rz, 1].
-        Where pos = 'robot0_eef_pos' and orientation = axis-angle from 'robot0_eef_quat'.
-        We assume 'robot0_eef_quat' is shape (N,4) in order [x, y, z, w].
-        """
-
-        # 1) Read positions and quaternions
-        pos_array = obs_group["robot0_eef_pos"][:]   # shape (N, 3)
-        quat_array = obs_group["robot0_eef_quat"][:] # shape (N, 4) => [qx, qy, qz, qw]
-        num_samples = pos_array.shape[0]
-
-        # 2) Prepare an array of shape (N,7)
-        all_hand_abs = np.zeros((num_samples, 4), dtype=np.float32)
-
-        # 3) Loop over each sample
-        for i in range(num_samples):
-            # (a) position
-            pos = pos_array[i]  # (3,)
-
-            # (b) quaternion
-            #   dataset: [qx, qy, qz, qw]
-            quat = quat_array[i]  # shape(4, )
-
-            # (c) convert to axis-angle
-            rvec = quat2axisangle(quat)
-
-            # (d) build [pos(3), rvec(3), 1]
-            all_hand_abs[i, 0:3] = pos
-            all_hand_abs[i, -1] = 1.0
-
-        return all_hand_abs
-    
-    def load_actions(obs_group):
-        """
-        Loads a (N,7) array of action vectors from obs_group["actions"].
-        Each row is presumably [dx, dy, dz, rx, ry, rz, gripper],
-        but you can adapt as needed if you only have 6D actions without gripper.
-
-        Returns:
-            actions_array (np.ndarray): shape (N, 7)
-        """
-        actions_array = obs_group["actions"][:]  # shape (N,7)
-        return actions_array
-
-
-    # ----------------------------------------------------------------
-    # 7) Main loop over demos
-    # ----------------------------------------------------------------
+    # 7) Loop over demos
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -811,12 +350,10 @@ def imitate_trajectory_with_action_identifier(
             lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
             combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
-            obs_group = root_z["data"][demo]["obs"]
+            obs_group   = root_z["data"][demo]["obs"]
             num_samples = obs_group["frontview_image"].shape[0]
 
-            # ------------------------------
-            # Build the "left" videos
-            # ------------------------------
+            # Left videos
             upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
             lower_left_frames = [obs_group["sideview_image"][i] for i in range(num_samples)]
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
@@ -826,72 +363,15 @@ def imitate_trajectory_with_action_identifier(
                 for frame in lower_left_frames:
                     writer.append_data(frame)
 
-            # ------------------------------
-            # Use the new class to get poses + distances, then compute actions
-            # ------------------------------
-            front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
-            front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
-            
-            side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            # ---- We want ground-truth absolute actions in eef_site coords ----
+            actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
 
-            # all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side = action_identifier.get_all_hand_poses_finger_distances_with_side(front_frames_list, front_depth_list=None, side_frames_list=side_frames_list)
-            
-            # # all_hand_poses_world = load_hand_poses_in_world(obs_group)
-            # # all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
-            
-            # actions_for_demo = action_identifier.compute_actions_simple_euler(all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side, side_frames_list)
+            # (Optionally) you might smooth the sequence:
+            # actions_for_demo = smooth_action_sequence(actions_for_demo, window_length=5, polyorder=2)
 
-            # Cache file where we store the three variables
-            # cache_file = "hand_poses_cache.npz"
-
-            # if os.path.exists(cache_file):
-            #     # Load from disk
-            #     print(f"Loading cached poses from {cache_file} ...")
-            #     data = np.load(cache_file, allow_pickle=True)
-            #     all_hand_poses_world = data["all_hand_poses_world"]
-            #     all_fingers_distances = data["all_fingers_distances"]
-            #     all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
-            # else:
-            #     # No cache => run the expensive inference once
-            #     print("No cache found. Running inference to get all_hand_poses_world...")
-            #     (all_hand_poses_world,
-            #     all_fingers_distances,
-            #     all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
-            #         front_frames_list,
-            #         front_depth_list=None,
-            #         side_frames_list=side_frames_list
-            #     )
-            #     # Save to disk for future runs
-            #     np.savez(
-            #         cache_file,
-            #         all_hand_poses_world=all_hand_poses_world,
-            #         all_fingers_distances=all_fingers_distances,
-            #         all_hand_poses_world_from_side=all_hand_poses_world_from_side
-            #     )
-                
-            actions_for_demo = load_ground_truth_poses_as_actions(obs_group)
-            # # all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
-
-            # # summary = compare_poses_and_actions(all_hand_poses_world, all_actions, print_details=True)
-            # # print("Summary:", summary)
-            
-            # # exit()
-
-            # # Now we have the three arrays. We can compute actions right away
-            # actions_for_demo = action_identifier.compute_actions_simple_euler(
-            #     all_hand_poses_world,
-            #     all_fingers_distances,
-            #     all_hand_poses_world_from_side,
-            #     side_frames_list
-            # )
-            
-
-            # ------------------------------
-            # Roll out environment with these actions
-            # ------------------------------
             initial_state = root_z["data"][demo]["states"][0]
 
-            # Right top video
+            # 1) top-right video
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
@@ -901,7 +381,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
 
-            # Right bottom video
+            # 2) bottom-right video
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
             env_camera1.file_path = lower_right_video_path
@@ -918,7 +398,7 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
-            # Combine quadrant videos
+            # combine quadrant
             combine_videos_quadrants(
                 upper_left_video_path,
                 upper_right_video_path,
@@ -931,41 +411,32 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
-    # ----------------------------------------------------------------
-    # 8) Final summary
-    # ----------------------------------------------------------------
-    success_rate = (n_success / total_n) * 100 if total_n else 0
-    results.append(f"\nFinal Success Rate: {n_success}/{total_n}: {success_rate:.2f}%")
+    success_rate = (n_success / total_n)*100 if total_n else 0
+    results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")
 
     with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
         f.write("\n".join(results))
 
-    # ----------------------------------------------------------------
-    # 9) Optionally convert MP4 => WEBP
-    # ----------------------------------------------------------------
     if save_webp:
-        print("Converting videos to webp format...")
+        print("Converting to webp...")
         mp4_files = glob(os.path.join(output_dir, "*.mp4"))
-        for mp4_file in tqdm(mp4_files, desc="Converting to webp"):
+        for mp4_file in tqdm(mp4_files):
             webp_file = mp4_file.replace(".mp4", ".webp")
             try:
                 convert_mp4_to_webp(mp4_file, webp_file)
                 os.remove(mp4_file)
             except Exception as e:
                 print(f"Error converting {mp4_file}: {e}")
-                
-    print("Wrote results to", os.path.join(output_dir, "trajectory_results.txt"))
+
+    print(f"Wrote results to {os.path.join(output_dir, 'trajectory_results.txt')}")
 
 
 if __name__ == "__main__":
-    # Now you won't see the model reloaded every time, 
-    # and Panda3D logs are suppressed to fatal.
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
-        # dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_absolute_in_place_sign_adjusted",
-        num_demos=100,
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_gt",
+        num_demos=3,
         save_webp=False,
         batch_size=40
     )
