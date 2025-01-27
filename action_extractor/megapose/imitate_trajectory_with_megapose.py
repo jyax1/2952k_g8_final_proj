@@ -435,6 +435,114 @@ def poses_to_absolute_actions(poses: list[np.ndarray]) -> np.ndarray:
 
     return actions
 
+def quat2axisangle(quat):
+    """
+    Converts quaternion to axis-angle format.
+    Returns a unit vector direction scaled by its angle in radians.
+
+    Args:
+        quat (np.array): (x,y,z,w) vec4 float angles
+
+    Returns:
+        np.array: (ax,ay,az) axis-angle exponential coordinates
+    """
+    # clip quaternion
+    if quat[3] > 1.0:
+        quat[3] = 1.0
+    elif quat[3] < -1.0:
+        quat[3] = -1.0
+
+    den = np.sqrt(1.0 - quat[3] * quat[3])
+    if math.isclose(den, 0.0):
+        # This is (close to) a zero degree rotation
+        return np.zeros(3)
+
+    return (quat[:3] * 2.0 * math.acos(quat[3])) / den
+
+def quat_multiply(quaternion1, quaternion0):
+    """
+    Return multiplication of two quaternions (q1 * q0).
+    
+    Args:
+        quaternion1 (np.array): (x,y,z,w) quaternion
+        quaternion0 (np.array): (x,y,z,w) quaternion
+    """
+    x0, y0, z0, w0 = quaternion0
+    x1, y1, z1, w1 = quaternion1
+    return np.array(
+        (
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0,
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+        ),
+        dtype=np.float32,
+    )
+    
+def quat_invert(quat):
+    """
+    Invert a normalized quaternion [x,y,z,w].
+    For a unit quaternion, the inverse is just the conjugate => [-x, -y, -z, w].
+    """
+    x, y, z, w = quat
+    return np.array([-x, -y, -z, w], dtype=np.float32)
+
+def mat_to_quat(mat_3x3):
+    """
+    Convert a 3x3 rotation matrix to a quaternion [x, y, z, w].
+    We'll use a standard approach, or you can rely on e.g. scipy.spatial.transform.
+    """
+    # Using a direct approach or from e.g. Rotation.from_matrix(mat_3x3).as_quat()
+    # but let's do it explicitly here for completeness:
+    from scipy.spatial.transform import Rotation as R
+    return R.from_matrix(mat_3x3).as_quat()
+
+def quat_invert(quat_xyzw):
+    """
+    Invert a normalized quaternion [x, y, z, w].
+    For unit quaternions, inverse = conjugate => [-x, -y, -z, w].
+    """
+    x, y, z, w = quat_xyzw
+    return np.array([-x, -y, -z, w], dtype=np.float32)
+
+def quat_multiply(q1_xyzw, q0_xyzw):
+    """
+    Quaternion multiply: q1 * q0, each in [x, y, z, w] format.
+    Returns [x, y, z, w].
+    """
+    x0, y0, z0, w0 = q0_xyzw
+    x1, y1, z1, w1 = q1_xyzw
+    return np.array(
+        [
+            x1*w0 + y1*z0 - z1*y0 + w1*x0,   # x
+            -x1*z0 + y1*w0 + z1*x0 + w1*y0, # y
+            x1*y0 - y1*x0 + z1*w0 + w1*z0,  # z
+            -x1*x0 - y1*y0 - z1*z0 + w1*w0, # w
+        ],
+        dtype=np.float32
+    )
+
+def quat2axisangle(quat):
+    """
+    Convert quaternion [x, y, z, w] to axis-angle [rx, ry, rz].
+    The direction is the rotation axis, magnitude is rotation angle (radians).
+    """
+    w = quat[3]
+    # clamp w into [-1,1] to avoid numerical blowups
+    if w > 1.0:
+        w = 1.0
+    elif w < -1.0:
+        w = -1.0
+
+    den = math.sqrt(1.0 - w*w)
+    if math.isclose(den, 0.0):
+        return np.zeros(3, dtype=np.float32)
+
+    angle = 2.0 * math.acos(w)
+    axis = quat[:3].copy() / den
+    return axis * angle
+
+
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
     hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
@@ -506,6 +614,7 @@ def imitate_trajectory_with_action_identifier(
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
     
     env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+    env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
     
     obs_modality_specs = {
         "obs": {
@@ -597,41 +706,83 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
     results = []
     
-    def load_hand_poses_in_world(obs_group):
+    def load_ground_truth_poses_as_actions(obs_group):
         """
-        Builds a list of homogeneous transforms (4×4) from 
-        'robot0_eef_pos' [N, 3] and 'robot0_eef_quat' [N, 4].
-        """
+        Returns an (N, 7) array, each row = [px, py, pz, rx, ry, rz, 1].
+        Where pos = 'robot0_eef_pos' and orientation = axis-angle from 'robot0_eef_quat'.
+        We assume 'robot0_eef_quat' is shape (N,4) in order [x, y, z, w].
 
-        # 1) Read all positions and quaternions from the HDF5 group
-        #    shapes: (N, 3) and (N, 4) respectively
+        We also unify consecutive axis-angles so there's no sudden sign flip.
+        """
+        # 1) Read positions and quaternions
         pos_array = obs_group["robot0_eef_pos"][:]   # shape (N, 3)
         quat_array = obs_group["robot0_eef_quat"][:] # shape (N, 4)
-
         num_samples = pos_array.shape[0]
-        all_hand_poses_world = []
 
+        # 2) Convert each quaternion to axis-angle
+        rvec_list = []
+        for i in range(num_samples):
+            quat = quat_array[i]  # [qx, qy, qz, qw]
+            rvec = quat2axisangle(
+                    quat_multiply(
+                        env_camera0.env.env._eef_xquat,
+                        quat
+                    )
+                )
+            rvec_list.append(rvec)
+            
+        # if num_samples > 0:
+        #     rvec_list[0] = - rvec_list[0]
+
+        # 3) Unify sign across consecutive frames to avoid mirror flips
+        for i in range(1, num_samples):
+            dot_ = np.dot(rvec_list[i], rvec_list[i-1])
+            if dot_ < 0.0:
+                rvec_list[i] = -rvec_list[i]
+
+        # 4) Build final (N, 7) array
+        all_hand_abs = np.zeros((num_samples, 7), dtype=np.float32)
+        for i in range(num_samples):
+            pos = pos_array[i]
+            rvec = rvec_list[i]
+            all_hand_abs[i, 0:3] = pos
+            all_hand_abs[i, 3:6] = rvec
+            all_hand_abs[i, 6]   = 1.0
+
+        return all_hand_abs
+    
+    def load_ground_truth_positions_as_actions(obs_group):
+        """
+        Returns an (N, 7) array, each row = [px, py, pz, rx, ry, rz, 1].
+        Where pos = 'robot0_eef_pos' and orientation = axis-angle from 'robot0_eef_quat'.
+        We assume 'robot0_eef_quat' is shape (N,4) in order [x, y, z, w].
+        """
+
+        # 1) Read positions and quaternions
+        pos_array = obs_group["robot0_eef_pos"][:]   # shape (N, 3)
+        quat_array = obs_group["robot0_eef_quat"][:] # shape (N, 4) => [qx, qy, qz, qw]
+        num_samples = pos_array.shape[0]
+
+        # 2) Prepare an array of shape (N,7)
+        all_hand_abs = np.zeros((num_samples, 4), dtype=np.float32)
+
+        # 3) Loop over each sample
         for i in range(num_samples):
             # (a) position
-            pos = pos_array[i]  # [x, y, z]
+            pos = pos_array[i]  # (3,)
 
             # (b) quaternion
-            #   If your dataset is [qx, qy, qz, qw], we can use it directly.
-            #   If it's [qw, qx, qy, qz], reorder before using:
-            quat = quat_array[i]  # [qx, qy, qz, qw] (assumed)
+            #   dataset: [qx, qy, qz, qw]
+            quat = quat_array[i]  # shape(4, )
 
-            # (c) Convert quaternion to a 3×3 rotation matrix
-            #   Rotation.from_quat expects [x, y, z, w]
-            rot_mat_3x3 = R.from_quat(quat).as_matrix()
+            # (c) convert to axis-angle
+            rvec = quat2axisangle(quat)
 
-            # (d) Build a 4×4 homogeneous transform
-            T = np.eye(4)
-            T[:3, :3] = rot_mat_3x3
-            T[:3, 3] = pos
+            # (d) build [pos(3), rvec(3), 1]
+            all_hand_abs[i, 0:3] = pos
+            all_hand_abs[i, -1] = 1.0
 
-            all_hand_poses_world.append(T)
-
-        return all_hand_poses_world
+        return all_hand_abs
     
     def load_actions(obs_group):
         """
@@ -718,10 +869,9 @@ def imitate_trajectory_with_action_identifier(
             #         all_hand_poses_world_from_side=all_hand_poses_world_from_side
             #     )
                 
-            all_hand_poses_world = load_hand_poses_in_world(obs_group)
+            actions_for_demo = load_ground_truth_poses_as_actions(obs_group)
             # # all_fingers_distances = [0 for _ in range(len(all_hand_poses_world))]
-            
-            # # all_actions = load_actions(root_z["data"][demo])
+
             # # summary = compare_poses_and_actions(all_hand_poses_world, all_actions, print_details=True)
             # # print("Summary:", summary)
             
@@ -735,7 +885,6 @@ def imitate_trajectory_with_action_identifier(
             #     side_frames_list
             # )
             
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
 
             # ------------------------------
             # Roll out environment with these actions
@@ -815,7 +964,7 @@ if __name__ == "__main__":
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
         # dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_absolute_ground_truth",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_absolute_in_place_sign_adjusted",
         num_demos=100,
         save_webp=False,
         batch_size=40
