@@ -178,6 +178,74 @@ def quat_inv(q):
     """
     return np.array([-q[0], -q[1], -q[2], q[3]], dtype=np.float32)
 
+def rotation_matrix_to_angle_axis(R):
+    """
+    Convert a 3x3 rotation matrix R into its angle-axis representation
+    (a 3D vector whose direction is the rotation axis and magnitude is the rotation angle).
+    """
+    # Numerical stability: clamp values for arccos
+    trace_val = np.trace(R)
+    theta = np.arccos(
+        np.clip((trace_val - 1.0) / 2.0, -1.0, 1.0)
+    )
+    
+    # If angle is very small, approximate as zero rotation.
+    if np.isclose(theta, 0.0):
+        return np.zeros(3)
+    
+    # Compute rotation axis using the classic formula
+    # axis = (1/(2*sin(theta))) * [R[2,1] - R[1,2], R[0,2] - R[2,0], R[1,0] - R[0,1]]
+    axis = np.array([
+        R[2, 1] - R[1, 2],
+        R[0, 2] - R[2, 0],
+        R[1, 0] - R[0, 1]
+    ])
+    axis = axis / (2.0 * np.sin(theta))
+    
+    # Angle-axis form is axis * angle
+    angle_axis = axis * theta
+    return angle_axis
+
+def poses_to_absolute_actions(poses):
+    """
+    Receives a list of 4x4 np arrays representing SE(3) rigid body poses
+    and converts them to a list of 7D vectors, where:
+        - first 3 elements: position (x, y, z),
+        - next 3 elements: orientation in angle-axis form,
+        - last element: 1.
+
+    Additionally, we ensure the orientation sequence is smooth by flipping
+    the sign of the angle-axis vector if it is 'opposite' from the previous one.
+    This avoids sudden 180° flips in the orientation representation.
+    """
+    actions = []
+    previous_angle_axis = None  # Will store the last orientation to ensure continuity
+    
+    for pose in poses:
+        # Extract translation from the last column of the pose matrix
+        translation = pose[:3, 3]
+        
+        # Extract the rotation matrix from the top-left 3x3
+        R = pose[:3, :3]
+        
+        # Convert the rotation to angle-axis
+        angle_axis = rotation_matrix_to_angle_axis(R)
+        
+        # If we already have a previous orientation, check continuity
+        if previous_angle_axis is not None:
+            # If dot product is negative, flip the sign of the current angle-axis
+            if np.dot(angle_axis, previous_angle_axis) < 0:
+                angle_axis = -angle_axis
+        
+        # Form the 7D vector: [tx, ty, tz, rx, ry, rz, 1]
+        action_vec = np.hstack([translation, angle_axis, 1.0])
+        actions.append(action_vec)
+        
+        # Update previous_angle_axis
+        previous_angle_axis = angle_axis
+    
+    return actions
+
 
 def load_ground_truth_poses_as_actions(obs_group, env_camera0):
     """
@@ -398,7 +466,7 @@ def imitate_trajectory_with_action_identifier(
                 )
 
            
-            actions_for_demo = all_hand_poses_world
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
             
 
             initial_state = root_z["data"][demo]["states"][0]
