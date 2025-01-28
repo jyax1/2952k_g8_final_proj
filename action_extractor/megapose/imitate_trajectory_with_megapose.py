@@ -207,6 +207,7 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
     # eef_rot_offset is typically [x, y, z, w].  We want to transform the dataset's world orientation
     # into the "eef_site frame" orientation that the controller needs.
     q_offset = env_camera0.env.env._eef_xquat  # shape (4,)
+    q_base = env_camera0.env.env.robots[0]._hand_quat
 
     all_actions = np.zeros((num_samples, 7), dtype=np.float32)
 
@@ -216,9 +217,9 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
     for i in range(num_samples):
         px, py, pz = pos_array[i]
 
-        q_world = quat_array[i]  # [x, y, z, w]
-        # orientation for eef_site = multiply(q_world, inv(q_offset))
-        q_eef_site = quat_multiply(q_offset, q_world)
+        q_world = quat_array[i]  # [w, x, y, z]
+        q_world = q_world[[1, 2, 3, 0]] # [x, y, z, w]
+        q_eef_site = q_offset
         # convert to axis-angle
         rvec = quat2axisangle(q_eef_site)
 
@@ -365,9 +366,40 @@ def imitate_trajectory_with_action_identifier(
 
             # ---- We want ground-truth absolute actions in eef_site coords ----
             actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
+            
+            front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
+            front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
+            side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            
+            cache_file = "hand_poses_cache.npz"
+            if os.path.exists(cache_file):
+                # Load from disk
+                print(f"Loading cached poses from {cache_file} ...")
+                data = np.load(cache_file, allow_pickle=True)
+                all_hand_poses_world = data["all_hand_poses_world"]
+                all_fingers_distances = data["all_fingers_distances"]
+                all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
+            else:
+                # No cache => run the expensive inference once
+                print("No cache found. Running inference to get all_hand_poses_world...")
+                (all_hand_poses_world,
+                all_fingers_distances,
+                all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
+                    front_frames_list,
+                    front_depth_list=None,
+                    side_frames_list=side_frames_list
+                )
+                # Save to disk for future runs
+                np.savez(
+                    cache_file,
+                    all_hand_poses_world=all_hand_poses_world,
+                    all_fingers_distances=all_fingers_distances,
+                    all_hand_poses_world_from_side=all_hand_poses_world_from_side
+                )
 
-            # (Optionally) you might smooth the sequence:
-            # actions_for_demo = smooth_action_sequence(actions_for_demo, window_length=5, polyorder=2)
+           
+            actions_for_demo = all_hand_poses_world
+            
 
             initial_state = root_z["data"][demo]["states"][0]
 
