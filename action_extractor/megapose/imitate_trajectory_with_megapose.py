@@ -246,36 +246,65 @@ def poses_to_absolute_actions(poses):
     
     return actions
 
+def quaternion_conjugate(q):
+    """
+    Conjugate (inverse for a unit quaternion): [w, x, y, z] -> [w, -x, -y, -z].
+    Assumes q is a unit quaternion.
+    """
+    w, x, y, z = q
+    return np.array([w, -x, -y, -z], dtype=float)
+
+def quaternion_norm(q):
+    """
+    Compute the Euclidean norm of a quaternion.
+    """
+    return np.sqrt(np.dot(q, q))
+
+def quaternion_normalize(q):
+    """
+    Normalize a quaternion to make it a unit quaternion.
+    """
+    norm = quaternion_norm(q)
+    if norm < 1e-12:
+        raise ValueError("Cannot normalize a near-zero quaternion.")
+    return q / norm
+
+def compute_hand_to_world_transform(q_world, q_hand):
+    """
+    Given:
+      - q_world:  orientation of an object in the world frame  (as [w, x, y, z])
+      - q_hand: orientation of the same object in the hand frame (as [w, x, y, z])
+    Returns:
+      - q_WO: the quaternion that transforms an orientation from the hand frame to the world frame.
+      
+    i.e. q_WO = q_world * inverse(q_hand)
+    """
+    # Ensure both quaternions are unit quaternions
+    q_world  = quaternion_normalize(q_world)
+    q_hand = quaternion_normalize(q_hand)
+    
+    q_hand_inv = quaternion_conjugate(q_hand)  # inverse of a unit quaternion
+    q_WO = quat_multiply(q_world, q_hand_inv)
+    return quaternion_normalize(q_WO)
+
+def transform_hand_orientation_to_world(q_WO, q_in_hand):
+    """
+    Transform an arbitrary orientation q_in_hand (hand frame)
+    into the world frame using q_WO.
+    
+    Returns: q_in_world = q_WO * q_in_hand
+    """
+    # Normalize for safety, especially if there's floating-point drift
+    q_in_hand = quaternion_normalize(q_in_hand)
+    q_out = quat_multiply(q_WO, q_in_hand)
+    return quaternion_normalize(q_out)
 
 def load_ground_truth_poses_as_actions(obs_group, env_camera0):
-    """
-    Convert the dataset's end-effector poses (in world frame) into the orientation
-    that OSC_POSE with absolute control actually wants, i.e. the "eef_site" frame orientation.
-
-    1) We read robot0_eef_pos, robot0_eef_quat  => these are presumably world-frame
-       orientation of the end effector.
-
-    2) The environment's absolute action expects orientation in the "eef_site" coordinate system.
-
-       Let q_offset = env_camera0.env.env.robots[0].eef_rot_offset
-         (the rotation offset between link7 and eef site)
-       Possibly also link7 orientation if needed, but typically we can do:
-         q_site = q_world * inv(q_offset)     (assuming q_offset transforms link7->eef_site)
-
-       Adjust as needed if your dataset is truly "world->gripper" vs "world->eef_site."
-
-    3) Convert to axis-angle and unify sign if you want (optional).
-
-    4) Return (N, 7) actions => [px, py, pz, rx, ry, rz, 1].
-    """
     pos_array = obs_group["robot0_eef_pos"][:]    # shape (N,3)
     quat_array = obs_group["robot0_eef_quat"][:]  # shape (N,4) => [qx, qy, qz, qw] (world)
     num_samples = pos_array.shape[0]
 
-    # eef_rot_offset is typically [x, y, z, w].  We want to transform the dataset's world orientation
-    # into the "eef_site frame" orientation that the controller needs.
-    q_offset = env_camera0.env.env._eef_xquat  # shape (4,)
-    q_base = env_camera0.env.env.robots[0]._hand_quat
+    current_orientation = env_camera0.env.env._eef_xquat  # shape (4,)
 
     all_actions = np.zeros((num_samples, 7), dtype=np.float32)
 
@@ -285,11 +314,9 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
     for i in range(num_samples):
         px, py, pz = pos_array[i]
 
-        q_world = quat_array[i]  # [w, x, y, z]
-        q_world = q_world[[1, 2, 3, 0]] # [x, y, z, w]
-        q_eef_site = q_offset
+        q_world = quat_array[i][[1, 2, 3, 0]]  # [w, x, y, z]
         # convert to axis-angle
-        rvec = quat2axisangle(q_eef_site)
+        rvec = quat2axisangle(q_world)
 
         # unify sign across consecutive frames to avoid ± axis flips
         if (prev_rvec is not None) and (np.dot(rvec, prev_rvec) < 0):
@@ -466,7 +493,8 @@ def imitate_trajectory_with_action_identifier(
                 )
 
            
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
+            # actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
+            actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
             
 
             initial_state = root_z["data"][demo]["states"][0]
