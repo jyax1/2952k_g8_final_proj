@@ -178,6 +178,10 @@ def quat_inv(q):
     """
     return np.array([-q[0], -q[1], -q[2], q[3]], dtype=np.float32)
 
+def quat_conjugate(q):
+    """Conjugate of a unit quaternion [w, x, y, z] => [w, -x, -y, -z]."""
+    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=np.float32)
+
 def rotation_matrix_to_angle_axis(R):
     """
     Convert a 3x3 rotation matrix R into its angle-axis representation
@@ -206,45 +210,43 @@ def rotation_matrix_to_angle_axis(R):
     angle_axis = axis * theta
     return angle_axis
 
-def poses_to_absolute_actions(poses):
+def rotation_matrix_to_quaternion(R):
     """
-    Receives a list of 4x4 np arrays representing SE(3) rigid body poses
-    and converts them to a list of 7D vectors, where:
-        - first 3 elements: position (x, y, z),
-        - next 3 elements: orientation in angle-axis form,
-        - last element: 1.
+    Convert a 3x3 rotation matrix R into a quaternion [x, y, z, w].
+    Assumes R is a proper rotation matrix (orthonormal, det=1).
+    """
+    M = np.asarray(R, dtype=np.float32)
+    trace = M[0,0] + M[1,1] + M[2,2]
 
-    Additionally, we ensure the orientation sequence is smooth by flipping
-    the sign of the angle-axis vector if it is 'opposite' from the previous one.
-    This avoids sudden 180° flips in the orientation representation.
-    """
-    actions = []
-    previous_angle_axis = None  # Will store the last orientation to ensure continuity
-    
-    for pose in poses:
-        # Extract translation from the last column of the pose matrix
-        translation = pose[:3, 3]
-        
-        # Extract the rotation matrix from the top-left 3x3
-        R = pose[:3, :3]
-        
-        # Convert the rotation to angle-axis
-        angle_axis = rotation_matrix_to_angle_axis(R)
-        
-        # If we already have a previous orientation, check continuity
-        if previous_angle_axis is not None:
-            # If dot product is negative, flip the sign of the current angle-axis
-            if np.dot(angle_axis, previous_angle_axis) < 0:
-                angle_axis = -angle_axis
-        
-        # Form the 7D vector: [tx, ty, tz, rx, ry, rz, 1]
-        action_vec = np.hstack([translation, angle_axis, 1.0])
-        actions.append(action_vec)
-        
-        # Update previous_angle_axis
-        previous_angle_axis = angle_axis
-    
-    return actions
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (M[2,1] - M[1,2]) * s
+        y = (M[0,2] - M[2,0]) * s
+        z = (M[1,0] - M[0,1]) * s
+    else:
+        # Find the major diagonal element
+        if M[0,0] > M[1,1] and M[0,0] > M[2,2]:
+            s = 2.0 * np.sqrt(max(1e-12, 1.0 + M[0,0] - M[1,1] - M[2,2]))
+            w = (M[2,1] - M[1,2]) / s
+            x = 0.25 * s
+            y = (M[0,1] + M[1,0]) / s
+            z = (M[0,2] + M[2,0]) / s
+        elif M[1,1] > M[2,2]:
+            s = 2.0 * np.sqrt(max(1e-12, 1.0 + M[1,1] - M[0,0] - M[2,2]))
+            w = (M[0,2] - M[2,0]) / s
+            x = (M[0,1] + M[1,0]) / s
+            y = 0.25 * s
+            z = (M[1,2] + M[2,1]) / s
+        else:
+            s = 2.0 * np.sqrt(max(1e-12, 1.0 + M[2,2] - M[0,0] - M[1,1]))
+            w = (M[1,0] - M[0,1]) / s
+            x = (M[0,2] + M[2,0]) / s
+            y = (M[1,2] + M[2,1]) / s
+            z = 0.25 * s
+
+    q = np.array([x, y, z, w], dtype=np.float32)
+    return quat_normalize(q)
 
 def quaternion_conjugate(q):
     """
@@ -299,36 +301,147 @@ def transform_hand_orientation_to_world(q_WO, q_in_hand):
     q_out = quat_multiply(q_WO, q_in_hand)
     return quaternion_normalize(q_out)
 
+def quat_normalize(q):
+    """Normalize a quaternion."""
+    norm = np.linalg.norm(q)
+    if norm < 1e-12:
+        raise ValueError("Cannot normalize near-zero quaternion.")
+    return q / norm
+
 def load_ground_truth_poses_as_actions(obs_group, env_camera0):
-    pos_array = obs_group["robot0_eef_pos"][:]    # shape (N,3)
-    quat_array = obs_group["robot0_eef_quat"][:]  # shape (N,4) => [qx, qy, qz, qw] (world)
+    """
+    Modified version:
+      - We compute delta quaternions between consecutive steps, 
+      - then 'add' (i.e. multiply) that delta with 'current_orientation'.
+      - Then convert that updated orientation to axis-angle for each action.
+    """
+
+    # (N, 3)
+    pos_array = obs_group["robot0_eef_pos"][:]   # end-effector positions
+    # (N, 4) => [qx, qy, qz, qw] in the world frame
+    quat_array = obs_group["robot0_eef_quat"][:] 
+
     num_samples = pos_array.shape[0]
 
-    current_orientation = env_camera0.env.env._eef_xquat  # shape (4,)
+    # The environment's initial eef orientation (assumed [w, x, y, z] but verify shape/order).
+    # Some internal environment variable -- adjust if needed.
+    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = quat_normalize(current_orientation)
 
-    all_actions = np.zeros((num_samples, 7), dtype=np.float32)
+    # We will have one fewer action than the number of samples,
+    # because we form deltas between consecutive frames.
+    num_actions = num_samples - 1
 
-    # optional: unify sign across consecutive frames
+    all_actions = np.zeros((num_actions, 7), dtype=np.float32)
+
+    # Keep track of the previous axis-angle to unify sign across consecutive frames
     prev_rvec = None
 
-    for i in range(num_samples):
-        px, py, pz = pos_array[i]
+    for i in range(num_actions):
+        # Current and next quaternions from data, reorder them to [w, x, y, z]
+        q_i   = quat_array[i]     #   [qw, qx, qy, qz]
+        q_i1  = quat_array[i + 1] # next [qw, qx, qy, qz]
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
 
-        q_world = quat_array[i][[1, 2, 3, 0]]  # [w, x, y, z]
-        # convert to axis-angle
-        rvec = quat2axisangle(q_world)
+        # 1) compute delta: how do we go from q_i to q_i1?
+        #    delta = q_i1 * inv(q_i)
+        q_delta = quat_multiply(quat_inv(q_i), q_i1)
+        q_delta = quat_normalize(q_delta)
 
-        # unify sign across consecutive frames to avoid ± axis flips
-        if (prev_rvec is not None) and (np.dot(rvec, prev_rvec) < 0):
+        # 2) "add" this delta to current_orientation (i.e. multiply in quaternion space)
+        current_orientation = quat_multiply(current_orientation, q_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # 3) Convert to axis-angle
+        rvec = quat2axisangle(current_orientation)
+
+        # 4) optional sign unify (avoid ± flips in axis representation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
             rvec = -rvec
         prev_rvec = rvec
 
-        all_actions[i, :3] = [px, py, pz]
+        # For position, you can choose either pos_array[i] or pos_array[i+1]. 
+        # Typically we take the next position: 
+        px, py, pz = pos_array[i+1]
+
+        all_actions[i, 0:3] = [px, py, pz]
         all_actions[i, 3:6] = rvec
-        all_actions[i, 6] = 1.0  # keep gripper=1 as "open," or do your logic
+        all_actions[i, 6]   = 1.0  # e.g., keep gripper = open = 1
 
     return all_actions
 
+
+def poses_to_absolute_actions(poses, env_camera0):
+    """
+    Similar logic to load_ground_truth_poses_as_actions, but:
+      - 'poses' is a list (or array) of 4x4 SE(3) transformation matrices.
+      - Each pose[i] is the end-effector's transform in the world frame.
+         => pose[i][:3, :3] is the rotation (3x3)
+         => pose[i][:3,  3] is the translation (x, y, z)
+    Steps:
+      1) For each consecutive pair of poses (i, i+1), compute
+         delta_quaternion = inverse(q_i) * q_{i+1}.
+      2) Multiply that delta_quaternion into a running 'current_orientation' 
+         (which starts as the environment's initial orientation).
+      3) Convert 'current_orientation' -> axis-angle (with sign unification).
+      4) Store position (e.g. from pose[i+1]), plus the axis-angle, plus a dummy gripper=1.
+      5) Return the Nx7 array of actions (N = len(poses)-1).
+    """
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)  # no pairs
+
+    # 1) Start from environment's known initial eef quaternion
+    #    (assuming it's [w, x, y, z], verify your environment usage)
+    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = quat_normalize(current_orientation)
+
+    # We'll create one fewer action than number of input poses
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions, 7), dtype=np.float32)
+
+    prev_rvec = None
+
+    for i in range(num_actions):
+        # --- Extract orientation from poses[i], [i+1] ---
+        # rotation matrices
+        R_i  = poses[i][:3, :3]
+        R_i1 = poses[i+1][:3, :3]
+
+        # convert to quaternions [x, y, z, w]
+        q_i  = rotation_matrix_to_quaternion(R_i)  
+        q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+        # 2) delta = inv(q_i) * q_i1
+        #    (Note: if in your code you prefer q_delta = q_i1 * inv(q_i), be consistent.)
+        q_i = quat_normalize(q_i)
+        q_i1 = quat_normalize(q_i1)
+        q_delta = quat_multiply(quat_inv(q_i), q_i1)
+        q_delta = quat_normalize(q_delta)
+
+        # 3) Accumulate on the running orientation
+        current_orientation = quat_multiply(current_orientation, q_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # 4) Convert to axis-angle
+        rvec = quat2axisangle(current_orientation)
+
+        # 5) optional unify sign with previous
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # 6) For position, let's pick pose[i+1] => its translation
+        translation = poses[i+1][:3, 3]
+        px, py, pz = translation
+
+        # 7) Fill in the 7D action
+        all_actions[i, :3] = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i, 6]   = 1.0  # e.g., "gripper = open"
+
+    return all_actions
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -460,8 +573,6 @@ def imitate_trajectory_with_action_identifier(
                     writer.append_data(frame)
 
             # ---- We want ground-truth absolute actions in eef_site coords ----
-            actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
-            
             front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
             front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
             side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
@@ -493,8 +604,8 @@ def imitate_trajectory_with_action_identifier(
                 )
 
            
-            # actions_for_demo = poses_to_absolute_actions(all_hand_poses_world)
-            actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, env_camera0)
+            # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
             
 
             initial_state = root_z["data"][demo]["states"][0]
