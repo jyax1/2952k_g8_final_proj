@@ -92,52 +92,64 @@ def estimate_pose(image_rgb: np.ndarray, K: np.ndarray, detections: DetectionsTy
         save_predictions(output_dir, output)
     return output
 
-def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list[list[dict]],
-                         K: np.ndarray, pose_estimator: PoseEstimator, model_info: dict,
-                         depth_list: list[np.ndarray] = None) -> list[PoseEstimatesType]:
-    """Runs pose estimation on multiple images in a single forward pass."""
+def estimate_pose_batched(
+    list_of_images: list[np.ndarray],
+    list_of_bboxes: list[list[dict]],
+    K: np.ndarray,
+    pose_estimator,
+    model_info: dict,
+    depth_list: Optional[list[np.ndarray]] = None,
+) -> tuple[list[PoseEstimatesType], list[np.ndarray]]:
+    """
+    Runs pose estimation on multiple images in a single forward pass.
+    
+    Returns:
+      - results_per_image: A list of length N, where results_per_image[i] 
+        is a PoseEstimatesType containing all poses estimated for image i.
+      - scores_per_image: A list of length N, where scores_per_image[i] is 
+        a NumPy array containing the corresponding 'pose_score' for each row 
+        in results_per_image[i].infos (in the same order).
+    """
     assert len(list_of_images) == len(list_of_bboxes), (
         "list_of_images and list_of_bboxes must have same length"
     )
     N = len(list_of_images)
-    
+
     # ----------------------------------------------------------------
-    # 1) Construct one big ObservationTensor with shape [N,3,H,W] or [N,4,H,W]
+    # 1) Build one big ObservationTensor with shape [N, C, H, W]
     # ----------------------------------------------------------------
     images_torch = []
     for i in range(N):
-        rgb = list_of_images[i]    # shape (H,W,3) in uint8
-        # convert to float [0..1], shape (H,W,3)
-        rgb_torch = torch.from_numpy(rgb).float() / 255.0
-        # [3,H,W]
-        rgb_torch = rgb_torch.permute(2,0,1)
-        # => shape (1,3,H,W)
-        rgb_torch = rgb_torch.unsqueeze(0)
+        rgb = list_of_images[i]  # shape (H,W,3) in uint8
+        rgb_torch = torch.from_numpy(rgb).float() / 255.0  # [H,W,3], values in [0,1]
+        rgb_torch = rgb_torch.permute(2, 0, 1).unsqueeze(0)  # (1,3,H,W)
 
         if depth_list is not None:
-            depth_np = depth_list[i]  # shape (H,W)
-            depth_torch = torch.from_numpy(depth_np).float() / 255.0  # (1,1,H,W)
-            depth_torch = depth_torch.permute(2,0,1).unsqueeze(0) # (1,1,H,W)
-            img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)  # shape (1,4,H,W)
+            # depth is shape (H,W) in uint8, for example
+            depth_np = depth_list[i]
+            depth_torch = torch.from_numpy(depth_np).float() / 255.0
+            depth_torch = depth_torch.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+            # Concatenate along channel dimension => shape (1,4,H,W)
+            img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)
             images_torch.append(img_4ch)
         else:
-            images_torch.append(rgb_torch)  # shape (1,3,H,W)
+            images_torch.append(rgb_torch)
 
-    # stack along batch dimension => shape (N,C,H,W)
-    images_batched = torch.cat(images_torch, dim=0)  
+    # Stack images into a single batch => shape (N, C, H, W)
+    images_batched = torch.cat(images_torch, dim=0)
 
-    # replicate K => shape (N,3,3)
+    # Replicate K => shape (N,3,3)
     K_torch = torch.from_numpy(K).float().unsqueeze(0).expand(N, -1, -1).clone()
 
-    # create ObservationTensor and move to GPU
+    # Create ObservationTensor and move to GPU
+    from megapose.inference.types import ObservationTensor
     observation = ObservationTensor(images_batched, K_torch).cuda()
 
     # ----------------------------------------------------------------
     # 2) Build a single DetectionsType containing all bounding boxes
     # ----------------------------------------------------------------
-    # We'll create a DataFrame with columns like 'batch_im_id','label','instance_id'
     rows = []
-    bboxes_list = []
+    bboxes_list_np = []
     for i in range(N):
         # list_of_bboxes[i] is e.g.:
         # [ {"label":"panda-hand","bbox":[x1,y1,x2,y2],"instance_id":0}, ... ]
@@ -151,16 +163,16 @@ def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list
                 "instance_id": inst_id
             }
             rows.append(row_dict)
-            bboxes_list.append(box_)
-    
+            bboxes_list_np.append(box_)
+
     if len(rows) == 0:
-        # no bounding boxes at all => empty
-        empty_df = pd.DataFrame([], columns=["batch_im_id","label","instance_id"])
+        # no bounding boxes => empty
+        empty_df = pd.DataFrame([], columns=["batch_im_id", "label", "instance_id"])
         empty_boxes = torch.empty((0,4), dtype=torch.float32)
         detections_batched = PandasTensorCollection(empty_df, bboxes=empty_boxes)
     else:
         df = pd.DataFrame(rows)
-        boxes_np = np.array(bboxes_list, dtype=np.float32)  # shape (#boxes,4)
+        boxes_np = np.array(bboxes_list_np, dtype=np.float32)  # (#boxes,4)
         boxes_torch = torch.from_numpy(boxes_np)
         detections_batched = PandasTensorCollection(df, bboxes=boxes_torch)
 
@@ -168,6 +180,7 @@ def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list
 
     # ----------------------------------------------------------------
     # 3) Single forward pass for all frames
+    #    => run_inference_pipeline returns final pose estimates
     # ----------------------------------------------------------------
     pose_est_batched, _ = pose_estimator.run_inference_pipeline(
         observation,
@@ -176,21 +189,33 @@ def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list
     )
 
     # ----------------------------------------------------------------
-    # 4) Split results per image
+    # 4) Split results per image, along with pose scores
     # ----------------------------------------------------------------
-    results_per_image = [None]*N
+    results_per_image: list[PoseEstimatesType] = [None]*N
+    scores_per_image: list[np.ndarray] = [None]*N
+
     df_res = pose_est_batched.infos
     for i in range(N):
         mask = (df_res["batch_im_id"] == i)
         if not mask.any():
-            # no detection for that image => empty slice
-            results_per_image[i] = pose_est_batched[[]]
+            # no detections for that image => empty slice
+            empty_slice = pose_est_batched[[]]
+            results_per_image[i] = empty_slice
+            scores_per_image[i] = np.array([], dtype=np.float32)
         else:
+            # indices that correspond to this image
             idx = mask[mask].index
-            subset = pose_est_batched[idx]
+            subset = pose_est_batched[idx]  # PoseEstimatesType for image i
             results_per_image[i] = subset
 
-    return results_per_image
+            # If pose_score is present, extract it; otherwise create an empty array
+            if "pose_score" in subset.infos.columns:
+                scores_per_image[i] = subset.infos["pose_score"].to_numpy(dtype=np.float32)
+            else:
+                scores_per_image[i] = np.array([], dtype=np.float32)
+
+    return results_per_image, scores_per_image
+
 
 COLOR_RANGES = {
     "green":   (np.array([50, 150, 50],  dtype=np.uint8), np.array([70, 255, 255], dtype=np.uint8)),

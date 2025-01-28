@@ -592,7 +592,7 @@ def imitate_trajectory_with_action_identifier(
                 all_fingers_distances,
                 all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
                     front_frames_list,
-                    front_depth_list=None,
+                    front_depth_list=front_depth_list,
                     side_frames_list=side_frames_list
                 )
                 # Save to disk for future runs
