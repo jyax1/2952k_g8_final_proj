@@ -128,7 +128,7 @@ def estimate_pose_batched(
             # depth is shape (H,W) in uint8, for example
             depth_np = depth_list[i]
             depth_torch = torch.from_numpy(depth_np).float() / 255.0
-            depth_torch = depth_torch.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+            depth_torch = depth_torch.permute(2,0,1).unsqueeze(0)  # (1,1,H,W)
             # Concatenate along channel dimension => shape (1,4,H,W)
             img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)
             images_torch.append(img_4ch)
@@ -544,7 +544,7 @@ class ActionIdentifierMegapose:
                 images_chunk.append(img)
 
             # Batched pose estimation for chunk (with optional depth)
-            chunk_results = estimate_pose_batched(
+            chunk_results, scores = estimate_pose_batched(
                 list_of_images=images_chunk,
                 list_of_bboxes=bboxes_chunk,
                 K=self.frontview_K,
@@ -656,7 +656,7 @@ class ActionIdentifierMegapose:
                 images_chunk.append(img)
 
             # Batched pose estimation for chunk (with optional depth)
-            chunk_results = estimate_pose_batched(
+            chunk_results, scores = estimate_pose_batched(
                 list_of_images=images_chunk,
                 list_of_bboxes=bboxes_chunk,
                 K=self.frontview_K,
@@ -664,6 +664,10 @@ class ActionIdentifierMegapose:
                 model_info=self.model_info,
                 depth_list=depth_chunk,
             )
+            
+            print("len(chunk_results):", len(chunk_results))
+            print(scores)
+            exit()
 
             # measure finger distances (cyan vs magenta) using front frames
             finger_dist_chunk = []
