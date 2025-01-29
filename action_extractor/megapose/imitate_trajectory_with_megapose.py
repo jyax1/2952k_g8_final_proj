@@ -52,6 +52,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     bounding_box_center,   # might be unused
     find_color_bounding_box,
     pixel_to_world,
+    poses_to_absolute_actions,
     ActionIdentifierMegapose
 )
 from robosuite.utils.camera_utils import (

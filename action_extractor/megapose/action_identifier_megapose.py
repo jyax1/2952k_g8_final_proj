@@ -13,6 +13,8 @@ import cv2
 
 from typing import List, Optional
 
+from action_extractor.utils.angles import *
+
 from megapose.utils.tensor_collection import PandasTensorCollection
 
 from megapose.datasets.object_dataset import RigidObject, RigidObjectDataset
@@ -24,7 +26,7 @@ from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger
 from megapose.inference.pose_estimator import PoseEstimator
 
-from scipy.spatial.transform import Rotation
+from scipy.spatial.transform import Rotation as R
 
 logger = get_logger(__name__)
 
@@ -424,20 +426,238 @@ def rotate_using_quaternion_exp(rvec, scale):
     R1 = R.from_rotvec(r_new).as_matrix()
     return R.from_matrix(R1).as_rotvec()
 
-def rotate_with_unwrap(rvec, scale):
+def smooth_positions(
+    poses: list[np.ndarray],
+    window_size: int = 2,
+    dist_threshold: float = 0.15
+) -> np.ndarray:
     """
-    Approach C: direct multiply then unwrap angle to (-pi, pi].
+    Smooths a sequence of SE(3) 4x4 poses by removing sudden 'outlier' 3D positions.
+    Returns an (N,3) NumPy array of cleaned translations.
+
+    Steps:
+      1) Extract positions from each 4x4 pose => p_i in R^3.
+      2) Outlier detection pass:
+         - For each frame i, gather its neighbors in [i - window_size .. i + window_size],
+           skipping i itself and any indices out of range.
+         - Compute the median of those neighbor positions (robust local estimate).
+         - If dist(p_i, median) > dist_threshold => mark p_i as outlier.
+      3) Outlier replacement pass:
+         - For each outlier, find the nearest inlier to the left, and the nearest inlier to the right.
+         - If both exist => linearly interpolate.
+         - If only one side exists => clamp to that inlier's position.
+      4) Return the final array of size (N, 3).
+
+    :param poses: List of N SE(3) 4x4 matrices. poses[i][:3,:3] is rotation, poses[i][:3,3] is translation.
+    :param window_size: How many frames on each side to consider as neighbors for local median.
+    :param dist_threshold: Distance above which a point is flagged as an outlier from its neighbors.
+    :return: Nx3 float32 array of cleaned/smoothed positions.
     """
-    angle = np.linalg.norm(rvec)
-    if angle < 1e-8:
-        return rvec * scale
-    axis = rvec / angle
-    angle_new = angle * scale
-    while angle_new > np.pi:
-        angle_new -= 2*np.pi
-    while angle_new <= -np.pi:
-        angle_new += 2*np.pi
-    return axis * angle_new
+    N = len(poses)
+    if N == 0:
+        return np.zeros((0,3), dtype=np.float32)
+
+    # 1) Extract the Nx3 positions
+    positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
+
+    # 2) First pass: detect outliers
+    outlier_mask = np.zeros(N, dtype=bool)
+    for i in range(N):
+        # Gather neighbors in range [i-window_size.. i+window_size], excluding i
+        left = max(0, i - window_size)
+        right = min(N, i + window_size + 1)
+        neighbor_indices = [idx for idx in range(left, right) if idx != i]
+
+        if len(neighbor_indices) == 0:
+            # No neighbors => can't decide => skip outlier check
+            continue
+
+        neighbor_pts = positions[neighbor_indices]  # shape (#neighbors, 3)
+
+        # Median in x, y, z among neighbors
+        local_median = np.median(neighbor_pts, axis=0)
+        dist_i = np.linalg.norm(positions[i] - local_median)
+
+        if dist_i > dist_threshold:
+            outlier_mask[i] = True
+
+    # 3) Second pass: replace outliers by interpolation
+    cleaned_positions = positions.copy()
+    for i in range(N):
+        if not outlier_mask[i]:
+            continue
+
+        # Find nearest inlier to the left
+        left_idx = i - 1
+        while left_idx >= 0 and outlier_mask[left_idx]:
+            left_idx -= 1
+
+        # Find nearest inlier to the right
+        right_idx = i + 1
+        while right_idx < N and outlier_mask[right_idx]:
+            right_idx += 1
+
+        if left_idx < 0 and right_idx >= N:
+            # Everything is outlier => fallback: keep original or zero
+            # We'll just keep original, but you could do something else
+            pass
+        elif left_idx < 0:
+            # No inlier to the left => clamp to right
+            cleaned_positions[i] = cleaned_positions[right_idx]
+        elif right_idx >= N:
+            # No inlier to the right => clamp to left
+            cleaned_positions[i] = cleaned_positions[left_idx]
+        else:
+            # Linear interpolate
+            frac = (i - left_idx) / float(right_idx - left_idx)
+            p_left = cleaned_positions[left_idx]
+            p_right = cleaned_positions[right_idx]
+            cleaned_positions[i] = p_left + frac * (p_right - p_left)
+
+    return cleaned_positions
+
+def poses_to_absolute_actions(
+    poses, 
+    poses_side, 
+    fingers_distances, 
+    env_camera0,
+):
+    """
+    We smooth out the translation portion by looking ahead for a future
+    index j where the jump is acceptable, and linearly interpolate intermediate
+    positions. If no such j is found (end of trajectory), we do a linear 
+    extrapolation from the past velocity or hold the last stable position.
+
+    The orientation logic remains the same as before:
+    - orientation is computed incrementally from poses[i]->poses[i+1].
+    - we do not alter orientation if there's a large jump in position.
+
+    Steps in detail:
+    1) SMOOTH POSITIONS:
+        - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
+        - Starting from i=0, if jump i->i+1 is small, keep it.
+        If jump is big, search forward for j with a small jump from i.
+        If found, linearly interpolate from i..j.
+        If not found (end), extrapolate or hold constant.
+    2) ORIENTATION:
+        - For each i in [0 .. num_samples-2],
+        compute delta quaternion from poses[i]-> poses[i+1].
+        Accumulate into `current_orientation`.
+        Convert to axis-angle (with sign unification).
+    3) BUILD ACTIONS:
+        - For each i in [0 .. num_samples-2], the final action 
+        uses `smoothed_positions[i+1]` as [px,py,pz] 
+        and the just-computed orientation as [rx,ry,rz].
+        - Set gripper=1.0 or your logic.
+
+    Returns:
+    all_actions of shape (num_samples-1, 7).
+    """
+
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute a smoothed set of positions
+    smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    smoothed_positions_side = smooth_positions(poses_side, dist_threshold=0.15)
+    
+    # for i in range(len(poses)-1):
+    #     # print('unsmoothed:', poses[i][:3,3], 'smoothed:', smoothed_positions[i])
+    #     dist = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
+    #     print(f"Distance between smoothed frame {i} and {i+1}: {dist:.4f}")
+        
+
+    # 2) Start from environment's known initial eef quaternion 
+    #    (assuming it's [w, x, y, z], confirm shape/order as needed).
+    starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = quat_normalize(current_orientation)
+    current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
+
+    # We'll have num_actions = num_samples - 1
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions, 7), dtype=np.float32)
+
+    prev_rvec = None
+    z_offset = None
+    
+    position_from_side = False
+
+    for i in range(num_actions):
+        # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
+        # --- Position from the precomputed 'smoothed_positions' ---
+        if z_offset is None:
+            z_offset = smoothed_positions[i][2] - current_position[2]
+            
+        if np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i]) > 0.1:
+            position_from_side = True
+            
+        if position_from_side:
+            px, py, pz = smoothed_positions_side[i+1]
+            
+            R_i  = poses_side[i][:3, :3]
+            R_i1 = poses_side[i+1][:3, :3]
+            
+        else:
+            px, py, pz = smoothed_positions[i+1]
+            
+            R_i  = poses[i][:3, :3]
+            R_i1 = poses[i+1][:3, :3]
+
+        q_i  = rotation_matrix_to_quaternion(R_i)
+        q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
+        q_inv = quat_inv(q_i)
+
+        q_delta = quat_multiply(q_inv, q_i1)
+        q_delta = quat_normalize(q_delta)
+        
+        '''
+        Only z-axis rotation allowed
+        '''
+        rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
+        roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+
+        # Zero out roll & pitch, keep only yaw
+        roll = 0.0
+        pitch = 0.0
+
+        # Build new rotation solely around z (yaw)
+        rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
+        q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
+        '''
+        Only z-axis rotation allowed
+        '''
+
+        # Accumulate orientation
+        current_orientation = quat_multiply(current_orientation, q_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert to axis-angle, unify sign
+        rvec = quat2axisangle(current_orientation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+        
+        # print(f"pz_front: {pz_front}, pz_side: {pz}")
+        pz -= z_offset
+        
+        finger_distance1 = fingers_distances[i]
+        finger_distance2 = fingers_distances[i + 1]
+        delta_finger_distance = finger_distance2 - finger_distance1
+
+        # Build the 7D action
+        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        if i > 20 and delta_finger_distance < 0.02:
+            all_actions[i][-1] = 1
+        else:
+            all_actions[i][-1] = -np.sign(delta_finger_distance)
+
+    return all_actions
 
 
 class ActionIdentifierMegapose:
@@ -622,149 +842,6 @@ class ActionIdentifierMegapose:
                         all_hand_poses_world_from_side[global_idx] = T_world_obj_side
 
         return all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side
-    
-    def poses_to_absolute_actions(
-        poses, 
-        poses_side, 
-        fingers_distances, 
-        env_camera0,
-    ):
-        """
-        We smooth out the translation portion by looking ahead for a future
-        index j where the jump is acceptable, and linearly interpolate intermediate
-        positions. If no such j is found (end of trajectory), we do a linear 
-        extrapolation from the past velocity or hold the last stable position.
-
-        The orientation logic remains the same as before:
-        - orientation is computed incrementally from poses[i]->poses[i+1].
-        - we do not alter orientation if there's a large jump in position.
-
-        Steps in detail:
-        1) SMOOTH POSITIONS:
-            - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
-            - Starting from i=0, if jump i->i+1 is small, keep it.
-            If jump is big, search forward for j with a small jump from i.
-            If found, linearly interpolate from i..j.
-            If not found (end), extrapolate or hold constant.
-        2) ORIENTATION:
-            - For each i in [0 .. num_samples-2],
-            compute delta quaternion from poses[i]-> poses[i+1].
-            Accumulate into `current_orientation`.
-            Convert to axis-angle (with sign unification).
-        3) BUILD ACTIONS:
-            - For each i in [0 .. num_samples-2], the final action 
-            uses `smoothed_positions[i+1]` as [px,py,pz] 
-            and the just-computed orientation as [rx,ry,rz].
-            - Set gripper=1.0 or your logic.
-
-        Returns:
-        all_actions of shape (num_samples-1, 7).
-        """
-
-        num_samples = len(poses)
-        if num_samples < 2:
-            return np.zeros((0, 7), dtype=np.float32)
-
-        # 1) Compute a smoothed set of positions
-        smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
-        smoothed_positions_side = smooth_positions(poses_side, dist_threshold=0.15)
-        
-        # for i in range(len(poses)-1):
-        #     # print('unsmoothed:', poses[i][:3,3], 'smoothed:', smoothed_positions[i])
-        #     dist = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
-        #     print(f"Distance between smoothed frame {i} and {i+1}: {dist:.4f}")
-            
-
-        # 2) Start from environment's known initial eef quaternion 
-        #    (assuming it's [w, x, y, z], confirm shape/order as needed).
-        starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
-        current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
-        current_orientation = quat_normalize(current_orientation)
-        current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
-
-        # We'll have num_actions = num_samples - 1
-        num_actions = num_samples - 1
-        all_actions = np.zeros((num_actions, 7), dtype=np.float32)
-
-        prev_rvec = None
-        z_offset = None
-        
-        position_from_side = False
-
-        for i in range(num_actions):
-            # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
-            # --- Position from the precomputed 'smoothed_positions' ---
-            if z_offset is None:
-                z_offset = smoothed_positions[i][2] - current_position[2]
-                
-            if np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i]) > 0.1:
-                position_from_side = True
-                
-            if position_from_side:
-                px, py, pz = smoothed_positions_side[i+1]
-                
-                R_i  = poses_side[i][:3, :3]
-                R_i1 = poses_side[i+1][:3, :3]
-                
-            else:
-                px, py, pz = smoothed_positions[i+1]
-                
-                R_i  = poses[i][:3, :3]
-                R_i1 = poses[i+1][:3, :3]
-
-            q_i  = rotation_matrix_to_quaternion(R_i)
-            q_i1 = rotation_matrix_to_quaternion(R_i1)
-
-            q_i   = quat_normalize(q_i)
-            q_i1  = quat_normalize(q_i1)
-            q_inv = quat_inv(q_i)
-
-            q_delta = quat_multiply(q_inv, q_i1)
-            q_delta = quat_normalize(q_delta)
-            
-            '''
-            Only z-axis rotation allowed
-            '''
-            rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
-            roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
-
-            # Zero out roll & pitch, keep only yaw
-            roll = 0.0
-            pitch = 0.0
-
-            # Build new rotation solely around z (yaw)
-            rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
-            q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
-            '''
-            Only z-axis rotation allowed
-            '''
-
-            # Accumulate orientation
-            current_orientation = quat_multiply(current_orientation, q_delta)
-            current_orientation = quat_normalize(current_orientation)
-
-            # Convert to axis-angle, unify sign
-            rvec = quat2axisangle(current_orientation)
-            if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
-                rvec = -rvec
-            prev_rvec = rvec
-            
-            # print(f"pz_front: {pz_front}, pz_side: {pz}")
-            pz -= z_offset
-            
-            finger_distance1 = fingers_distances[i]
-            finger_distance2 = fingers_distances[i + 1]
-            delta_finger_distance = finger_distance2 - finger_distance1
-
-            # Build the 7D action
-            all_actions[i, :3]  = [px, py, pz]
-            all_actions[i, 3:6] = rvec
-            if i > 20 and delta_finger_distance < 0.02:
-                all_actions[i][-1] = 1
-            else:
-                all_actions[i][-1] = -np.sign(delta_finger_distance)
-
-        return all_actions
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  APPROACH A: small increments
@@ -818,15 +895,15 @@ class ActionIdentifierMegapose:
             delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
             R_side_delta = delta_pose_side[:3,:3]
 
-            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
-            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+            euler_front = R.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = R.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
 
             fused_euler = [
                 euler_front[0],
                 euler_front[1],
                 euler_side[2],
             ]
-            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            R_fused = R.from_euler('xyz', fused_euler, degrees=False)
             axis_angle_vec = R_fused.as_rotvec()
 
             # approach A
@@ -902,15 +979,15 @@ class ActionIdentifierMegapose:
             delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
             R_side_delta = delta_pose_side[:3,:3]
 
-            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
-            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+            euler_front = R.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = R.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
 
             fused_euler = [
                 euler_front[0],
                 euler_front[1],
                 euler_side[2],
             ]
-            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            R_fused = R.from_euler('xyz', fused_euler, degrees=False)
             axis_angle_vec = R_fused.as_rotvec()
 
             # approach B
@@ -984,11 +1061,11 @@ class ActionIdentifierMegapose:
             delta_pose_side = np.linalg.inv(pose_i1_side) @ pose_i_side
             R_side_delta = delta_pose_side[:3,:3]
 
-            euler_front = Rotation.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
-            euler_side  = Rotation.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
+            euler_front = R.from_matrix(R_front_delta).as_euler('xyz', degrees=False)
+            euler_side  = R.from_matrix(R_side_delta).as_euler('xyz', degrees=False)
 
             fused_euler = [ euler_front[0], euler_front[1], euler_side[2] ]
-            R_fused = Rotation.from_euler('xyz', fused_euler, degrees=False)
+            R_fused = R.from_euler('xyz', fused_euler, degrees=False)
             axis_angle_vec = R_fused.as_rotvec()
 
             # approach C: multiply, then unwrap
@@ -1063,7 +1140,6 @@ class ActionIdentifierMegapose:
         """
 
         import numpy as np
-        from scipy.spatial.transform import Rotation as R
 
         num_frames = len(all_hand_poses_world)
         if num_frames < 2:
@@ -1309,7 +1385,7 @@ class ActionIdentifierMegapose:
             # 3) Convert rotation matrix to axis-angle
             #    as_rotvec() returns a 3D vector whose direction is the rotation axis
             #    and whose magnitude is the rotation angle (in radians).
-            axis_angle_vec = Rotation.from_matrix(R_delta).as_rotvec() 
+            axis_angle_vec = R.from_matrix(R_delta).as_rotvec() 
 
             finger_distance1 = all_fingers_distances[i]
             finger_distance2 = all_fingers_distances[i + 1]
