@@ -420,14 +420,12 @@ def imitate_trajectory_with_action_identifier(
                 print(f"Loading cached poses from {cache_file} ...")
                 data = np.load(cache_file, allow_pickle=True)
                 all_hand_poses_world = data["all_hand_poses_world"]
-                all_fingers_distances = data["all_fingers_distances"]
                 all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
             else:
                 # No cache => run the expensive inference once
                 print("No cache found. Running inference to get all_hand_poses_world...")
                 (all_hand_poses_world,
-                all_fingers_distances,
-                all_hand_poses_world_from_side) = action_identifier.get_all_hand_poses_finger_distances_with_side(
+                all_hand_poses_world_from_side) = action_identifier.get_poses_from_frames(
                     front_frames_list,
                     front_depth_list=front_depth_list,
                     side_frames_list=side_frames_list
@@ -436,11 +434,12 @@ def imitate_trajectory_with_action_identifier(
                 np.savez(
                     cache_file,
                     all_hand_poses_world=all_hand_poses_world,
-                    all_fingers_distances=all_fingers_distances,
                     all_hand_poses_world_from_side=all_hand_poses_world_from_side
                 )
+            
+            gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
            
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, all_fingers_distances, env_camera0)
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, gt_gripper_actions, env_camera0)
             # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
             
 

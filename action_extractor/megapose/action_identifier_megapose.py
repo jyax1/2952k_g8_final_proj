@@ -519,7 +519,7 @@ def smooth_positions(
 def poses_to_absolute_actions(
     poses, 
     poses_side, 
-    fingers_distances, 
+    gripper_actions,
     env_camera0,
 ):
     """
@@ -561,12 +561,6 @@ def poses_to_absolute_actions(
     # 1) Compute a smoothed set of positions
     smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
     smoothed_positions_side = smooth_positions(poses_side, dist_threshold=0.15)
-    
-    # for i in range(len(poses)-1):
-    #     # print('unsmoothed:', poses[i][:3,3], 'smoothed:', smoothed_positions[i])
-    #     dist = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
-    #     print(f"Distance between smoothed frame {i} and {i+1}: {dist:.4f}")
-        
 
     # 2) Start from environment's known initial eef quaternion 
     #    (assuming it's [w, x, y, z], confirm shape/order as needed).
@@ -644,18 +638,11 @@ def poses_to_absolute_actions(
         
         # print(f"pz_front: {pz_front}, pz_side: {pz}")
         pz -= z_offset
-        
-        finger_distance1 = fingers_distances[i]
-        finger_distance2 = fingers_distances[i + 1]
-        delta_finger_distance = finger_distance2 - finger_distance1
 
         # Build the 7D action
         all_actions[i, :3]  = [px, py, pz]
         all_actions[i, 3:6] = rvec
-        if i > 20 and delta_finger_distance < 0.02:
-            all_actions[i][-1] = 1
-        else:
-            all_actions[i][-1] = -np.sign(delta_finger_distance)
+        all_actions[i][-1] = gripper_actions[i]
 
     return all_actions
 
@@ -692,7 +679,7 @@ class ActionIdentifierMegapose:
         self.frontview_R = frontview_R
         self.sideview_R = sideview_R 
 
-    def get_all_hand_poses_finger_distances_with_side(
+    def get_poses_from_frames(
         self,
         front_frames_list: list[np.ndarray],
         front_depth_list: Optional[list[np.ndarray]] = None,
@@ -705,22 +692,19 @@ class ActionIdentifierMegapose:
           1) Chunk the front frames (and optional front-depth) in 'batch_size' steps,
           2) Find bounding boxes for 'green' (the hand) in the front frames,
           3) Call estimate_pose_batched for them (front camera) => front poses,
-          4) Measure finger distances (using the front frames, 'cyan' vs 'magenta'),
-          5) Transform front camera->object to world->object using frontview_R,
-          6) Do the same logic for the side frames if provided, using sideview_R and sideview_K,
-          7) Return three lists (all length n):
+          4) Transform front camera->object to world->object using frontview_R,
+          5) Do the same logic for the side frames if provided, using sideview_R and sideview_K,
+          6) Return three lists (all length n):
                all_hand_poses_world        : np.ndarray(4,4) or None
-               all_fingers_distances       : float
                all_hand_poses_world_from_side : np.ndarray(4,4) or None
 
         :param front_frames_list: List of RGB frames from the front camera, each shape (H,W,3).
         :param front_depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
         :param side_frames_list:  Optional list of side-camera frames, each shape (H,W,3). If None, side poses are not computed.
-        :return: (all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side)
+        :return: (all_hand_poses_world, all_hand_poses_world_from_side)
         """
         num_frames = len(front_frames_list)
         all_hand_poses_world = [None] * num_frames
-        all_fingers_distances = [0.0] * num_frames
         
         # Prepare a list for side poses (will remain all None if side_frames_list is None)
         all_hand_poses_world_from_side = [None] * num_frames
@@ -759,40 +743,9 @@ class ActionIdentifierMegapose:
                 depth_list=depth_chunk,
             )
 
-            # measure finger distances (cyan vs magenta) using front frames
-            finger_dist_chunk = []
-            for idx in range(chunk_start, chunk_end):
-                img = front_frames_list[idx]
-                bbox_cyan = find_color_bounding_box(img, "cyan")
-                bbox_magenta = find_color_bounding_box(img, "magenta")
-                d = 0.0
-
-                offset = idx - chunk_start  # position within this chunk
-                pose_est_for_frame = chunk_results[offset]
-
-                if (bbox_cyan is not None) and (bbox_magenta is not None) and (len(pose_est_for_frame) > 0):
-                    # Get the transform from the *front camera* to the object
-                    # (assuming your 'pose_est_for_frame.poses[0]' is T_cam_obj)
-                    pose_frontview_frame = pose_est_for_frame.poses[0].cpu().numpy()
-
-                    # The 'depth' is just the z-translation of this frontview frame
-                    point_depth = pose_frontview_frame[2, 3]
-
-                    # Then compute the finger distance in world, or do a pixel_to_world, etc.
-                    d = finger_distance_in_world(
-                        bbox_cyan,
-                        bbox_magenta,
-                        point_depth,
-                        self.frontview_K,
-                        self.frontview_R
-                    )
-
-                finger_dist_chunk.append(d)
-
             # Store results for front
             for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
                 pose_est_for_frame = chunk_results[offset]
-                all_fingers_distances[global_idx] = finger_dist_chunk[offset]
                 if len(pose_est_for_frame) < 1:
                     # no detection => None
                     all_hand_poses_world[global_idx] = None
@@ -841,7 +794,7 @@ class ActionIdentifierMegapose:
                         T_world_obj_side = self.sideview_R @ T_cam_obj_side
                         all_hand_poses_world_from_side[global_idx] = T_world_obj_side
 
-        return all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side
+        return all_hand_poses_world, all_hand_poses_world_from_side
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  APPROACH A: small increments
