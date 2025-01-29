@@ -821,7 +821,6 @@ def poses_to_absolute_actions(
         Only z-axis rotation allowed
         '''
 
-
         # Accumulate orientation
         current_orientation = quat_multiply(current_orientation, q_delta)
         current_orientation = quat_normalize(current_orientation)
