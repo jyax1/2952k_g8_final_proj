@@ -371,74 +371,353 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     return all_actions
 
-
-def poses_to_absolute_actions(poses, env_camera0):
+def _smooth_positions(poses, jump_threshold):
     """
-    Similar logic to load_ground_truth_poses_as_actions, but:
-      - 'poses' is a list (or array) of 4x4 SE(3) transformation matrices.
-      - Each pose[i] is the end-effector's transform in the world frame.
-         => pose[i][:3, :3] is the rotation (3x3)
-         => pose[i][:3,  3] is the translation (x, y, z)
-    Steps:
-      1) For each consecutive pair of poses (i, i+1), compute
-         delta_quaternion = inverse(q_i) * q_{i+1}.
-      2) Multiply that delta_quaternion into a running 'current_orientation' 
-         (which starts as the environment's initial orientation).
-      3) Convert 'current_orientation' -> axis-angle (with sign unification).
-      4) Store position (e.g. from pose[i+1]), plus the axis-angle, plus a dummy gripper=1.
-      5) Return the Nx7 array of actions (N = len(poses)-1).
+    Given a list of 4x4 SE(3) poses, produce a smoothed array of shape (N,3)
+    that avoids large jumps. We'll do a single pass with the following logic:
+
+    - out[0] = poses[0].translation
+    - For i in [0 .. N-2]:
+        1) Check dist between out[i] and poses[i+1].translation.
+        2) If <= jump_threshold, set out[i+1] to poses[i+1].translation (no big jump).
+        3) If > jump_threshold, search for a j in [i+2..end] such that
+           distance to out[i] is <= jump_threshold. If found, linearly
+           interpolate from i..j. If not found, we do a fallback approach:
+             - If i>0, we do velocity-based extrapolation from out[i-1]->out[i].
+             - If i=0 (the first is an outlier), we do velocity-based interpolation
+               from the second pose onward or just hold the second pose, etc.
+
+    This ensures each step doesn't exceed the threshold unless we do an
+    interpolation to jump over it. 
+    Additionally, we handle the special case: 
+    if i=0 is too far from *all* subsequent poses, we assume the first
+    is the outlier and try to extrapolate from the next positions.
     """
     num_samples = len(poses)
-    if num_samples < 2:
-        return np.zeros((0, 7), dtype=np.float32)  # no pairs
+    out = np.zeros((num_samples, 3), dtype=np.float32)
+    out[0] = poses[0][:3, 3]  # the first pose's translation
 
-    # 1) Start from environment's known initial eef quaternion
-    #    (assuming it's [w, x, y, z], verify your environment usage)
+    i = 0
+    while i < num_samples - 1:
+        # The target is the actual pose[i+1] translation
+        target_pos = poses[i+1][:3, 3]
+        dist_i_next = np.linalg.norm(target_pos - out[i])
+
+        if dist_i_next <= jump_threshold:
+            # No big jump => keep the actual next position
+            out[i+1] = target_pos
+            i += 1
+        else:
+            # There's a large jump from out[i] -> poses[i+1].
+            # Search for j in [i+2 .. end] so that dist(out[i], poses[j]) <= jump_threshold
+            j = None
+            for test_idx in range(i+2, num_samples):
+                test_pos = poses[test_idx][:3, 3]
+                dist_i_test = np.linalg.norm(test_pos - out[i])
+                if dist_i_test <= jump_threshold:
+                    j = test_idx
+                    break
+
+            if j is None:
+                # No good j found => fallback approach
+                if i >= 1:
+                    # We do velocity-based extrapolation from out[i-1] -> out[i]
+                    velocity = out[i] - out[i-1]   # previous step
+                    steps_left = (num_samples - 1) - i
+                    for k in range(1, steps_left + 1):
+                        frac = k / (steps_left + 1e-8)  # optional
+                        out[i + k] = out[i] + frac * velocity
+                    i = num_samples
+                else:
+                    # i=0 => means the very first pose is an outlier
+                    if num_samples > 2:
+                        # We'll try to define a velocity from poses[1]->poses[2]
+                        pos1 = poses[1][:3, 3]
+                        pos2 = poses[2][:3, 3]
+                        velocity_12 = pos2 - pos1  # direction from second to third pose
+                        # Fill out[0], out[1], ... by stepping from pos1 forward
+                        out[0] = pos1  # override first
+                        out[1] = pos1
+                        steps_left = num_samples - 2
+                        for k in range(1, steps_left+1):
+                            frac = k / float(steps_left)
+                            out[k+1] = pos1 + frac * velocity_12
+                        i = num_samples
+                    else:
+                        # Only 2 frames total => just hold the second
+                        out[1] = poses[1][:3, 3]
+                        i = num_samples
+            else:
+                # We found a j s.t. dist(out[i], poses[j]) <= jump_threshold
+                # We'll linearly interpolate from out[i] to poses[j] over (j - i) steps
+                j_pos = poses[j][:3, 3]
+                steps = j - i
+                for m in range(i+1, j+1):
+                    frac = (m - i) / float(steps)
+                    out[m] = out[i] + frac * (j_pos - out[i])
+                i = j
+
+    return out
+
+def _smooth_positions_side(
+    poses_side,
+    threshold=3.0,
+    axes_to_smooth=(2,)  # e.g. (0,2) if you want to smooth x and z
+):
+    """
+    Given a list/array of 4x4 SE(3) side-camera poses (N of them),
+    produce an (N, 3) array of translations [x, y, z] in which we optionally
+    detect outliers + interpolate for the specified 'axes_to_smooth'.
+
+    For each axis in axes_to_smooth:
+      1) Extract its values => arr[i] = poses_side[i][:3,3][axis].
+      2) Detect outliers with median + MAD using 'threshold' * MAD.
+      3) Mark outliers as NaN, linearly interpolate them.
+      4) If leading or trailing frames are NaN, clamp to nearest valid.
+
+    For any axis *not* in axes_to_smooth, we simply copy raw values from poses_side.
+
+    Args:
+      poses_side: shape (N, 4, 4), list or np.array of side-camera transforms.
+      threshold: how many "MADs" away from median() to consider an outlier.
+      axes_to_smooth: tuple of axes (0 => x, 1 => y, 2 => z) to smooth.
+
+    Returns:
+      out: shape (N, 3),
+        out[i,0] => x,
+        out[i,1] => y,
+        out[i,2] => z.
+      The selected axes have outliers removed and linearly interpolated.
+      Non-selected axes are copied verbatim from the original poses_side.
+    """
+
+    N = len(poses_side)
+    out = np.zeros((N, 3), dtype=np.float32)
+    if N == 0:
+        return out
+
+    # --- Step 1: Extract raw X, Y, Z arrays ---
+    x_vals = np.array([p[0,3] for p in poses_side], dtype=np.float32)
+    y_vals = np.array([p[1,3] for p in poses_side], dtype=np.float32)
+    z_vals = np.array([p[2,3] for p in poses_side], dtype=np.float32)
+
+    # We'll build a dictionary for convenience
+    #  axis=0 => x_vals, axis=1 => y_vals, axis=2 => z_vals
+    raw_data = {
+        0: x_vals,
+        1: y_vals,
+        2: z_vals,
+    }
+
+    # This will store the final smoothed 1D arrays for x,y,z
+    cleaned_data = {
+        0: raw_data[0].copy(),
+        1: raw_data[1].copy(),
+        2: raw_data[2].copy(),
+    }
+
+    # --- Step 2: For each axis we want to smooth, detect outliers + interpolate ---
+    for axis in axes_to_smooth:
+        arr = raw_data[axis].copy()  # raw 1D data for this axis
+        arr_clean = _remove_outliers_and_interpolate_1d(arr, threshold=threshold)
+        cleaned_data[axis] = arr_clean
+
+    # --- Step 3: Build final (N,3) output from cleaned_data ---
+    out[:, 0] = cleaned_data[0]
+    out[:, 1] = cleaned_data[1]
+    out[:, 2] = cleaned_data[2]
+
+    return out
+
+
+def _remove_outliers_and_interpolate_1d(values, threshold=3.0):
+    """
+    1) Detect outliers via median + MAD => mark as NaN
+    2) Replace leading/trailing NaNs by clamping to nearest valid
+    3) Interpolate interior NaN blocks linearly
+
+    :param values: 1D np.ndarray of shape (N,)
+    :param threshold: how many MADs from the median => outlier
+    :return: 1D np.ndarray (N,) with outliers replaced by linear interpolation
+    """
+    out_arr = values.copy()
+    N = len(values)
+    if N == 0:
+        return out_arr
+
+    # -- Step A: median + MAD outlier detection
+    median_val = np.median(out_arr)
+    abs_dev = np.abs(out_arr - median_val)
+    mad_val = np.median(abs_dev)
+
+    if mad_val < 1e-12:
+        # all nearly the same => no outliers
+        return out_arr
+
+    outlier_mask = (abs_dev > threshold * mad_val)
+    out_arr[outlier_mask] = np.nan
+
+    # -- Step B: handle case all outliers
+    valid_mask = ~np.isnan(out_arr)
+    valid_indices = np.where(valid_mask)[0]
+    if len(valid_indices) == 0:
+        # fill everything with median_val or just return
+        out_arr[:] = median_val
+        return out_arr
+
+    # -- Step C: clamp leading/trailing NaNs
+    first_valid = valid_indices[0]
+    last_valid = valid_indices[-1]
+
+    if first_valid > 0:
+        out_arr[:first_valid] = out_arr[first_valid]
+    if last_valid < (N-1):
+        out_arr[last_valid+1:] = out_arr[last_valid]
+
+    # -- Step D: linearly interpolate each contiguous NaN block
+    nan_indices = np.where(np.isnan(out_arr))[0]
+    idx_ptr = 0
+    while idx_ptr < len(nan_indices):
+        start_invalid = nan_indices[idx_ptr]
+        block_start = start_invalid
+        block_end = start_invalid
+
+        # find the contiguous block of NaNs
+        while (block_end + 1 < N) and np.isnan(out_arr[block_end + 1]):
+            block_end += 1
+
+        # block [block_start..block_end]
+        left_valid = block_start - 1
+        right_valid = block_end + 1
+
+        # skip to next block
+        idx_ptr += (block_end - block_start + 1)
+
+        # check boundaries
+        if left_valid < 0 or right_valid >= N:
+            # means we've already clamped them, so skip
+            continue
+
+        if np.isnan(out_arr[left_valid]) or np.isnan(out_arr[right_valid]):
+            # can't interpolate if either side is invalid
+            continue
+
+        left_val = out_arr[left_valid]
+        right_val = out_arr[right_valid]
+        span = (block_end - block_start) + 1
+
+        for k in range(span):
+            frac = float(k+1)/(span+1)
+            out_arr[block_start + k] = left_val + frac*(right_val - left_val)
+
+    return out_arr
+
+
+def poses_to_absolute_actions(
+    poses, 
+    poses_side, 
+    fingers_distances, 
+    env_camera0,
+):
+    """
+    We smooth out the translation portion by looking ahead for a future
+    index j where the jump is acceptable, and linearly interpolate intermediate
+    positions. If no such j is found (end of trajectory), we do a linear 
+    extrapolation from the past velocity or hold the last stable position.
+
+    The orientation logic remains the same as before:
+      - orientation is computed incrementally from poses[i]->poses[i+1].
+      - we do not alter orientation if there's a large jump in position.
+
+    Steps in detail:
+      1) SMOOTH POSITIONS:
+         - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
+         - Starting from i=0, if jump i->i+1 is small, keep it.
+           If jump is big, search forward for j with a small jump from i.
+           If found, linearly interpolate from i..j.
+           If not found (end), extrapolate or hold constant.
+      2) ORIENTATION:
+         - For each i in [0 .. num_samples-2],
+           compute delta quaternion from poses[i]-> poses[i+1].
+           Accumulate into `current_orientation`.
+           Convert to axis-angle (with sign unification).
+      3) BUILD ACTIONS:
+         - For each i in [0 .. num_samples-2], the final action 
+           uses `smoothed_positions[i+1]` as [px,py,pz] 
+           and the just-computed orientation as [rx,ry,rz].
+         - Set gripper=1.0 or your logic.
+
+    Returns:
+      all_actions of shape (num_samples-1, 7).
+    """
+
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute a smoothed set of positions
+    smoothed_positions = _smooth_positions_side(poses, axes_to_smooth=(0,1,2))
+    smoothed_positions_side = _smooth_positions_side(poses_side, axes_to_smooth=(0,1,2))
+    # for i in range(len(poses)):
+    #     print(poses[i][:3,3], smoothed_positions[i])
+        
+    # exit()
+        
+
+    # 2) Start from environment's known initial eef quaternion 
+    #    (assuming it's [w, x, y, z], confirm shape/order as needed).
+    starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
     current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
+    current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
 
-    # We'll create one fewer action than number of input poses
+    # We'll have num_actions = num_samples - 1
     num_actions = num_samples - 1
     all_actions = np.zeros((num_actions, 7), dtype=np.float32)
 
     prev_rvec = None
+    z_offset = None
 
     for i in range(num_actions):
-        # --- Extract orientation from poses[i], [i+1] ---
-        # rotation matrices
+        # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
         R_i  = poses[i][:3, :3]
         R_i1 = poses[i+1][:3, :3]
 
-        # convert to quaternions [x, y, z, w]
-        q_i  = rotation_matrix_to_quaternion(R_i)  
+        q_i  = rotation_matrix_to_quaternion(R_i)
         q_i1 = rotation_matrix_to_quaternion(R_i1)
 
-        # 2) delta = inv(q_i) * q_i1
-        #    (Note: if in your code you prefer q_delta = q_i1 * inv(q_i), be consistent.)
-        q_i = quat_normalize(q_i)
-        q_i1 = quat_normalize(q_i1)
-        q_delta = quat_multiply(quat_inv(q_i), q_i1)
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
+        q_inv = quat_inv(q_i)
+
+        q_delta = quat_multiply(q_inv, q_i1)
         q_delta = quat_normalize(q_delta)
 
-        # 3) Accumulate on the running orientation
+        # Accumulate orientation
         current_orientation = quat_multiply(current_orientation, q_delta)
         current_orientation = quat_normalize(current_orientation)
 
-        # 4) Convert to axis-angle
+        # Convert to axis-angle, unify sign
         rvec = quat2axisangle(current_orientation)
-
-        # 5) optional unify sign with previous
         if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
             rvec = -rvec
         prev_rvec = rvec
 
-        # 6) For position, let's pick pose[i+1] => its translation
-        translation = poses[i+1][:3, 3]
-        px, py, pz = translation
+        # --- Position from the precomputed 'smoothed_positions' ---
+        if z_offset is None:
+            z_offset = smoothed_positions[i][2] - current_position[2]
+            
+        px, py, pz = smoothed_positions[i+1]
+        px, py, pz  = smoothed_positions_side[i+1]
+        
+        # print(f"pz_front: {pz_front}, pz_side: {pz}")
+        pz -= z_offset
+        
+        print('px:', px, 'py:', py, 'pz:', pz)
 
-        # 7) Fill in the 7D action
-        all_actions[i, :3] = [px, py, pz]
-        all_actions[i, 3:6] = rvec
+        # Build the 7D action
+        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, 3:6] = quat2axisangle(starting_orientation)
         all_actions[i, 6]   = 1.0  # e.g., "gripper = open"
 
     return all_actions
@@ -602,9 +881,8 @@ def imitate_trajectory_with_action_identifier(
                     all_fingers_distances=all_fingers_distances,
                     all_hand_poses_world_from_side=all_hand_poses_world_from_side
                 )
-
            
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, env_camera0)
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, all_fingers_distances, env_camera0)
             # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
             
 
