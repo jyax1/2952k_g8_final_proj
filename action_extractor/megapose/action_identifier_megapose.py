@@ -622,6 +622,149 @@ class ActionIdentifierMegapose:
                         all_hand_poses_world_from_side[global_idx] = T_world_obj_side
 
         return all_hand_poses_world, all_fingers_distances, all_hand_poses_world_from_side
+    
+    def poses_to_absolute_actions(
+        poses, 
+        poses_side, 
+        fingers_distances, 
+        env_camera0,
+    ):
+        """
+        We smooth out the translation portion by looking ahead for a future
+        index j where the jump is acceptable, and linearly interpolate intermediate
+        positions. If no such j is found (end of trajectory), we do a linear 
+        extrapolation from the past velocity or hold the last stable position.
+
+        The orientation logic remains the same as before:
+        - orientation is computed incrementally from poses[i]->poses[i+1].
+        - we do not alter orientation if there's a large jump in position.
+
+        Steps in detail:
+        1) SMOOTH POSITIONS:
+            - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
+            - Starting from i=0, if jump i->i+1 is small, keep it.
+            If jump is big, search forward for j with a small jump from i.
+            If found, linearly interpolate from i..j.
+            If not found (end), extrapolate or hold constant.
+        2) ORIENTATION:
+            - For each i in [0 .. num_samples-2],
+            compute delta quaternion from poses[i]-> poses[i+1].
+            Accumulate into `current_orientation`.
+            Convert to axis-angle (with sign unification).
+        3) BUILD ACTIONS:
+            - For each i in [0 .. num_samples-2], the final action 
+            uses `smoothed_positions[i+1]` as [px,py,pz] 
+            and the just-computed orientation as [rx,ry,rz].
+            - Set gripper=1.0 or your logic.
+
+        Returns:
+        all_actions of shape (num_samples-1, 7).
+        """
+
+        num_samples = len(poses)
+        if num_samples < 2:
+            return np.zeros((0, 7), dtype=np.float32)
+
+        # 1) Compute a smoothed set of positions
+        smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+        smoothed_positions_side = smooth_positions(poses_side, dist_threshold=0.15)
+        
+        # for i in range(len(poses)-1):
+        #     # print('unsmoothed:', poses[i][:3,3], 'smoothed:', smoothed_positions[i])
+        #     dist = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
+        #     print(f"Distance between smoothed frame {i} and {i+1}: {dist:.4f}")
+            
+
+        # 2) Start from environment's known initial eef quaternion 
+        #    (assuming it's [w, x, y, z], confirm shape/order as needed).
+        starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+        current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+        current_orientation = quat_normalize(current_orientation)
+        current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
+
+        # We'll have num_actions = num_samples - 1
+        num_actions = num_samples - 1
+        all_actions = np.zeros((num_actions, 7), dtype=np.float32)
+
+        prev_rvec = None
+        z_offset = None
+        
+        position_from_side = False
+
+        for i in range(num_actions):
+            # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
+            # --- Position from the precomputed 'smoothed_positions' ---
+            if z_offset is None:
+                z_offset = smoothed_positions[i][2] - current_position[2]
+                
+            if np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i]) > 0.1:
+                position_from_side = True
+                
+            if position_from_side:
+                px, py, pz = smoothed_positions_side[i+1]
+                
+                R_i  = poses_side[i][:3, :3]
+                R_i1 = poses_side[i+1][:3, :3]
+                
+            else:
+                px, py, pz = smoothed_positions[i+1]
+                
+                R_i  = poses[i][:3, :3]
+                R_i1 = poses[i+1][:3, :3]
+
+            q_i  = rotation_matrix_to_quaternion(R_i)
+            q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+            q_i   = quat_normalize(q_i)
+            q_i1  = quat_normalize(q_i1)
+            q_inv = quat_inv(q_i)
+
+            q_delta = quat_multiply(q_inv, q_i1)
+            q_delta = quat_normalize(q_delta)
+            
+            '''
+            Only z-axis rotation allowed
+            '''
+            rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
+            roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+
+            # Zero out roll & pitch, keep only yaw
+            roll = 0.0
+            pitch = 0.0
+
+            # Build new rotation solely around z (yaw)
+            rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
+            q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
+            '''
+            Only z-axis rotation allowed
+            '''
+
+            # Accumulate orientation
+            current_orientation = quat_multiply(current_orientation, q_delta)
+            current_orientation = quat_normalize(current_orientation)
+
+            # Convert to axis-angle, unify sign
+            rvec = quat2axisangle(current_orientation)
+            if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+                rvec = -rvec
+            prev_rvec = rvec
+            
+            # print(f"pz_front: {pz_front}, pz_side: {pz}")
+            pz -= z_offset
+            
+            finger_distance1 = fingers_distances[i]
+            finger_distance2 = fingers_distances[i + 1]
+            delta_finger_distance = finger_distance2 - finger_distance1
+
+            # Build the 7D action
+            all_actions[i, :3]  = [px, py, pz]
+            all_actions[i, 3:6] = rvec
+            if i > 20 and delta_finger_distance < 0.02:
+                all_actions[i][-1] = 1
+            else:
+                all_actions[i][-1] = -np.sign(delta_finger_distance)
+
+        return all_actions
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  APPROACH A: small increments
