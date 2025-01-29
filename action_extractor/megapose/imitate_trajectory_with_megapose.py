@@ -56,6 +56,8 @@ from robosuite.utils.camera_utils import (
     get_camera_intrinsic_matrix,
 )
 
+from transforms3d.euler import quat2euler, euler2quat
+
 from scipy.spatial.transform import Rotation as R
 
 
@@ -801,6 +803,24 @@ def poses_to_absolute_actions(
 
         q_delta = quat_multiply(q_inv, q_i1)
         q_delta = quat_normalize(q_delta)
+        
+        '''
+        Only z-axis rotation allowed
+        '''
+        rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
+        roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+
+        # Zero out roll & pitch, keep only yaw
+        roll = 0.0
+        pitch = 0.0
+
+        # Build new rotation solely around z (yaw)
+        rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
+        q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
+        '''
+        Only z-axis rotation allowed
+        '''
+
 
         # Accumulate orientation
         current_orientation = quat_multiply(current_orientation, q_delta)
