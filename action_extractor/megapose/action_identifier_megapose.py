@@ -612,16 +612,16 @@ def poses_to_absolute_actions(
         '''
         Only z-axis rotation allowed
         '''
-        rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
-        roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+        # rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
+        # roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
 
-        # Zero out roll & pitch, keep only yaw
-        roll = 0.0
-        pitch = 0.0
+        # # Zero out roll & pitch, keep only yaw
+        # roll = 0.0
+        # pitch = 0.0
 
-        # Build new rotation solely around z (yaw)
-        rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
-        q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
+        # # Build new rotation solely around z (yaw)
+        # rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
+        # q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
         '''
         Only z-axis rotation allowed
         '''
@@ -649,6 +649,150 @@ def poses_to_absolute_actions(
         all_actions[num_actions+i] = all_actions[num_actions-1]
         
     return all_actions
+
+def poses_to_absolute_actions_mixed_ori_v1(
+    poses, 
+    poses_side, 
+    gripper_actions,
+    env_camera0,
+    axes_side_when_front=(False, False, False),
+    axes_front_when_side=(False, False, False),
+):
+    """
+    Modify orientation logic as follows:
+      - 'position_from_side' in the code determines which base pose set 
+        we use (front vs side).
+      - If position_from_side=False => we take orientation from 'poses' 
+        but override certain axes (roll/pitch/yaw) from 'poses_side'
+        according to axes_side_when_front=(roll_bool, pitch_bool, yaw_bool).
+      - If position_from_side=True => we take orientation from 'poses_side'
+        but override certain axes from 'poses' according to 
+        axes_front_when_side=(roll_bool, pitch_bool, yaw_bool).
+
+    Everything else is exactly the same as before: 
+      - We have smooth_positions for both sets, 
+      - We accumulate orientation in current_orientation,
+      - We apply a z_offset to pz, 
+      - We store final actions in [px,py,pz, rx,ry,rz, gripper].
+      - We add 10 buffer frames at the end.
+    """
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute a smoothed set of positions
+    smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    smoothed_positions_side = smooth_positions(poses_side, dist_threshold=0.15)
+
+    # 2) Start from environment's known initial eef quaternion 
+    #    (assuming it's [w, x, y, z], confirm shape/order as needed).
+    starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    current_orientation = quat_normalize(current_orientation)
+    current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
+
+    # We'll have num_actions = num_samples - 1
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+
+    prev_rvec = None
+    z_offset = None
+    
+    position_from_side = False
+
+    for i in range(num_actions):
+        # Decide whether we switch to side-based positions
+        if z_offset is None:
+            z_offset = smoothed_positions[i][2] - current_position[2]
+        if np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i]) > 0.1:
+            position_from_side = True
+
+        # Pick the smoothed (px,py,pz) from front or side
+        if position_from_side:
+            px, py, pz = smoothed_positions_side[i+1]
+        else:
+            px, py, pz = smoothed_positions[i+1]
+
+        # Subtract z_offset from pz
+        pz -= z_offset
+
+        # ------------------------------------------------------
+        #  Orientation
+        # ------------------------------------------------------
+        # base orientation from front or side?
+        if position_from_side:
+            # base = side
+            R_i  = poses_side[i][:3, :3]
+            R_i1 = poses_side[i+1][:3, :3]
+            # overrides from front
+            euler_base_i  = R.from_matrix(R_i).as_euler('xyz', degrees=False)
+            euler_base_i1 = R.from_matrix(R_i1).as_euler('xyz', degrees=False)
+
+            euler_other_i  = R.from_matrix(poses[i][:3, :3]).as_euler('xyz', degrees=False)
+            euler_other_i1 = R.from_matrix(poses[i+1][:3, :3]).as_euler('xyz', degrees=False)
+
+            # combine euler_i, euler_i1
+            combined_euler_i  = list(euler_base_i)
+            combined_euler_i1 = list(euler_base_i1)
+            for axis_idx in range(3):  # roll=0, pitch=1, yaw=2
+                if axes_front_when_side[axis_idx]:
+                    # override from front's euler
+                    combined_euler_i[axis_idx]  = euler_other_i[axis_idx]
+                    combined_euler_i1[axis_idx] = euler_other_i1[axis_idx]
+
+        else:
+            # base = front
+            R_i  = poses[i][:3, :3]
+            R_i1 = poses[i+1][:3, :3]
+            # overrides from side
+            euler_base_i  = R.from_matrix(R_i).as_euler('xyz', degrees=False)
+            euler_base_i1 = R.from_matrix(R_i1).as_euler('xyz', degrees=False)
+
+            euler_other_i  = R.from_matrix(poses_side[i][:3, :3]).as_euler('xyz', degrees=False)
+            euler_other_i1 = R.from_matrix(poses_side[i+1][:3, :3]).as_euler('xyz', degrees=False)
+
+            # combine euler_i, euler_i1
+            combined_euler_i  = list(euler_base_i)
+            combined_euler_i1 = list(euler_base_i1)
+            for axis_idx in range(3):  # roll=0, pitch=1, yaw=2
+                if axes_side_when_front[axis_idx]:
+                    # override from side's euler
+                    combined_euler_i[axis_idx]  = euler_other_i[axis_idx]
+                    combined_euler_i1[axis_idx] = euler_other_i1[axis_idx]
+
+        # Convert combined Euler => quaternions
+        q_i  = R.from_euler('xyz', combined_euler_i,  degrees=False).as_quat()  # [x,y,z,w]
+        q_i1 = R.from_euler('xyz', combined_euler_i1, degrees=False).as_quat()
+
+        q_i  = quat_normalize(q_i)
+        q_i1 = quat_normalize(q_i1)
+
+        # Compute q_delta
+        q_inv = quat_inv(q_i)
+        q_delta = quat_multiply(q_inv, q_i1)
+        q_delta = quat_normalize(q_delta)
+
+        # Accumulate orientation
+        current_orientation = quat_multiply(current_orientation, q_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert to axis-angle, unify sign
+        rvec = quat2axisangle(current_orientation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # Build the 7D action
+        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i][6]   = gripper_actions[i]
+
+    # Add 10 buffer absolute actions that are copies of the last action
+    for j in range(10):
+        all_actions[num_actions + j] = all_actions[num_actions - 1]
+
+    return all_actions
+
 
 
 class ActionIdentifierMegapose:

@@ -53,6 +53,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     find_color_bounding_box,
     pixel_to_world,
     poses_to_absolute_actions,
+    poses_to_absolute_actions_mixed_ori_v1,
     ActionIdentifierMegapose
 )
 from robosuite.utils.camera_utils import (
@@ -189,96 +190,6 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
         all_actions[i, 6]   = 1.0  # e.g., keep gripper = open = 1
 
     return all_actions
-
-def smooth_positions(
-    poses: list[np.ndarray],
-    window_size: int = 2,
-    dist_threshold: float = 0.15
-) -> np.ndarray:
-    """
-    Smooths a sequence of SE(3) 4x4 poses by removing sudden 'outlier' 3D positions.
-    Returns an (N,3) NumPy array of cleaned translations.
-
-    Steps:
-      1) Extract positions from each 4x4 pose => p_i in R^3.
-      2) Outlier detection pass:
-         - For each frame i, gather its neighbors in [i - window_size .. i + window_size],
-           skipping i itself and any indices out of range.
-         - Compute the median of those neighbor positions (robust local estimate).
-         - If dist(p_i, median) > dist_threshold => mark p_i as outlier.
-      3) Outlier replacement pass:
-         - For each outlier, find the nearest inlier to the left, and the nearest inlier to the right.
-         - If both exist => linearly interpolate.
-         - If only one side exists => clamp to that inlier's position.
-      4) Return the final array of size (N, 3).
-
-    :param poses: List of N SE(3) 4x4 matrices. poses[i][:3,:3] is rotation, poses[i][:3,3] is translation.
-    :param window_size: How many frames on each side to consider as neighbors for local median.
-    :param dist_threshold: Distance above which a point is flagged as an outlier from its neighbors.
-    :return: Nx3 float32 array of cleaned/smoothed positions.
-    """
-    N = len(poses)
-    if N == 0:
-        return np.zeros((0,3), dtype=np.float32)
-
-    # 1) Extract the Nx3 positions
-    positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
-
-    # 2) First pass: detect outliers
-    outlier_mask = np.zeros(N, dtype=bool)
-    for i in range(N):
-        # Gather neighbors in range [i-window_size.. i+window_size], excluding i
-        left = max(0, i - window_size)
-        right = min(N, i + window_size + 1)
-        neighbor_indices = [idx for idx in range(left, right) if idx != i]
-
-        if len(neighbor_indices) == 0:
-            # No neighbors => can't decide => skip outlier check
-            continue
-
-        neighbor_pts = positions[neighbor_indices]  # shape (#neighbors, 3)
-
-        # Median in x, y, z among neighbors
-        local_median = np.median(neighbor_pts, axis=0)
-        dist_i = np.linalg.norm(positions[i] - local_median)
-
-        if dist_i > dist_threshold:
-            outlier_mask[i] = True
-
-    # 3) Second pass: replace outliers by interpolation
-    cleaned_positions = positions.copy()
-    for i in range(N):
-        if not outlier_mask[i]:
-            continue
-
-        # Find nearest inlier to the left
-        left_idx = i - 1
-        while left_idx >= 0 and outlier_mask[left_idx]:
-            left_idx -= 1
-
-        # Find nearest inlier to the right
-        right_idx = i + 1
-        while right_idx < N and outlier_mask[right_idx]:
-            right_idx += 1
-
-        if left_idx < 0 and right_idx >= N:
-            # Everything is outlier => fallback: keep original or zero
-            # We'll just keep original, but you could do something else
-            pass
-        elif left_idx < 0:
-            # No inlier to the left => clamp to right
-            cleaned_positions[i] = cleaned_positions[right_idx]
-        elif right_idx >= N:
-            # No inlier to the right => clamp to left
-            cleaned_positions[i] = cleaned_positions[left_idx]
-        else:
-            # Linear interpolate
-            frac = (i - left_idx) / float(right_idx - left_idx)
-            p_left = cleaned_positions[left_idx]
-            p_right = cleaned_positions[right_idx]
-            cleaned_positions[i] = p_left + frac * (p_right - p_left)
-
-    return cleaned_positions
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -439,7 +350,12 @@ def imitate_trajectory_with_action_identifier(
             
             gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
            
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, gt_gripper_actions, env_camera0)
+            actions_for_demo = poses_to_absolute_actions_mixed_ori_v1(all_hand_poses_world, 
+                                                                      all_hand_poses_world_from_side, 
+                                                                      gt_gripper_actions, 
+                                                                      env_camera0, 
+                                                                      axes_side_when_front=(False, False, False),
+                                                                      axes_front_when_side=(False, False, False),)
             # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
             
 
