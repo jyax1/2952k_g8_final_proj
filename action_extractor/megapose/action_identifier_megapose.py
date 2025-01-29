@@ -571,7 +571,7 @@ def poses_to_absolute_actions(
 
     # We'll have num_actions = num_samples - 1
     num_actions = num_samples - 1
-    all_actions = np.zeros((num_actions, 7), dtype=np.float32)
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
 
     prev_rvec = None
     z_offset = None
@@ -644,6 +644,10 @@ def poses_to_absolute_actions(
         all_actions[i, 3:6] = rvec
         all_actions[i][-1] = gripper_actions[i]
 
+    # Add 10 buffer absolute actions that are copies of the last action
+    for i in range(10):
+        all_actions[num_actions+i] = all_actions[num_actions-1]
+        
     return all_actions
 
 
