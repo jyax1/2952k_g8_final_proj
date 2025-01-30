@@ -520,7 +520,7 @@ def poses_to_absolute_actions(
     poses, 
     poses_side, 
     gripper_actions,
-    env_camera0,
+    env,
 ):
     """
     We smooth out the translation portion by looking ahead for a future
@@ -564,10 +564,10 @@ def poses_to_absolute_actions(
 
     # 2) Start from environment's known initial eef quaternion 
     #    (assuming it's [w, x, y, z], confirm shape/order as needed).
-    starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
-    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    starting_orientation = env.env.env._eef_xquat.astype(np.float32)
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
-    current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
+    current_position = env.env.env._eef_xpos.astype(np.float32)
 
     # We'll have num_actions = num_samples - 1
     num_actions = num_samples - 1
@@ -654,7 +654,7 @@ def poses_to_absolute_actions_mixed_ori_v1(
     poses, 
     poses_side, 
     gripper_actions,
-    env_camera0,
+    env,
     axes_side_when_front=(False, False, False),
     axes_front_when_side=(False, False, False),
 ):
@@ -686,10 +686,10 @@ def poses_to_absolute_actions_mixed_ori_v1(
 
     # 2) Start from environment's known initial eef quaternion 
     #    (assuming it's [w, x, y, z], confirm shape/order as needed).
-    starting_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
-    current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
+    starting_orientation = env.env.env._eef_xquat.astype(np.float32)
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
-    current_position = env_camera0.env.env._eef_xpos.astype(np.float32)
+    current_position = env.env.env._eef_xpos.astype(np.float32)
 
     # We'll have num_actions = num_samples - 1
     num_actions = num_samples - 1
