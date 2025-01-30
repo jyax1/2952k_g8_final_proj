@@ -201,10 +201,7 @@ def imitate_trajectory_with_action_identifier(
     cameras=["frontview_image", "sideview_image"],
     batch_size=40,
 ):
-    # We will test all combinations for axes_side_when_front and axes_front_when_side
-    bool_combos = list(itertools.product([False, True], repeat=3))
-
-    # 0) Create the top-level output dir
+    # 0) Output dir
     os.makedirs(output_dir, exist_ok=True)
 
     # 1) Build object dataset
@@ -216,7 +213,7 @@ def imitate_trajectory_with_action_identifier(
     logger.info(f"Loading model {model_name} once at script start.")
     hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
 
-    # 3) Preprocess dataset => zarr (unchanged)
+    # 3) Preprocess dataset => zarr
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
         ds_dir = seq_dir.replace(".hdf5", ".zarr")
@@ -284,7 +281,7 @@ def imitate_trajectory_with_action_identifier(
         camera_name=cameras[1].split("_")[0],
     )
 
-    # 6) ActionIdentifierMegapose
+    # 6) Optionally build the ActionIdentifierMegapose
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
         frontview_R=frontview_R,
@@ -296,171 +293,133 @@ def imitate_trajectory_with_action_identifier(
         scale_translation=80.0,
     )
 
-    # We'll store results at the end
-    all_combos_results = []
+    n_success = 0
+    total_n = 0
+    results = []
 
-    # For each combination of (axes_side_when_front, axes_front_when_side)
-    # we'll do a nested loop:
-    for side_when_front_combo in bool_combos:
-        for front_when_side_combo in bool_combos:
+    # 7) Loop over demos
+    for root_z in roots:
+        demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+        for demo in tqdm(demos, desc="Processing demos"):
+            demo_id = demo.replace("demo_", "")
+            upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
+            upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
+            lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
+            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
+            combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
-            # Convert booleans to something like "FTF" or "010" for subdir naming
-            def combo_to_str(cmb):
-                return ''.join('1' if x else '0' for x in cmb)
-            combo_swf_str = combo_to_str(side_when_front_combo)   # e.g. "010"
-            combo_fws_str = combo_to_str(front_when_side_combo)   # e.g. "110"
+            obs_group   = root_z["data"][demo]["obs"]
+            num_samples = obs_group["frontview_image"].shape[0]
 
-            # Create a subdirectory for this specific combination
-            combo_out_dir = os.path.join(
-                output_dir, 
-                f"front_{combo_swf_str}_side_{combo_fws_str}"
+            # Left videos
+            upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
+            lower_left_frames = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            with imageio.get_writer(upper_left_video_path, fps=20) as writer:
+                for frame in upper_left_frames:
+                    writer.append_data(frame)
+            with imageio.get_writer(lower_left_video_path, fps=20) as writer:
+                for frame in lower_left_frames:
+                    writer.append_data(frame)
+
+            # ---- We want ground-truth absolute actions in eef_site coords ----
+            front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
+            front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
+            side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            
+            cache_file = "hand_poses_cache.npz"
+            if os.path.exists(cache_file):
+                # Load from disk
+                print(f"Loading cached poses from {cache_file} ...")
+                data = np.load(cache_file, allow_pickle=True)
+                all_hand_poses_world = data["all_hand_poses_world"]
+                all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
+            else:
+                # No cache => run the expensive inference once
+                print("No cache found. Running inference to get all_hand_poses_world...")
+                (all_hand_poses_world,
+                all_hand_poses_world_from_side) = action_identifier.get_poses_from_frames(
+                    front_frames_list,
+                    front_depth_list=front_depth_list,
+                    side_frames_list=side_frames_list
+                )
+                # Save to disk for future runs
+                np.savez(
+                    cache_file,
+                    all_hand_poses_world=all_hand_poses_world,
+                    all_hand_poses_world_from_side=all_hand_poses_world_from_side
+                )
+            
+            gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
+           
+            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, gt_gripper_actions, env_camera0)
+            # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
+            
+
+            initial_state = root_z["data"][demo]["states"][0]
+
+            # 1) top-right video
+            env_camera0.reset()
+            env_camera0.reset_to({"states": initial_state})
+            env_camera0.file_path = upper_right_video_path
+            env_camera0.step_count = 0
+            for action in actions_for_demo:
+                env_camera0.step(action)
+            env_camera0.video_recoder.stop()
+            env_camera0.file_path = None
+
+            # 2) bottom-right video
+            env_camera1.reset()
+            env_camera1.reset_to({"states": initial_state})
+            env_camera1.file_path = lower_right_video_path
+            env_camera1.step_count = 0
+            for action in actions_for_demo:
+                env_camera1.step(action)
+            env_camera1.video_recoder.stop()
+            env_camera1.file_path = None
+
+            # success check
+            success = env_camera0.is_success()["task"]
+            if success:
+                n_success += 1
+            total_n += 1
+            results.append(f"{demo}: {'success' if success else 'failed'}")
+
+            # combine quadrant
+            combine_videos_quadrants(
+                upper_left_video_path,
+                upper_right_video_path,
+                lower_left_video_path,
+                lower_right_video_path,
+                combined_video_path
             )
-            os.makedirs(combo_out_dir, exist_ok=True)
+            os.remove(upper_left_video_path)
+            os.remove(upper_right_video_path)
+            os.remove(lower_left_video_path)
+            os.remove(lower_right_video_path)
 
-            n_success = 0
-            total_n = 0
-            results = []
+    success_rate = (n_success / total_n)*100 if total_n else 0
+    results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")
 
-            # 7) Loop over demos
-            for root_z in roots:
-                demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-                for demo in tqdm(demos, desc=f"Processing demos [swf={combo_swf_str}, fws={combo_fws_str}]"):
-                    demo_id = demo.replace("demo_", "")
-                    upper_left_video_path  = os.path.join(combo_out_dir, f"{demo_id}_upper_left.mp4")
-                    upper_right_video_path = os.path.join(combo_out_dir, f"{demo_id}_upper_right.mp4")
-                    lower_left_video_path  = os.path.join(combo_out_dir, f"{demo_id}_lower_left.mp4")
-                    lower_right_video_path = os.path.join(combo_out_dir, f"{demo_id}_lower_right.mp4")
-                    combined_video_path    = os.path.join(combo_out_dir, f"{demo_id}_combined.mp4")
+    with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
+        f.write("\n".join(results))
 
-                    obs_group   = root_z["data"][demo]["obs"]
-                    num_samples = obs_group["frontview_image"].shape[0]
+    if save_webp:
+        print("Converting to webp...")
+        mp4_files = glob(os.path.join(output_dir, "*.mp4"))
+        for mp4_file in tqdm(mp4_files):
+            webp_file = mp4_file.replace(".mp4", ".webp")
+            try:
+                convert_mp4_to_webp(mp4_file, webp_file)
+                os.remove(mp4_file)
+            except Exception as e:
+                print(f"Error converting {mp4_file}: {e}")
 
-                    # Left videos
-                    upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
-                    lower_left_frames = [obs_group["sideview_image"][i] for i in range(num_samples)]
-                    with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                        for frame in upper_left_frames:
-                            writer.append_data(frame)
-                    with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                        for frame in lower_left_frames:
-                            writer.append_data(frame)
-
-                    # get the front, side frames
-                    front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
-                    front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
-                    side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
-                    
-                    cache_file = "hand_poses_cache.npz"
-                    if os.path.exists(cache_file):
-                        # Load from disk
-                        print(f"Loading cached poses from {cache_file} ...")
-                        data = np.load(cache_file, allow_pickle=True)
-                        all_hand_poses_world = data["all_hand_poses_world"]
-                        all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
-                    else:
-                        # No cache => run the expensive inference once
-                        print("No cache found. Running inference to get all_hand_poses_world...")
-                        (all_hand_poses_world,
-                        all_hand_poses_world_from_side) = action_identifier.get_poses_from_frames(
-                            front_frames_list,
-                            front_depth_list=front_depth_list,
-                            side_frames_list=side_frames_list
-                        )
-                        # Save to disk for future runs
-                        np.savez(
-                            cache_file,
-                            all_hand_poses_world=all_hand_poses_world,
-                            all_hand_poses_world_from_side=all_hand_poses_world_from_side
-                        )
-                    
-                    gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
-                    
-                    # Now call your modified orientation function 
-                    # with the chosen combos for orientation axes
-                    actions_for_demo = poses_to_absolute_actions_mixed_ori_v1(
-                        all_hand_poses_world,
-                        all_hand_poses_world_from_side,
-                        gt_gripper_actions,
-                        env_camera0,
-                        axes_side_when_front=side_when_front_combo,
-                        axes_front_when_side=front_when_side_combo,
-                    )
-
-                    initial_state = root_z["data"][demo]["states"][0]
-
-                    # top-right video
-                    env_camera0.reset()
-                    env_camera0.reset_to({"states": initial_state})
-                    env_camera0.file_path = upper_right_video_path
-                    env_camera0.step_count = 0
-                    for action in actions_for_demo:
-                        env_camera0.step(action)
-                    env_camera0.video_recoder.stop()
-                    env_camera0.file_path = None
-
-                    # bottom-right video
-                    env_camera1.reset()
-                    env_camera1.reset_to({"states": initial_state})
-                    env_camera1.file_path = lower_right_video_path
-                    env_camera1.step_count = 0
-                    for action in actions_for_demo:
-                        env_camera1.step(action)
-                    env_camera1.video_recoder.stop()
-                    env_camera1.file_path = None
-
-                    # success check
-                    success = env_camera0.is_success()["task"]
-                    if success:
-                        n_success += 1
-                    total_n += 1
-                    results.append(f"{demo}: {'success' if success else 'failed'}")
-
-                    # combine quadrant
-                    combine_videos_quadrants(
-                        upper_left_video_path,
-                        upper_right_video_path,
-                        lower_left_video_path,
-                        lower_right_video_path,
-                        combined_video_path
-                    )
-                    os.remove(upper_left_video_path)
-                    os.remove(upper_right_video_path)
-                    os.remove(lower_left_video_path)
-                    os.remove(lower_right_video_path)
-
-            success_rate = (n_success / total_n)*100 if total_n else 0
-            results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")
-
-            # Write results
-            with open(os.path.join(combo_out_dir, "trajectory_results.txt"), "w") as f:
-                f.write("\n".join(results))
-
-            if save_webp:
-                print(f"Converting to webp in subdir: {combo_out_dir}")
-                mp4_files = glob(os.path.join(combo_out_dir, "*.mp4"))
-                for mp4_file in tqdm(mp4_files):
-                    webp_file = mp4_file.replace(".mp4", ".webp")
-                    try:
-                        convert_mp4_to_webp(mp4_file, webp_file)
-                        os.remove(mp4_file)
-                    except Exception as e:
-                        print(f"Error converting {mp4_file}: {e}")
-
-            all_combos_results.append(
-                (combo_swf_str, combo_fws_str, success_rate, combo_out_dir)
-            )
-
-    # Optionally, print a summary of all combos
-    print("\n--- ALL COMBINATIONS SUMMARY ---")
-    for (swf, fws, sr, outd) in all_combos_results:
-        print(f"front_{swf}_side_{fws}: success_rate={sr:.2f}% => {outd}")
-
-    print("DONE running all combinations.")
+    print(f"Wrote results to {os.path.join(output_dir, 'trajectory_results.txt')}")
 
 
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_lighting",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_gt",
         num_demos=3,
