@@ -96,6 +96,48 @@ def recolor_gripper(xml_string: str) -> str:
 
     return xml_string
 
+def replace_all_lights(xml_string: str) -> str:
+    """
+    1) Remove every self-closing <light .../> definition in the MuJoCo XML.
+    2) Insert the new desired <light .../> lines right after <worldbody>.
+
+    The inserted lines are:
+      <light pos="1.0 0 1.5" ... />
+      <light pos="1.0 0 0.8" ... />
+      <light pos="-0.24 0. 0.80" ... />
+      <light pos="0.0 1.0 1.5" ... />
+      <light pos="0.0 0.0 0.8" ... />
+      <light pos="0.0 -1.0 1.5" ... />
+    """
+    # 1) Remove all lines that match <light .../> (i.e. self-closing tags)
+    #    We assume all lights are self-closing, e.g. <light .../>
+    pattern_remove_lights = r'<light\b.*?/>'
+    xml_string = re.sub(pattern_remove_lights, '', xml_string, flags=re.DOTALL)
+
+    # 2) Define the new lights block
+    #    Each is appended with "\n" so they appear on separate lines
+    new_lights_block = (
+        '<light pos="1.0 0 1.5" dir="-0.2 0.0 -1" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+        '<light pos="1.0 0 0.8" dir="-0.2 0.0 -0.6" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+        '<light pos="-0.24 0. 0.80" dir="1.0 0.0 0.0" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+        '<light pos="0.0 1.0 1.5" dir="0.0 -0.2 -1" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+        '<light pos="0.0 0.0 0.8" dir="0.0 0.0 1" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+        '<light pos="0.0 -1.0 1.5" dir="0.0 0.2 -1" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4" directional="true" castshadow="false"/>\n'
+    )
+
+    # 3) Insert the new block immediately after <worldbody> (the first occurrence).
+    #    This approach is simpler than matching a specific line for old lights.
+    pattern_worldbody = r'(<worldbody>)'
+    xml_string = re.sub(
+        pattern_worldbody,
+        r'\1\n' + new_lights_block,  # \1 is the captured <worldbody>
+        xml_string,
+        count=1  # only replace the first <worldbody> we find
+    )
+
+    return xml_string
+
+
 def find_index_after_pattern(text, pattern, after_pattern):
         # Find the index of the first occurrence of after_pattern
         start_index = text.find(after_pattern)
@@ -350,7 +392,10 @@ def dataset_states_to_obs(args):
             states = f["data/{}/states".format(ep)][()]
             initial_state = dict(states=states[0])
             if is_robosuite_env:
-                initial_state["model"] = recolor_gripper(f["data/{}".format(ep)].attrs["model_file"])
+                xml_str = f["data/{}".format(ep)].attrs["model_file"]
+                xml_str = replace_all_lights(xml_str)
+                xml_str = recolor_gripper(xml_str)
+                initial_state["model"] = xml_str
             actions = f["data/{}/actions".format(ep)][()]
 
             initial_state_list.append(initial_state)
