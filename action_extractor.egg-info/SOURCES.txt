@@ -42,7 +42,7 @@ action_extractor/megapose/panda_hand_mesh/panda-hand.png
 action_extractor/utility_scripts/__init__.py
 action_extractor/utility_scripts/convert_robosuite.py
 action_extractor/utility_scripts/copy_n_demos.py
-action_extractor/utility_scripts/data_study.py
+action_extractor/utility_scripts/visualize_dataset_actions_distribution.py
 action_extractor/utility_scripts/dataset_states_to_obs_parallel.py
 action_extractor/utility_scripts/imitate_trajectory_with_action_identifier.py
 action_extractor/utility_scripts/parallel_h5_to_zarr.py
