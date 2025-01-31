@@ -12,6 +12,16 @@ p3d.load_prc_file_data("", "notify-level-glxdisplay fatal\n")
 p3d.load_prc_file_data("", "notify-level-x11display fatal\n")
 p3d.load_prc_file_data("", "notify-level-gsg fatal\n")
 
+# video (unlabeled) -> use pose estimation to label videos -> video with pseudo labels -> train policy
+
+# This script:
+# 1) Takes video from dataset
+# 2) Pass video into megapose to get pose estimations
+# 3) Use pose estimations to get actions
+# 4) Use actions to roll-out in the simulator
+# 5) Save video into designated mp4 file
+# Function: evaluate quality of pose estimation
+
 #####################################################################
 # Normal imports
 #####################################################################
@@ -251,7 +261,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras=["agentview_image", "sideagentview_image"],  # now general "camA_image" & "camB_image"
+    cameras=["frontview_image", "sideview_image"],  # now general "camA_image" & "camB_image"
     batch_size=40,
 ):
     """

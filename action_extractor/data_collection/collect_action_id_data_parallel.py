@@ -3,6 +3,23 @@ Built on collect_human_demonstrations.py
 Collect MOVEMENT data for the action id task in 3D space
 Given a 3d grid, collect trajectories between pairs of points
 '''
+
+'''
+This script is used to collect data for pose estimation
+Given a grid of 3D points covering the task action space, we collect trajectories between pairs of points
+This gives us a mapping from images to gripper poses
+'''
+
+'''
+TODO (David):
+Collect pose-estimation/action-identification data for square_d0
+How to get grid size:
+- Go into square_d0 dataset (from mimicgen), look at ['data'][{demo}]['ob']['robot0_eef_pos'] for all demos
+- Find the min and max values for x, y, z
+- Right now, this script only does translation, no rotation.
+- Think about how to do rotation.
+'''
+
 import argparse
 import datetime
 import json
