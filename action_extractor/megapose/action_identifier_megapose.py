@@ -796,24 +796,30 @@ def poses_to_absolute_actions_mixed_ori_v1(
 
 
 class ActionIdentifierMegapose:
-    """Processes video frames (optionally with depth) to extract hand poses and finger distances."""
+    """
+    Processes video frames (optionally with depth) to extract hand poses from two cameras:
+      - "camera A" (ex 'frontview')
+      - "camera B" (ex 'sideview')
+    and returns 4x4 transforms in world coordinates for each camera.
+    """
 
     def __init__(
         self,
         pose_estimator,
-        frontview_R: np.ndarray,         # extrinsics from get_camera_extrinsic_matrix
-        frontview_K: np.ndarray,         # intrinsics from get_camera_intrinsic_matrix
-        sideview_R: np.ndarray,          # extrinsics from get_camera_extrinsic_matrix
-        sideview_K: np.ndarray,          # intrinsics from get_camera_intrinsic_matrix
-        model_info: dict,      # from NAMED_MODELS[model_name]
+        cameraA_R: np.ndarray,   # extrinsics from get_camera_extrinsic_matrix
+        cameraA_K: np.ndarray,   # intrinsics from get_camera_intrinsic_matrix
+        cameraB_R: np.ndarray,   # extrinsics from get_camera_extrinsic_matrix
+        cameraB_K: np.ndarray,   # intrinsics from get_camera_intrinsic_matrix
+        model_info: dict,        # from NAMED_MODELS[model_name]
         batch_size: int = 40,
         scale_translation: float = 80.0,
     ):
         """
         :param pose_estimator: The PoseEstimator for 'panda-hand' (already loaded).
-        :param R: A 4×4 (or 3×4) matrix from get_camera_extrinsic_matrix(...).
-                  Must be expanded to 4×4 if only 3×3 is available.
-        :param K: (3×3) intrinsics.
+        :param cameraA_R: 4×4 extrinsic matrix for camera A
+        :param cameraA_K: 3×3 intrinsics for camera A
+        :param cameraB_R: 4×4 extrinsic matrix for camera B
+        :param cameraB_K: 3×3 intrinsics for camera B
         :param model_info: dict with "inference_parameters" etc.
         :param batch_size: how many frames to process at once in estimate_pose_batched.
         :param scale_translation: multiplier for global translation deltas (80).
@@ -822,43 +828,45 @@ class ActionIdentifierMegapose:
         self.model_info = model_info
         self.batch_size = batch_size
         self.scale_translation = scale_translation
-        self.frontview_K = frontview_K
-        self.sideview_K = sideview_K
-        self.frontview_R = frontview_R
-        self.sideview_R = sideview_R 
+
+        self.cameraA_K = cameraA_K
+        self.cameraB_K = cameraB_K
+        self.cameraA_R = cameraA_R
+        self.cameraB_R = cameraB_R
 
     def get_poses_from_frames(
         self,
-        front_frames_list: list[np.ndarray],
-        front_depth_list: Optional[list[np.ndarray]] = None,
-        side_frames_list: Optional[list[np.ndarray]] = None,
-    ) -> tuple[list[Optional[np.ndarray]], list[float], list[Optional[np.ndarray]]]:
+        cameraA_frames_list: list[np.ndarray],
+        cameraA_depth_list: Optional[list[np.ndarray]] = None,
+        cameraB_frames_list: Optional[list[np.ndarray]] = None,
+    ) -> tuple[list[Optional[np.ndarray]], list[Optional[np.ndarray]]]:
         """
-        Given a list of *front* frames (each shape [H,W,3] in np.uint8) and optionally a matching
-        list of depth images (each shape [H,W]), plus an optional list of *side* frames:
+        Given a list of frames for "camera A" (optionally with matching depth), 
+        plus an optional list for "camera B," we:
 
-          1) Chunk the front frames (and optional front-depth) in 'batch_size' steps,
-          2) Find bounding boxes for 'green' (the hand) in the front frames,
-          3) Call estimate_pose_batched for them (front camera) => front poses,
-          4) Transform front camera->object to world->object using frontview_R,
-          5) Do the same logic for the side frames if provided, using sideview_R and sideview_K,
-          6) Return three lists (all length n):
-               all_hand_poses_world        : np.ndarray(4,4) or None
-               all_hand_poses_world_from_side : np.ndarray(4,4) or None
+          1) Chunk the camera A frames (and optional A-depth) in 'batch_size' steps,
+          2) Find bounding boxes for 'green' (the hand) in camera A frames,
+          3) Call estimate_pose_batched => poses in camera A,
+          4) Convert to world coords via cameraA_R,
+          5) Do the same logic for camera B if provided, 
+             converting to world coords via cameraB_R,
+          6) Return two lists (both length n):
+             all_hand_poses_world_A : np.ndarray(4,4) or None
+             all_hand_poses_world_B : np.ndarray(4,4) or None
 
-        :param front_frames_list: List of RGB frames from the front camera, each shape (H,W,3).
-        :param front_depth_list:  Optional list of depth frames, each shape (H,W). If None, depth is not used.
-        :param side_frames_list:  Optional list of side-camera frames, each shape (H,W,3). If None, side poses are not computed.
-        :return: (all_hand_poses_world, all_hand_poses_world_from_side)
+        :param cameraA_frames_list: List of RGB frames for camera A, each shape (H,W,3).
+        :param cameraA_depth_list:  Optional list of depth frames for camera A, shape (H,W).
+                                    If None, depth is not used for camera A.
+        :param cameraB_frames_list: Optional list of frames for camera B, shape (H,W,3).
+                                    If None, we skip camera B.
+        :return: (all_hand_poses_world_A, all_hand_poses_world_B)
         """
-        num_frames = len(front_frames_list)
-        all_hand_poses_world = [None] * num_frames
-        
-        # Prepare a list for side poses (will remain all None if side_frames_list is None)
-        all_hand_poses_world_from_side = [None] * num_frames
+        num_frames = len(cameraA_frames_list)
+        all_hand_poses_world_A = [None] * num_frames
+        all_hand_poses_world_B = [None] * num_frames
 
         # -----------------
-        # FRONT FRAMES LOGIC
+        # CAMERA A LOGIC
         # -----------------
         for chunk_start in range(0, num_frames, self.batch_size):
             chunk_end = min(chunk_start + self.batch_size, num_frames)
@@ -866,13 +874,13 @@ class ActionIdentifierMegapose:
             bboxes_chunk = []
             depth_chunk = None
 
-            # Slice the depth frames for this batch if provided
-            if front_depth_list is not None:
-                depth_chunk = front_depth_list[chunk_start:chunk_end]
+            # If we have depth, slice it
+            if cameraA_depth_list is not None:
+                depth_chunk = cameraA_depth_list[chunk_start:chunk_end]
 
-            # Gather bounding boxes for 'panda-hand' (green) in front frames
+            # Gather bounding boxes
             for idx in range(chunk_start, chunk_end):
-                img = front_frames_list[idx]
+                img = cameraA_frames_list[idx]
                 box_hand = find_color_bounding_box(img, color_name="green")
                 if box_hand is not None:
                     # instance_id=0 for single object
@@ -881,68 +889,66 @@ class ActionIdentifierMegapose:
                     bboxes_chunk.append([])
                 images_chunk.append(img)
 
-            # Batched pose estimation for chunk (with optional depth)
+            # Batched pose estimation for chunk
             chunk_results = estimate_pose_batched(
                 list_of_images=images_chunk,
                 list_of_bboxes=bboxes_chunk,
-                K=self.frontview_K,
+                K=self.cameraA_K,
                 pose_estimator=self.pose_estimator,
                 model_info=self.model_info,
                 depth_list=depth_chunk,
             )
 
-            # Store results for front
+            # Store results for A
             for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
                 pose_est_for_frame = chunk_results[offset]
                 if len(pose_est_for_frame) < 1:
-                    # no detection => None
-                    all_hand_poses_world[global_idx] = None
+                    all_hand_poses_world_A[global_idx] = None
                 else:
-                    # get the first detection
                     T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
-                    T_world_obj = self.frontview_R @ T_cam_obj
-                    all_hand_poses_world[global_idx] = T_world_obj
+                    T_world_obj = self.cameraA_R @ T_cam_obj
+                    all_hand_poses_world_A[global_idx] = T_world_obj
 
         # ----------------
-        # SIDE FRAMES LOGIC
+        # CAMERA B LOGIC
         # ----------------
-        if side_frames_list is not None:
-            # Process side frames in chunks (same approach)
+        if cameraB_frames_list is not None:
+            # We assume cameraB_frames_list has the same length
             for chunk_start in range(0, num_frames, self.batch_size):
                 chunk_end = min(chunk_start + self.batch_size, num_frames)
-                side_images_chunk = side_frames_list[chunk_start:chunk_end]
-                side_bboxes_chunk = []
+                b_images_chunk = []
+                b_bboxes_chunk = []
 
-                # Gather bounding boxes in side frames
                 for idx in range(chunk_start, chunk_end):
-                    side_img = side_frames_list[idx]
-                    box_hand_side = find_color_bounding_box(side_img, color_name="green")
+                    b_img = cameraB_frames_list[idx]
+                    box_hand_side = find_color_bounding_box(b_img, color_name="green")
                     if box_hand_side is not None:
-                        side_bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand_side, "instance_id": 0}])
+                        b_bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand_side, "instance_id": 0}])
                     else:
-                        side_bboxes_chunk.append([])
+                        b_bboxes_chunk.append([])
+                    b_images_chunk.append(b_img)
 
-                # Batched pose estimation for side chunk
-                side_chunk_results = estimate_pose_batched(
-                    list_of_images=side_images_chunk,
-                    list_of_bboxes=side_bboxes_chunk,
-                    K=self.sideview_K,
+                # Batched pose estimation for camera B chunk
+                b_chunk_results = estimate_pose_batched(
+                    list_of_images=b_images_chunk,
+                    list_of_bboxes=b_bboxes_chunk,
+                    K=self.cameraB_K,
                     pose_estimator=self.pose_estimator,
                     model_info=self.model_info,
-                    depth_list=None,  # we don't have side-depth in your code
+                    depth_list=None,  # no side-depth
                 )
 
-                # Store results for side
+                # Store results for B
                 for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
-                    pose_est_for_frame_side = side_chunk_results[offset]
+                    pose_est_for_frame_side = b_chunk_results[offset]
                     if len(pose_est_for_frame_side) < 1:
-                        all_hand_poses_world_from_side[global_idx] = None
+                        all_hand_poses_world_B[global_idx] = None
                     else:
                         T_cam_obj_side = pose_est_for_frame_side.poses[0].cpu().numpy()
-                        T_world_obj_side = self.sideview_R @ T_cam_obj_side
-                        all_hand_poses_world_from_side[global_idx] = T_world_obj_side
+                        T_world_obj_side = self.cameraB_R @ T_cam_obj_side
+                        all_hand_poses_world_B[global_idx] = T_world_obj_side
 
-        return all_hand_poses_world, all_hand_poses_world_from_side
+        return all_hand_poses_world_A, all_hand_poses_world_B
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  APPROACH A: small increments

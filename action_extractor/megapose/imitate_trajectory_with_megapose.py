@@ -251,9 +251,15 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras=["frontview_image", "sideview_image"],
+    cameras=["agentview_image", "sideagentview_image"],  # now general "camA_image" & "camB_image"
     batch_size=40,
 ):
+    """
+    General version where 'cameras' is any 2-element list of camera angle strings, 
+    e.g. ["frontview_image", "sideview_image"] or ["birdview_image","agentview_image"].
+    This code references cameras[0] -> camera A, cameras[1] -> camera B.
+    """
+
     # 0) Output dir
     os.makedirs(output_dir, exist_ok=True)
 
@@ -289,9 +295,13 @@ def imitate_trajectory_with_action_identifier(
     env_meta['env_kwargs']['controller_configs']['control_delta'] = False
     env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
 
+    # We'll define "camera0" => cameras[0], "camera1" => cameras[1]
+    camera0_name = cameras[0].split("_")[0]
+    camera1_name = cameras[1].split("_")[0]
+
     obs_modality_specs = {
         "obs": {
-            "rgb": cameras,
+            "rgb": cameras,  # e.g. ["frontview_image","sideview_image"]
             "depth": [f"{cam.split('_')[0]}_depth" for cam in cameras],
         }
     }
@@ -299,19 +309,21 @@ def imitate_trajectory_with_action_identifier(
 
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
 
-    example_image = roots[0]["data"]["demo_0"]["obs"]["frontview_image"][0]
+    # Example image from camera0
+    example_image = roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
-    frontview_K = get_camera_intrinsic_matrix(env_camera0.env.sim,
-                                              camera_name="frontview",
-                                              camera_height=camera_height,
-                                              camera_width=camera_width)
-    sideview_K   = get_camera_intrinsic_matrix(env_camera0.env.sim,
-                                               camera_name="sideview",
-                                               camera_height=camera_height,
-                                               camera_width=camera_width)
-    frontview_R  = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="frontview")
-    sideview_R   = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name="sideview")
+    # We fetch intrinsics & extrinsics for these two cameras:
+    camera0_K = get_camera_intrinsic_matrix(env_camera0.env.sim,
+                                            camera_name=camera0_name,
+                                            camera_height=camera_height,
+                                            camera_width=camera_width)
+    camera1_K = get_camera_intrinsic_matrix(env_camera0.env.sim,
+                                            camera_name=camera1_name,
+                                            camera_height=camera_height,
+                                            camera_width=camera_width)
+    camera0_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name=camera0_name)
+    camera1_R = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name=camera1_name)
 
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
@@ -320,9 +332,10 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=cameras[0].split("_")[0],
+        camera_name='frontview',
     )
 
+    # We'll do a second environment for camera1
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
         env_camera1,
@@ -331,16 +344,16 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=cameras[1].split("_")[0],
+        camera_name='sideview',
     )
 
-    # 6) Optionally build the ActionIdentifierMegapose
+    # 6) Build the ActionIdentifierMegapose using camera0/camera1 info
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
-        frontview_R=frontview_R,
-        frontview_K=frontview_K,
-        sideview_R=sideview_R,
-        sideview_K=sideview_K,
+        cameraA_R=camera0_R,
+        cameraA_K=camera0_K,
+        cameraB_R=camera1_R,
+        cameraB_K=camera1_K,
         model_info=model_info,
         batch_size=batch_size,
         scale_translation=80.0,
@@ -362,55 +375,61 @@ def imitate_trajectory_with_action_identifier(
             combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
             obs_group   = root_z["data"][demo]["obs"]
-            num_samples = obs_group["frontview_image"].shape[0]
+            num_samples = obs_group[cameras[0]].shape[0]
 
-            # Left videos
-            upper_left_frames = [obs_group["frontview_image"][i] for i in range(num_samples)]
-            lower_left_frames = [obs_group["sideview_image"][i] for i in range(num_samples)]
+            # Let's define camera0_frames, camera1_frames
+            camera0_frames = [obs_group[cameras[0]][i] for i in range(num_samples)]
+            camera1_frames = [obs_group[cameras[1]][i] for i in range(num_samples)]
+
+            # We'll produce "upper_left" from camera0, "lower_left" from camera1
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in upper_left_frames:
+                for frame in camera0_frames:
                     writer.append_data(frame)
             with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in lower_left_frames:
+                for frame in camera1_frames:
                     writer.append_data(frame)
 
-            # ---- We want ground-truth absolute actions in eef_site coords ----
-            front_frames_list = [obs_group["frontview_image"][i] for i in range(num_samples)]
-            front_depth_list = [obs_group["frontview_depth"][i] for i in range(num_samples)]
-            side_frames_list = [obs_group["sideview_image"][i] for i in range(num_samples)]
-            
-            cache_file = "hand_poses_cache.npz"
+            # Depth lists if present
+            camera0_depth_list = [obs_group[f"{camera0_name}_depth"][i] for i in range(num_samples)]
+            camera1_depth_list = [obs_group[f"{camera1_name}_depth"][i] for i in range(num_samples)]
+
+            cache_file = f"hand_poses_{camera0_name}_{camera1_name}_cache.npz"
             if os.path.exists(cache_file):
                 # Load from disk
                 print(f"Loading cached poses from {cache_file} ...")
                 data = np.load(cache_file, allow_pickle=True)
-                all_hand_poses_world = data["all_hand_poses_world"]
-                all_hand_poses_world_from_side = data["all_hand_poses_world_from_side"]
+                all_hand_poses_camA = data["all_hand_poses_camA"]
+                all_hand_poses_camB = data["all_hand_poses_camB"]
             else:
                 # No cache => run the expensive inference once
-                print("No cache found. Running inference to get all_hand_poses_world...")
-                (all_hand_poses_world,
-                all_hand_poses_world_from_side) = action_identifier.get_poses_from_frames(
-                    front_frames_list,
-                    front_depth_list=front_depth_list,
-                    side_frames_list=side_frames_list
-                )
+                print("No cache found. Running inference to get poses for camera A/B ...")
+                # We'll call the new get_poses_from_frames method
+                (all_hand_poses_camA,
+                 all_hand_poses_camB) = action_identifier.get_poses_from_frames(
+                     cameraA_frames_list=camera0_frames,
+                     cameraA_depth_list=camera0_depth_list,
+                     cameraB_frames_list=camera1_frames,  # optional
+                 )
                 # Save to disk for future runs
                 np.savez(
                     cache_file,
-                    all_hand_poses_world=all_hand_poses_world,
-                    all_hand_poses_world_from_side=all_hand_poses_world_from_side
+                    all_hand_poses_camA=all_hand_poses_camA,
+                    all_hand_poses_camB=all_hand_poses_camB
                 )
             
             gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
            
-            actions_for_demo = poses_to_absolute_actions(all_hand_poses_world, all_hand_poses_world_from_side, gt_gripper_actions, env_camera0)
-            # actions_for_demo = load_ground_truth_poses_as_actions(obs_group, env_camera0)
-            
+            # Build your absolute actions from all_hand_poses_camA, all_hand_poses_camB
+            actions_for_demo = poses_to_absolute_actions(
+                all_hand_poses_camA,
+                all_hand_poses_camB,
+                gt_gripper_actions,
+                env_camera0
+            )
 
             initial_state = root_z["data"][demo]["states"][0]
 
-            # 1) top-right video
+            # top-right video => camera0 environment
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
@@ -420,7 +439,7 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
 
-            # 2) bottom-right video
+            # bottom-right video => camera1 environment
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
             env_camera1.file_path = lower_right_video_path
@@ -437,7 +456,7 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
-            # combine quadrant
+            # Combine quadrant
             combine_videos_quadrants(
                 upper_left_video_path,
                 upper_right_video_path,
