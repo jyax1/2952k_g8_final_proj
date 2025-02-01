@@ -123,14 +123,6 @@ def rotation_matrix_to_quaternion(R):
     q = np.array([x, y, z, w], dtype=np.float32)
     return quat_normalize(q)
 
-def quaternion_conjugate(q):
-    """
-    Conjugate (inverse for a unit quaternion): [w, x, y, z] -> [w, -x, -y, -z].
-    Assumes q is a unit quaternion.
-    """
-    w, x, y, z = q
-    return np.array([w, -x, -y, -z], dtype=float)
-
 def quaternion_norm(q):
     """
     Compute the Euclidean norm of a quaternion.
@@ -145,24 +137,6 @@ def quaternion_normalize(q):
     if norm < 1e-12:
         raise ValueError("Cannot normalize a near-zero quaternion.")
     return q / norm
-
-def compute_hand_to_world_transform(q_world, q_hand):
-    """
-    Given:
-      - q_world:  orientation of an object in the world frame  (as [w, x, y, z])
-      - q_hand: orientation of the same object in the hand frame (as [w, x, y, z])
-    Returns:
-      - q_WO: the quaternion that transforms an orientation from the hand frame to the world frame.
-      
-    i.e. q_WO = q_world * inverse(q_hand)
-    """
-    # Ensure both quaternions are unit quaternions
-    q_world  = quaternion_normalize(q_world)
-    q_hand = quaternion_normalize(q_hand)
-    
-    q_hand_inv = quaternion_conjugate(q_hand)  # inverse of a unit quaternion
-    q_WO = quat_multiply(q_world, q_hand_inv)
-    return quaternion_normalize(q_WO)
 
 def transform_hand_orientation_to_world(q_WO, q_in_hand):
     """

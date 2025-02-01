@@ -207,7 +207,6 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     num_samples = pos_array.shape[0]
 
-    # The environment's initial eef orientation (assumed [w, x, y, z] but verify shape/order).
     # Some internal environment variable -- adjust if needed.
     current_orientation = env_camera0.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
@@ -222,9 +221,8 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
     prev_rvec = None
 
     for i in range(num_actions):
-        # Current and next quaternions from data, reorder them to [w, x, y, z]
-        q_i   = quat_array[i]     #   [qw, qx, qy, qz]
-        q_i1  = quat_array[i + 1] # next [qw, qx, qy, qz]
+        q_i   = quat_array[i]
+        q_i1  = quat_array[i + 1]
         q_i   = quat_normalize(q_i)
         q_i1  = quat_normalize(q_i1)
 
@@ -261,7 +259,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras=["frontview_image", "sideview_image"],  # now general "camA_image" & "camB_image"
+    cameras=["fronttableview_image", "sidetableview_image"],  # now general "camA_image" & "camB_image"
     batch_size=40,
 ):
     """
@@ -342,7 +340,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name='frontview',
+        camera_name=camera0_name,
     )
 
     # We'll do a second environment for camera1
@@ -354,7 +352,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name='sideview',
+        camera_name=camera1_name,
     )
 
     # 6) Build the ActionIdentifierMegapose using camera0/camera1 info
@@ -501,9 +499,9 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_lighting",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_tableview",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_gt",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_front",
         num_demos=3,
         save_webp=False,
         batch_size=40

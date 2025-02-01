@@ -564,7 +564,7 @@ def poses_to_absolute_actions(
 
     # 2) Start from environment's known initial eef quaternion 
     #    (assuming it's [w, x, y, z], confirm shape/order as needed).
-    starting_orientation = env.env.env._eef_xquat.astype(np.float32)
+    # starting_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
     current_position = env.env.env._eef_xpos.astype(np.float32)
@@ -575,8 +575,6 @@ def poses_to_absolute_actions(
 
     prev_rvec = None
     z_offset = None
-    
-    position_from_side = False
 
     for i in range(num_actions):
         # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
@@ -584,10 +582,10 @@ def poses_to_absolute_actions(
         if z_offset is None:
             z_offset = smoothed_positions[i][2] - current_position[2]
             
-        if np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i]) > 0.1:
-            position_from_side = True
+        front_pos_delta = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
+        side_pos_delta = np.linalg.norm(smoothed_positions_side[i+1] - smoothed_positions_side[i])
             
-        if position_from_side:
+        if False:
             px, py, pz = smoothed_positions_side[i+1]
             
             R_i  = poses_side[i][:3, :3]
@@ -640,6 +638,7 @@ def poses_to_absolute_actions(
         pz -= z_offset
 
         # Build the 7D action
+        current_position = np.array([px, py, pz], dtype=np.float32)
         all_actions[i, :3]  = [px, py, pz]
         all_actions[i, 3:6] = rvec
         all_actions[i][-1] = gripper_actions[i]
