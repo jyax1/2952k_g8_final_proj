@@ -415,9 +415,12 @@ def imitate_trajectory_with_action_identifier(
                 # We'll call the new get_poses_from_frames method
                 (all_hand_poses_camA,
                  all_hand_poses_camB) = action_identifier.get_poses_from_frames(
+                     cameraA_name=camera0_name,
+                     cameraB_name=camera1_name,
                      cameraA_frames_list=camera0_frames,
                      cameraA_depth_list=camera0_depth_list,
                      cameraB_frames_list=camera1_frames,  # optional
+                     cameraB_depth_list=camera1_depth_list,  # optional
                  )
                 # Save to disk for future runs
                 np.savez(

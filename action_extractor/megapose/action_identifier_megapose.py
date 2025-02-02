@@ -29,6 +29,8 @@ from megapose.inference.pose_estimator import PoseEstimator
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 
+from robomimic.utils.obs_utils import DEPTH_MINMAX
+
 logger = get_logger(__name__)
 
 # -----------------------------------------------------------------------------
@@ -97,7 +99,8 @@ def estimate_pose(image_rgb: np.ndarray, K: np.ndarray, detections: DetectionsTy
 
 def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list[list[dict]],
                          K: np.ndarray, pose_estimator: PoseEstimator, model_info: dict,
-                         depth_list: list[np.ndarray] = None) -> list[PoseEstimatesType]:
+                         depth_list: list[np.ndarray] = None,
+                         depth_minmax: list[float] = [0, 1]) -> list[PoseEstimatesType]:
     """Runs pose estimation on multiple images in a single forward pass."""
     assert len(list_of_images) == len(list_of_bboxes), (
         "list_of_images and list_of_bboxes must have same length"
@@ -119,8 +122,15 @@ def estimate_pose_batched(list_of_images: list[np.ndarray], list_of_bboxes: list
 
         if depth_list is not None:
             depth_np = depth_list[i]  # shape (H,W)
-            depth_torch = torch.from_numpy(depth_np).float() / 255.0  # (1,1,H,W)
-            depth_torch = depth_torch.permute(2,0,1).unsqueeze(0) # (1,1,H,W)
+            # Assuming min_depth and max_depth are in meters, convert to millimeters
+            min_depth_meters = depth_minmax[0] * 1000  # convert to millimeters
+            max_depth_meters = depth_minmax[1] * 1000  # convert to millimeters
+            
+            # Convert depth_np to absolute depth distance in millimeters
+            depth_mm = (depth_np / 255.0) * (max_depth_meters - min_depth_meters) + min_depth_meters
+            
+            depth_torch = torch.from_numpy(depth_mm).float()  # (H,W)
+            depth_torch = depth_torch.permute(2,0,1).unsqueeze(0)  # (1,1,H,W)
             img_4ch = torch.cat([rgb_torch, depth_torch], dim=1)  # shape (1,4,H,W)
             images_torch.append(img_4ch)
         else:
@@ -962,6 +972,8 @@ class ActionIdentifierMegapose:
 
     def get_poses_from_frames(
         self,
+        cameraA_name: str,
+        cameraB_name: str,
         cameraA_frames_list: list[np.ndarray],
         cameraA_depth_list: Optional[list[np.ndarray]] = None,
         cameraB_frames_list: Optional[list[np.ndarray]] = None,
@@ -1026,6 +1038,7 @@ class ActionIdentifierMegapose:
                 pose_estimator=self.pose_estimator,
                 model_info=self.model_info,
                 depth_list=depth_chunk,
+                depth_minmax=DEPTH_MINMAX[f'{cameraA_name}_depth']
             )
 
             # Store results for A
@@ -1065,6 +1078,7 @@ class ActionIdentifierMegapose:
                     pose_estimator=self.pose_estimator,
                     model_info=self.model_info,
                     depth_list=cameraB_depth_list[chunk_start:chunk_end] if cameraB_depth_list is not None else None,
+                    depth_minmax=DEPTH_MINMAX[f'{cameraB_name}_depth']
                 )
 
                 # Store results for B
