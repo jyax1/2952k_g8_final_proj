@@ -64,6 +64,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     find_color_bounding_box,
     pixel_to_world,
     poses_to_absolute_actions,
+    poses_to_absolute_actions_average,
     poses_to_absolute_actions_mixed_ori_v1,
     ActionIdentifierMegapose
 )
@@ -259,7 +260,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras=["fronttableview_image", "sidetableview_image"],  # now general "camA_image" & "camB_image"
+    cameras=["squared0view_image", "squared0view2_image"],  # now general "camA_image" & "camB_image"
     batch_size=40,
 ):
     """
@@ -410,7 +411,7 @@ def imitate_trajectory_with_action_identifier(
                 all_hand_poses_camB = data["all_hand_poses_camB"]
             else:
                 # No cache => run the expensive inference once
-                print("No cache found. Running inference to get poses for camera A/B ...")
+                print(f"No cache found. Running inference to get poses for camera {camera0_name}/{camera1_name} ...")
                 # We'll call the new get_poses_from_frames method
                 (all_hand_poses_camA,
                  all_hand_poses_camB) = action_identifier.get_poses_from_frames(
@@ -428,7 +429,7 @@ def imitate_trajectory_with_action_identifier(
             gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
            
             # Build your absolute actions from all_hand_poses_camA, all_hand_poses_camB
-            actions_for_demo = poses_to_absolute_actions(
+            actions_for_demo = poses_to_absolute_actions_average(
                 all_hand_poses_camA,
                 all_hand_poses_camB,
                 gt_gripper_actions,
@@ -501,7 +502,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_tableview",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_front",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_average_frontsideviews",
         num_demos=3,
         save_webp=False,
         batch_size=40

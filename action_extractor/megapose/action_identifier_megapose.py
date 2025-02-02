@@ -27,6 +27,7 @@ from megapose.utils.logging import get_logger
 from megapose.inference.pose_estimator import PoseEstimator
 
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
 
 logger = get_logger(__name__)
 
@@ -585,7 +586,7 @@ def poses_to_absolute_actions(
         front_pos_delta = np.linalg.norm(smoothed_positions[i+1] - smoothed_positions[i])
         side_pos_delta = np.linalg.norm(smoothed_positions_side[i+1] - smoothed_positions_side[i])
             
-        if False:
+        if side_pos_delta < front_pos_delta:
             px, py, pz = smoothed_positions_side[i+1]
             
             R_i  = poses_side[i][:3, :3]
@@ -647,6 +648,132 @@ def poses_to_absolute_actions(
     for i in range(10):
         all_actions[num_actions+i] = all_actions[num_actions-1]
         
+    return all_actions
+
+def slerp_quat(qA, qB, fraction=0.5):
+    """
+    Spherical interpolation (slerp) between two quaternions qA and qB (each [x,y,z,w]).
+    fraction=0.0 => returns qA
+    fraction=1.0 => returns qB
+    """
+    # Normalize for safety
+    qA = quat_normalize(qA)
+    qB = quat_normalize(qB)
+
+    # Convert to Rotation objects
+    rA = R.from_quat(qA)  # shape (4,)
+    rB = R.from_quat(qB)
+
+    # Build a small 'keyframe' rotation array (times 0, 1)
+    # so we can slerp at t=fraction
+    times = np.array([0.0, 1.0])
+    rots = R.concatenate([rA, rB])  # shape=2
+
+    # Create Slerp object
+    slerp_obj = Slerp(times, rots)
+
+    # Evaluate at t=fraction (must be array-like)
+    r_interp = slerp_obj(np.array([fraction]))  # shape=(1,) of Rotation
+
+    # Return the single quaternion as [x,y,z,w]
+    q_interp = r_interp.as_quat()[0].astype(np.float32)
+
+    return q_interp
+
+def poses_to_absolute_actions_average(
+    poses, 
+    poses_side, 
+    gripper_actions,
+    env,
+):
+    """
+    We now AVERAGE the absolute position from 'poses' and 'poses_side', 
+    as well as slerp (average) the orientation change from each view.
+    """
+
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Smooth or extract positions from both
+    smoothed_positions_front = smooth_positions(poses, dist_threshold=0.15)
+    smoothed_positions_side  = smooth_positions(poses_side, dist_threshold=0.15)
+
+    # 2) Start from environment's known initial orientation
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)  # [x,y,z,w]
+    current_orientation = quat_normalize(current_orientation)
+    current_position    = env.env.env._eef_xpos.astype(np.float32)
+
+    # We'll have num_actions = num_samples - 1
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+
+    prev_rvec = None
+
+    # We'll store an initial offset in z so that we align the first pose with the current eef z
+    # (Same logic as your code, if you want that.)
+    z_offset = None
+
+    for i in range(num_actions):
+        # ==========================
+        #  (A) AVERAGE POSITIONS
+        # ==========================
+        front_xyz = smoothed_positions_front[i+1]
+        side_xyz  = smoothed_positions_side[i+1]
+        avg_xyz   = 0.5 * (front_xyz + side_xyz)
+
+        if z_offset is None:
+            # first iteration, define offset
+            z_offset = avg_xyz[2] - current_position[2]
+
+        # Subtract offset from the final Z
+        px, py, pz = avg_xyz
+        pz = pz - z_offset
+
+        # ==========================
+        #  (B) AVERAGE ORIENTATION (delta)
+        # ==========================
+        # 1) FRONT orientation delta from i -> i+1
+        R_i_front  = poses[i][:3, :3]
+        R_i1_front = poses[i+1][:3, :3]
+        q_i_front   = rotation_matrix_to_quaternion(R_i_front)
+        q_i1_front  = rotation_matrix_to_quaternion(R_i1_front)
+        q_delta_front = quat_multiply(quat_inv(q_i_front), q_i1_front)
+        q_delta_front = quat_normalize(q_delta_front)
+
+        # 2) SIDE orientation delta from i -> i+1
+        R_i_side  = poses_side[i][:3, :3]
+        R_i1_side = poses_side[i+1][:3, :3]
+        q_i_side   = rotation_matrix_to_quaternion(R_i_side)
+        q_i1_side  = rotation_matrix_to_quaternion(R_i1_side)
+        q_delta_side = quat_multiply(quat_inv(q_i_side), q_i1_side)
+        q_delta_side = quat_normalize(q_delta_side)
+
+        # 3) "Average" (slerp) these two delta quaternions 50/50
+        q_delta_averaged = slerp_quat(q_delta_front, q_delta_side, fraction=0.5)
+
+        # 4) Accumulate into current_orientation
+        current_orientation = quat_multiply(current_orientation, q_delta_averaged)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert to axis-angle, unify sign with previous step if needed
+        rvec = quat2axisangle(current_orientation)
+        if (prev_rvec is not None) and (np.dot(rvec, prev_rvec) < 0.0):
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # ==========================
+        #  (C) BUILD THE ACTION
+        # ==========================
+        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        # If you want the last used gripper action from index i, or i+1, etc.
+        all_actions[i, 6]   = gripper_actions[i]
+
+    # Add 10 buffer absolute actions that are copies of the last action
+    for j in range(10):
+        all_actions[num_actions + j] = all_actions[num_actions - 1]
+
     return all_actions
 
 def poses_to_absolute_actions_mixed_ori_v1(
@@ -838,6 +965,7 @@ class ActionIdentifierMegapose:
         cameraA_frames_list: list[np.ndarray],
         cameraA_depth_list: Optional[list[np.ndarray]] = None,
         cameraB_frames_list: Optional[list[np.ndarray]] = None,
+        cameraB_depth_list: Optional[list[np.ndarray]] = None,  # Added argument
     ) -> tuple[list[Optional[np.ndarray]], list[Optional[np.ndarray]]]:
         """
         Given a list of frames for "camera A" (optionally with matching depth), 
@@ -858,6 +986,8 @@ class ActionIdentifierMegapose:
                                     If None, depth is not used for camera A.
         :param cameraB_frames_list: Optional list of frames for camera B, shape (H,W,3).
                                     If None, we skip camera B.
+        :param cameraB_depth_list:  Optional list of depth frames for camera B, shape (H,W).
+                                    If None, depth is not used for camera B.
         :return: (all_hand_poses_world_A, all_hand_poses_world_B)
         """
         num_frames = len(cameraA_frames_list)
@@ -934,7 +1064,7 @@ class ActionIdentifierMegapose:
                     K=self.cameraB_K,
                     pose_estimator=self.pose_estimator,
                     model_info=self.model_info,
-                    depth_list=None,  # no side-depth
+                    depth_list=cameraB_depth_list[chunk_start:chunk_end] if cameraB_depth_list is not None else None,
                 )
 
                 # Store results for B

@@ -232,7 +232,8 @@ def extract_trajectory(
                     <camera mode="fixed" name="sideagentview" pos="0 0.5 1.35" quat="0.0 0.0 0.383 0.923"/>\n
                     <camera mode="fixed" name="fronttableview" pos="0.8 0 1.2" quat="0.5608419  0.43064642 0.43064642 0.5608419"/>\n
                     <camera mode="fixed" name="sidetableview" pos="0 0.8 1" quat="0.01071808 0.00552625 0.69142354 0.72234905"/>\n
-                    <camera mode="fixed" name="square_d0view" pos="0.6 0.6 1" quat="0.28633323 0.26970193 0.63667727 0.6632619"/>\n
+                    <camera mode="fixed" name="squared0view" pos="0.6 0.6 1" quat="0.28633323 0.26970193 0.63667727 0.6632619"/>\n
+                    <camera mode="fixed" name="squared0view2" pos="0.6 -0.6 1" quat="0.6714651  0.6409069  0.25949073 0.2665288"/>\n
                     '''
 
     initial_state['model'] = initial_state['model'][:insert_index] + new_cameras_xml + initial_state['model'][insert_index:]
@@ -338,7 +339,7 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['fronttableview', 'sidetableview']
+    camera_names = ['squared0view', 'squared0view2']
     additional_camera_for_voxel = ['birdview', 'sideview2', 'backview'] if store_voxel else []
     camera_names = camera_names + additional_camera_for_voxel
 
