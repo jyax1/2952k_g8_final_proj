@@ -65,6 +65,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     pixel_to_world,
     poses_to_absolute_actions,
     poses_to_absolute_actions_average,
+    poses_to_absolute_actions_from_closest_camera,
     poses_to_absolute_actions_mixed_ori_v1,
     ActionIdentifierMegapose
 )
@@ -260,7 +261,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras=["squared0view_image", "squared0view2_image"],  # now general "camA_image" & "camB_image"
+    cameras=["squared0view_image", "sidetableview_image"],  # now general "camA_image" & "camB_image"
     batch_size=40,
 ):
     """
@@ -276,7 +277,7 @@ def imitate_trajectory_with_action_identifier(
     hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
 
     # 2) Load model once
-    model_name = "megapose-1.0-RGB-multi-hypothesis"
+    model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} once at script start.")
     hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
@@ -432,11 +433,13 @@ def imitate_trajectory_with_action_identifier(
             gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
            
             # Build your absolute actions from all_hand_poses_camA, all_hand_poses_camB
-            actions_for_demo = poses_to_absolute_actions_average(
+            actions_for_demo = poses_to_absolute_actions(
                 all_hand_poses_camA,
                 all_hand_poses_camB,
                 gt_gripper_actions,
-                env_camera0
+                env_camera0,
+                # get_camera_extrinsic_matrix(env_camera0.env.env.sim, camera_name=camera0_name),
+                # get_camera_extrinsic_matrix(env_camera0.env.env.sim, camera_name=camera1_name),
             )
 
             initial_state = root_z["data"][demo]["states"][0]
@@ -505,7 +508,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_tableview",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
-        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_average_frontsideviews",
+        output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
         num_demos=3,
         save_webp=False,
         batch_size=40

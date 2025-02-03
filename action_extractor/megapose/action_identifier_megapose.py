@@ -660,6 +660,122 @@ def poses_to_absolute_actions(
         
     return all_actions
 
+def poses_to_absolute_actions_from_closest_camera(
+    posesA, 
+    posesB, 
+    gripper_actions,
+    env,
+    cameraA_R,  # 4x4 SE(3) matrix for camera A
+    cameraB_R   # 4x4 SE(3) matrix for camera B
+):
+    """
+    For each time step, we compute a smoothed set of positions from both
+    pose estimates (from camera A and camera B) and then take a weighted average
+    based on the distance between each pose estimation and its corresponding camera
+    location (extracted from cameraA_R and cameraB_R). The closer camera's estimate
+    is given more weight. Orientation deltas from the two views are combined using slerp
+    with the same weight.
+    
+    The rest of the processing is similar to before:
+      1) Smooth positions from posesA and posesB.
+      2) For each time step, compute the weighted average of positions.
+      3) Compute orientation delta for each view (from posesA and posesB), then slerp 
+         them (using fraction equal to the weight for cameraB) and accumulate.
+      4) Build the final 7D action (position, axis-angle rotation, gripper).
+    
+    Returns:
+      all_actions of shape (num_samples-1 + 10, 7)
+    """
+    num_samples = len(posesA)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute smoothed positions from both sets of poses
+    smoothed_positionsA = smooth_positions(posesA, dist_threshold=0.15)
+    smoothed_positionsB = smooth_positions(posesB, dist_threshold=0.15)
+
+    # 2) Get initial absolute orientation & position from env
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)  # assumed [x,y,z,w]
+    current_orientation = quat_normalize(current_orientation)
+    current_position = env.env.env._eef_xpos.astype(np.float32)
+
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+    prev_rvec = None
+    z_offset = None
+
+    # Extract camera positions from cameraA_R and cameraB_R (assumed to be 4x4)
+    camA_pos = cameraA_R[:3, 3]
+    camB_pos = cameraB_R[:3, 3]
+
+    for i in range(num_actions):
+        # --- Compute weighted average of positions ---
+        posA = smoothed_positionsA[i+1]
+        posB = smoothed_positionsB[i+1]
+
+        # On first iteration, define a z_offset to align z with current_position
+        if z_offset is None:
+            z_offset = posA[2] - current_position[2]
+
+        # Compute distances from each estimated position to its camera
+        distA = np.linalg.norm(posA - camA_pos) + 1e-6
+        distB = np.linalg.norm(posB - camB_pos) + 1e-6
+        # Inverse-distance weighting: closer camera gets higher weight.
+        weightA = 1.0 / distA
+        weightB = 1.0 / distB
+        total_weight = weightA + weightB
+        wA = weightA / total_weight
+        wB = weightB / total_weight
+
+        # Weighted average position
+        avg_pos = wA * posA + wB * posB
+        # Adjust z coordinate using the offset
+        avg_pos[2] -= z_offset
+        px, py, pz = avg_pos
+
+        # --- Compute orientation deltas ---
+        # For posesA (front view)
+        R_i_A  = posesA[i][:3, :3]
+        R_i1_A = posesA[i+1][:3, :3]
+        q_i_A  = rotation_matrix_to_quaternion(R_i_A)
+        q_i1_A = rotation_matrix_to_quaternion(R_i1_A)
+        q_delta_A = quat_multiply(quat_inv(q_i_A), q_i1_A)
+        q_delta_A = quat_normalize(q_delta_A)
+
+        # For posesB (side view)
+        R_i_B  = posesB[i][:3, :3]
+        R_i1_B = posesB[i+1][:3, :3]
+        q_i_B  = rotation_matrix_to_quaternion(R_i_B)
+        q_i1_B = rotation_matrix_to_quaternion(R_i1_B)
+        q_delta_B = quat_multiply(quat_inv(q_i_B), q_i1_B)
+        q_delta_B = quat_normalize(q_delta_B)
+
+        # Weight the orientation delta using wB (or equivalently, fraction = wB)
+        # If cameraB is much closer (wB near 1), then q_delta_B dominates; if wB near 0, q_delta_A dominates.
+        q_delta_weighted = slerp_quat(q_delta_A, q_delta_B, fraction=wB)
+
+        # Accumulate orientation
+        current_orientation = quat_multiply(current_orientation, q_delta_weighted)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert current_orientation to axis-angle
+        rvec = quat2axisangle(current_orientation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # Build the action: [px, py, pz, rvec, gripper]
+        current_position = np.array([px, py, pz], dtype=np.float32)
+        all_actions[i, :3] = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i, 6] = gripper_actions[i]
+
+    # Add 10 buffer actions (copies of the last action)
+    for j in range(10):
+        all_actions[num_actions + j] = all_actions[num_actions - 1]
+
+    return all_actions
+
 def slerp_quat(qA, qB, fraction=0.5):
     """
     Spherical interpolation (slerp) between two quaternions qA and qB (each [x,y,z,w]).
