@@ -409,7 +409,9 @@ def imitate_trajectory_with_action_identifier(
             # 11) Run pose estimation across all cameras.
             # (Assume you have updated get_poses_from_frames to accept dictionaries.)
             cache_cam_string = "_".join(sorted(camera_names))
-            cache_file = os.path.join('/debug', f"hand_poses_{cache_cam_string}_cache.npz")
+            cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug")
+            os.makedirs(cache_dir, exist_ok=True)  # Ensure the directory exists
+            cache_file = os.path.join(cache_dir, f"hand_poses_{cache_cam_string}_cache.npz")
 
             if os.path.exists(cache_file):
                 print(f"Loading cached poses from {cache_file} ...")
