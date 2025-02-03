@@ -66,6 +66,7 @@ from action_extractor.megapose.action_identifier_megapose import (
     poses_to_absolute_actions,
     poses_to_absolute_actions_average,
     poses_to_absolute_actions_from_closest_camera,
+    poses_to_absolute_actions_from_multiple_cameras,
     poses_to_absolute_actions_mixed_ori_v1,
     ActionIdentifierMegapose
 )
@@ -261,29 +262,33 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras: list[str] = ["squared0view_image", "sidetableview_image", "frontview_image"],
+    cameras: list[str] = ["squared0view_image", "sidetableview_image", "squared0view2_image"],
     batch_size=40,
 ):
     """
-    General version where 'cameras' is a list of camera observation names (e.g. 
-    ["frontview_image", "sideview_image", ...]). We still initialize env_camera0 and
-    env_camera1 using cameras[0] and cameras[1], but we also compute intrinsics and 
-    extrinsics for all cameras, storing them in dictionaries. (Further processing 
-    for additional cameras can be added later.)
+    General version where 'cameras' is a list of camera observation strings,
+    e.g. ["frontview_image", "sideview_image", "birdview_image", ...].
+
+    This code now:
+      - Computes intrinsic and extrinsic parameters for every camera in the list,
+        storing them in dictionaries (camera_Ks and camera_Rs).
+      - Initializes the two rendering environments (env_camera0 and env_camera1) using cameras[0] and cameras[1].
+      - When calling the pose estimator, it now passes dictionaries of frames and depth lists for all cameras.
+      - (Later you can update the pose-to-action conversion function to combine an arbitrary number of cameras.)
     """
-    # 0) Output dir
+    # 0) Create output directory.
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1) Build object dataset
+    # 1) Build object dataset.
     hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
 
-    # 2) Load model once
+    # 2) Load the pose estimation model once.
     model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} once at script start.")
     hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
 
-    # 3) Preprocess dataset => zarr
+    # 3) Preprocess dataset => convert HDF5 to Zarr.
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     for seq_dir in sequence_dirs:
         ds_dir = seq_dir.replace(".hdf5", ".zarr")
@@ -296,21 +301,21 @@ def imitate_trajectory_with_action_identifier(
             directorystore_to_zarr_zip(ds_dir, zarr_path)
             shutil.rmtree(ds_dir)
 
-    # 4) Collect Zarr files
+    # 4) Collect Zarr files.
     zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
     stores = [ZipStore(zarr_file, mode="r") for zarr_file in zarr_files]
     roots = [zarr.group(store) for store in stores]
 
-    # 5) Create environment
+    # 5) Create environment metadata.
     env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
     env_meta['env_kwargs']['controller_configs']['control_delta'] = False
     env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
 
-    # Compute camera names from the observation strings.
-    # For example, if a camera string is "frontview_image", we take "frontview" as the name.
+    # Extract base camera names from the observation strings.
+    # For example, "frontview_image" becomes "frontview".
     camera_names = [cam.split("_")[0] for cam in cameras]
 
-    # Setup observation modality specs
+    # Setup observation modality specs.
     obs_modality_specs = {
         "obs": {
             "rgb": cameras,
@@ -319,28 +324,28 @@ def imitate_trajectory_with_action_identifier(
     }
     ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
 
-    # Create an environment for rendering
+    # Create a rendering environment (we'll use it to obtain image dimensions and camera parameters).
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
-
-    # Example image from the first camera observation
     example_image = roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
-    # Get intrinsic and extrinsic matrices for each camera, store in dictionaries
+    # 6) Compute intrinsics and extrinsics for every camera in the list.
     camera_Ks = {}
     camera_Rs = {}
-    for cam_name in camera_names:
-        camera_Ks[cam_name] = get_camera_intrinsic_matrix(env_camera0.env.sim,
-                                                            camera_name=cam_name,
-                                                            camera_height=camera_height,
-                                                            camera_width=camera_width)
-        camera_Rs[cam_name] = get_camera_extrinsic_matrix(env_camera0.env.sim, camera_name=cam_name)
+    for cam in camera_names:
+        camera_Ks[cam] = get_camera_intrinsic_matrix(
+            env_camera0.env.sim,
+            camera_name=cam,
+            camera_height=camera_height,
+            camera_width=camera_width,
+        )
+        camera_Rs[cam] = get_camera_extrinsic_matrix(
+            env_camera0.env.sim,
+            camera_name=cam,
+        )
 
-    # We'll use the first two cameras for the two environments
-    camera0_name = camera_names[0]
-    camera1_name = camera_names[1]
-
-    # Initialize env_camera0 and env_camera1 as before:
+    # 7) Initialize rendering environments for at least two cameras.
+    # Use cameras[0] and cameras[1] for video recording.
     env_camera0 = VideoRecordingWrapper(
         env_camera0,
         video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
@@ -348,7 +353,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=camera0_name,
+        camera_name=camera_names[0],
     )
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
@@ -358,16 +363,15 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=camera1_name,
+        camera_name=camera_names[1],
     )
 
-    # 6) Build the ActionIdentifierMegapose using camera0 and camera1 info
+    # 8) Build the ActionIdentifierMegapose using all camera info.
+    # Here we update the signature to accept dictionaries instead of individual cameras.
     action_identifier = ActionIdentifierMegapose(
         pose_estimator=hand_pose_estimator,
-        cameraA_R=camera_Rs[camera0_name],
-        cameraA_K=camera_Ks[camera0_name],
-        cameraB_R=camera_Rs[camera1_name],
-        cameraB_K=camera_Ks[camera1_name],
+        camera_Rs=camera_Rs,  # dictionary mapping camera name -> extrinsic matrix
+        camera_Ks=camera_Ks,  # dictionary mapping camera name -> intrinsic matrix
         model_info=model_info,
         batch_size=batch_size,
         scale_translation=80.0,
@@ -377,85 +381,66 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
     results = []
 
-    # 7) Loop over demos
+    # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
-            # For now, we only create quadrant videos for the first two cameras.
-            upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
-            upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
-            lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
-            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
-            combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
+            # Create video paths for each camera.
+            video_paths = { cam: os.path.join(output_dir, f"{demo_id}_{cam}.mp4") for cam in camera_names }
+            # For quadrant (or multi-view) combination, you might later combine all videos.
+            combined_video_path = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
             obs_group = root_z["data"][demo]["obs"]
             num_samples = obs_group[cameras[0]].shape[0]
 
-            # For now, extract frames from the first two cameras only.
-            camera0_frames = [obs_group[cameras[0]][i] for i in range(num_samples)]
-            camera1_frames = [obs_group[cameras[1]][i] for i in range(num_samples)]
+            # 10) For each camera, extract frames and (if available) depth.
+            cameras_frames = {}
+            cameras_depth = {}
+            for cam_obs in cameras:
+                base = cam_obs.split("_")[0]
+                cameras_frames[base] = [obs_group[cam_obs][i] for i in range(num_samples)]
+                depth_key = f"{base}_depth"
+                if depth_key in obs_group:
+                    cameras_depth[base] = [obs_group[depth_key][i] for i in range(num_samples)]
+                else:
+                    cameras_depth[base] = None
 
-            # Produce "upper_left" and "lower_left" videos from these cameras.
-            with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in camera0_frames:
-                    writer.append_data(frame)
-            with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in camera1_frames:
-                    writer.append_data(frame)
+            # 11) Run pose estimation across all cameras.
+            # (Assume you have updated get_poses_from_frames to accept dictionaries.)
+            all_hand_poses = action_identifier.get_poses_from_frames(
+                cameras_frames_dict=cameras_frames,
+                cameras_depth_dict=cameras_depth
+            )
+            # all_hand_poses is now a dictionary mapping camera name -> list of poses.
 
-            # Depth lists if present for camera0 and camera1
-            camera0_depth_list = [obs_group[f"{camera0_name}_depth"][i] for i in range(num_samples)]
-            camera1_depth_list = [obs_group[f"{camera1_name}_depth"][i] for i in range(num_samples)]
-
-            cache_file = f"hand_poses_{camera0_name}_{camera1_name}_cache.npz"
-            if os.path.exists(cache_file):
-                print(f"Loading cached poses from {cache_file} ...")
-                data = np.load(cache_file, allow_pickle=True)
-                all_hand_poses_camA = data["all_hand_poses_camA"]
-                all_hand_poses_camB = data["all_hand_poses_camB"]
-            else:
-                print(f"No cache found. Running inference to get poses for camera {camera0_name}/{camera1_name} ...")
-                (all_hand_poses_camA, all_hand_poses_camB) = action_identifier.get_poses_from_frames(
-                    cameraA_name=camera0_name,
-                    cameraB_name=camera1_name,
-                    cameraA_frames_list=camera0_frames,
-                    cameraA_depth_list=camera0_depth_list,
-                    cameraB_frames_list=camera1_frames,
-                    cameraB_depth_list=camera1_depth_list,
-                )
-                np.savez(
-                    cache_file,
-                    all_hand_poses_camA=all_hand_poses_camA,
-                    all_hand_poses_camB=all_hand_poses_camB
-                )
-
-            gt_gripper_actions = [root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)]
-           
-            # Build your absolute actions using the poses from camera A and B.
-            actions_for_demo = poses_to_absolute_actions(
-                all_hand_poses_camA,
-                all_hand_poses_camB,
-                gt_gripper_actions,
-                env_camera0  # using camera0 environment for execution
+            # 12) Build absolute actions.
+            # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
+            actions_for_demo = poses_to_absolute_actions_from_multiple_cameras(
+                poses_dict=all_hand_poses,
+                gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+                env=env_camera0  # using camera0 environment for execution
             )
 
             initial_state = root_z["data"][demo]["states"][0]
 
-            # Top-right video from camera0 environment
+            # 13) Execute actions and record videos.
+            # For simplicity, we use env_camera0 and env_camera1 for two views;
+            # you can later extend this to record from all cameras.
+            # Top-right video from camera0 environment:
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
-            env_camera0.file_path = upper_right_video_path
+            env_camera0.file_path = video_paths[camera_names[0]]
             env_camera0.step_count = 0
             for action in actions_for_demo:
                 env_camera0.step(action)
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
 
-            # Bottom-right video from camera1 environment
+            # Bottom-right video from camera1 environment:
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
-            env_camera1.file_path = lower_right_video_path
+            env_camera1.file_path = video_paths[camera_names[1]]
             env_camera1.step_count = 0
             for action in actions_for_demo:
                 env_camera1.step(action)
@@ -469,18 +454,19 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             results.append(f"{demo}: {'success' if success else 'failed'}")
 
-            # Combine quadrant video (currently only combining the two videos)
+            # Combine videos from all cameras (if desired).
+            # Here, we assume a function that can combine multiple videos.
             combine_videos_quadrants(
-                upper_left_video_path,
-                upper_right_video_path,
-                lower_left_video_path,
-                lower_right_video_path,
+                video_paths[camera_names[0]],
+                video_paths[camera_names[1]],
+                # For now, if more than 2 cameras are available, you would add them appropriately.
+                video_paths[camera_names[0]],  # placeholder
+                video_paths[camera_names[1]],  # placeholder
                 combined_video_path
             )
-            os.remove(upper_left_video_path)
-            os.remove(upper_right_video_path)
-            os.remove(lower_left_video_path)
-            os.remove(lower_right_video_path)
+            # Optionally remove the individual videos.
+            for vp in video_paths.values():
+                os.remove(vp)
 
     success_rate = (n_success / total_n)*100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")

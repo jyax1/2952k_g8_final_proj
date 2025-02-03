@@ -902,6 +902,138 @@ def poses_to_absolute_actions_average(
 
     return all_actions
 
+def poses_to_absolute_actions_from_multiple_cameras(
+    self,
+    poses_dict: dict[str, list[Optional[np.ndarray]]],
+    gripper_actions: list[float],
+    env,
+) -> np.ndarray:
+    """
+    Given a dictionary of pose estimates (each a list of 4×4 transforms in world coordinates)
+    from an arbitrary number of cameras, this function:
+    
+      1) Computes smoothed positions for each camera (using smooth_positions),
+      2) For each time step, computes inverse-distance weights based on the distance between
+         the estimated position and the camera's location (from self.camera_Rs),
+      3) Computes a weighted average of positions from all cameras,
+      4) Computes for each camera the orientation delta (from frame i to i+1), and combines
+         these using a weighted slerp (iteratively) with the same weights,
+      5) Accumulates the orientation deltas into a running orientation (initialized from env),
+      6) Converts the current orientation into an axis–angle vector (with sign unification),
+      7) Assembles the final 7D action as [px, py, pz, rx, ry, rz, gripper].
+      
+    A buffer of 10 additional copies of the last action is appended.
+    
+    :param poses_dict: Dictionary mapping camera base name (e.g. "frontview") to a list 
+                       of 4×4 pose matrices (or None) for each frame.
+    :param gripper_actions: List of gripper commands (one per frame).
+    :param env: Environment object from which the initial eef orientation and position are obtained.
+    :return: A numpy array of shape ((num_samples-1)+10, 7) of absolute actions.
+    """
+    # Assume all cameras have the same number of frames.
+    any_key = next(iter(poses_dict))
+    num_samples = len(poses_dict[any_key])
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+    
+    # Compute smoothed positions for each camera.
+    # Assume smooth_positions takes a list of 4x4 matrices and returns an (N,3) array.
+    smoothed_positions_dict = {}
+    for cam, pose_list in poses_dict.items():
+        smoothed_positions_dict[cam] = smooth_positions(pose_list, dist_threshold=0.15)
+    
+    # Initialize the current orientation and position from the environment.
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)  # [x,y,z,w]
+    current_orientation = quat_normalize(current_orientation)
+    current_position = env.env.env._eef_xpos.astype(np.float32)
+
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+    prev_rvec = None
+    z_offset = None
+
+    epsilon = 1e-6  # small constant to avoid division by zero
+    
+    for i in range(num_actions):
+        # --- (A) Compute weighted average position ---
+        pos_sum = np.zeros(3, dtype=np.float32)
+        weight_sum = 0.0
+        for cam, pos_array in smoothed_positions_dict.items():
+            pos = pos_array[i+1]
+            # Use the translation part of the camera extrinsic matrix as the camera's location.
+            cam_pos = self.camera_Rs[cam][:3, 3]
+            dist = np.linalg.norm(pos - cam_pos) + epsilon
+            weight = 1.0 / dist
+            pos_sum += weight * pos
+            weight_sum += weight
+        avg_pos = pos_sum / weight_sum
+
+        if z_offset is None:
+            z_offset = avg_pos[2] - current_position[2]
+        # Adjust the z coordinate
+        avg_pos[2] -= z_offset
+        px, py, pz = avg_pos
+
+        # --- (B) Combine orientation deltas ---
+        # For each camera, if poses are available at i and i+1, compute delta quaternion.
+        # Then weight these deltas using the same weights used for position.
+        combined_delta = None
+        weight_total = 0.0
+        for cam, pose_list in poses_dict.items():
+            if (pose_list[i] is None) or (pose_list[i+1] is None):
+                continue
+            # Extract rotation parts (first 3x3 block)
+            R_i = pose_list[i][:3, :3]
+            R_i1 = pose_list[i+1][:3, :3]
+            q_i = rotation_matrix_to_quaternion(R_i)
+            q_i1 = rotation_matrix_to_quaternion(R_i1)
+            q_i = quat_normalize(q_i)
+            q_i1 = quat_normalize(q_i1)
+            q_delta = quat_multiply(quat_inv(q_i), q_i1)
+            q_delta = quat_normalize(q_delta)
+            # Compute weight based on distance as before.
+            pos_array = smoothed_positions_dict[cam]
+            pos_cam = pos_array[i+1]
+            cam_pos = self.camera_Rs[cam][:3, 3]
+            dist = np.linalg.norm(pos_cam - cam_pos) + epsilon
+            weight = 1.0 / dist
+            # For combining quaternions, we use slerp.
+            # If this is the first valid delta, set it as the combined_delta.
+            if combined_delta is None:
+                combined_delta = q_delta
+                weight_total = weight
+            else:
+                # Compute fraction for slerp relative to the cumulative weight.
+                fraction = weight / (weight_total + weight)
+                combined_delta = slerp_quat(combined_delta, q_delta, fraction=fraction)
+                weight_total += weight
+
+        if combined_delta is None:
+            # If none of the cameras provided a delta, use identity (no change)
+            combined_delta = np.array([0, 0, 0, 1], dtype=np.float32)
+        
+        # Accumulate the delta into current_orientation
+        current_orientation = quat_multiply(current_orientation, combined_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert current_orientation to axis-angle (rvec) and unify sign.
+        rvec = quat2axisangle(current_orientation)
+        if (prev_rvec is not None) and (np.dot(rvec, prev_rvec) < 0):
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # --- (C) Build the 7D action ---
+        current_position = np.array([px, py, pz], dtype=np.float32)
+        all_actions[i, :3] = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i, 6] = gripper_actions[i]
+
+    # Append 10 buffer actions (copies of the last action)
+    for j in range(10):
+        all_actions[num_actions+j] = all_actions[num_actions-1]
+    
+    return all_actions
+
 def poses_to_absolute_actions_mixed_ori_v1(
     poses, 
     poses_side, 
@@ -1049,165 +1181,124 @@ def poses_to_absolute_actions_mixed_ori_v1(
 
 class ActionIdentifierMegapose:
     """
-    Processes video frames (optionally with depth) to extract hand poses from two cameras:
-      - "camera A" (ex 'frontview')
-      - "camera B" (ex 'sideview')
-    and returns 4x4 transforms in world coordinates for each camera.
+    Processes video frames (optionally with depth) to extract hand poses from multiple cameras.
+    For each camera in the provided dictionaries, this class returns 4×4 transforms in world coordinates.
     """
-
     def __init__(
         self,
         pose_estimator,
-        cameraA_R: np.ndarray,   # extrinsics from get_camera_extrinsic_matrix
-        cameraA_K: np.ndarray,   # intrinsics from get_camera_intrinsic_matrix
-        cameraB_R: np.ndarray,   # extrinsics from get_camera_extrinsic_matrix
-        cameraB_K: np.ndarray,   # intrinsics from get_camera_intrinsic_matrix
-        model_info: dict,        # from NAMED_MODELS[model_name]
+        camera_Rs: dict,   # dictionary mapping camera name -> 4×4 extrinsic matrix
+        camera_Ks: dict,   # dictionary mapping camera name -> 3×3 intrinsic matrix
+        model_info: dict,  # from NAMED_MODELS[model_name]
         batch_size: int = 40,
         scale_translation: float = 80.0,
     ):
         """
         :param pose_estimator: The PoseEstimator for 'panda-hand' (already loaded).
-        :param cameraA_R: 4×4 extrinsic matrix for camera A
-        :param cameraA_K: 3×3 intrinsics for camera A
-        :param cameraB_R: 4×4 extrinsic matrix for camera B
-        :param cameraB_K: 3×3 intrinsics for camera B
-        :param model_info: dict with "inference_parameters" etc.
-        :param batch_size: how many frames to process at once in estimate_pose_batched.
-        :param scale_translation: multiplier for global translation deltas (80).
+        :param camera_Rs: Dictionary mapping camera name to its 4×4 extrinsic matrix.
+        :param camera_Ks: Dictionary mapping camera name to its 3×3 intrinsic matrix.
+        :param model_info: Dict with "inference_parameters" etc.
+        :param batch_size: How many frames to process at once in estimate_pose_batched.
+        :param scale_translation: Multiplier for global translation deltas.
         """
         self.pose_estimator = pose_estimator
         self.model_info = model_info
         self.batch_size = batch_size
         self.scale_translation = scale_translation
 
-        self.cameraA_K = cameraA_K
-        self.cameraB_K = cameraB_K
-        self.cameraA_R = cameraA_R
-        self.cameraB_R = cameraB_R
+        self.camera_Rs = camera_Rs
+        self.camera_Ks = camera_Ks
 
     def get_poses_from_frames(
         self,
-        cameraA_name: str,
-        cameraB_name: str,
-        cameraA_frames_list: list[np.ndarray],
-        cameraA_depth_list: Optional[list[np.ndarray]] = None,
-        cameraB_frames_list: Optional[list[np.ndarray]] = None,
-        cameraB_depth_list: Optional[list[np.ndarray]] = None,  # Added argument
-    ) -> tuple[list[Optional[np.ndarray]], list[Optional[np.ndarray]]]:
+        cameras_frames_dict: dict[str, list[np.ndarray]],
+        cameras_depth_dict: Optional[dict[str, list[np.ndarray]]] = None,
+        depth_minmax: Optional[dict[str, tuple[float, float]]] = None,
+    ) -> dict[str, list[Optional[np.ndarray]]]:
         """
-        Given a list of frames for "camera A" (optionally with matching depth), 
-        plus an optional list for "camera B," we:
-
-          1) Chunk the camera A frames (and optional A-depth) in 'batch_size' steps,
-          2) Find bounding boxes for 'green' (the hand) in camera A frames,
-          3) Call estimate_pose_batched => poses in camera A,
-          4) Convert to world coords via cameraA_R,
-          5) Do the same logic for camera B if provided, 
-             converting to world coords via cameraB_R,
-          6) Return two lists (both length n):
-             all_hand_poses_world_A : np.ndarray(4,4) or None
-             all_hand_poses_world_B : np.ndarray(4,4) or None
-
-        :param cameraA_frames_list: List of RGB frames for camera A, each shape (H,W,3).
-        :param cameraA_depth_list:  Optional list of depth frames for camera A, shape (H,W).
-                                    If None, depth is not used for camera A.
-        :param cameraB_frames_list: Optional list of frames for camera B, shape (H,W,3).
-                                    If None, we skip camera B.
-        :param cameraB_depth_list:  Optional list of depth frames for camera B, shape (H,W).
-                                    If None, depth is not used for camera B.
-        :return: (all_hand_poses_world_A, all_hand_poses_world_B)
+        Given a dictionary of RGB frames for multiple cameras (optionally with matching depth),
+        this function processes the frames in batches and uses the pose estimator to extract hand poses.
+        For each camera, the function:
+        
+        1) Chunks the frames (and optional depth) in 'batch_size' steps.
+        2) Finds bounding boxes for the "green" hand in each frame.
+        3) Calls estimate_pose_batched to obtain the camera-frame poses.
+        4) Converts these poses to world coordinates using the corresponding extrinsic matrix 
+            from self.camera_Rs.
+        
+        :param cameras_frames_dict: Dictionary mapping camera base name (e.g. "frontview") 
+                                    to a list of RGB frames, each of shape (H,W,3).
+        :param cameras_depth_dict:  Optional dictionary mapping camera base name to a list 
+                                    of depth frames (each (H,W)). If a camera key is missing 
+                                    or its value is None, depth is not used for that camera.
+        :param depth_minmax:        Optional dictionary mapping strings like "frontview_depth" 
+                                    to a tuple (min_depth, max_depth) used to normalize depth.
+        :return: Dictionary mapping each camera base name to a list (length = num_frames) 
+                of estimated 4×4 transforms in world coordinates (or None if no pose was found).
         """
-        num_frames = len(cameraA_frames_list)
-        all_hand_poses_world_A = [None] * num_frames
-        all_hand_poses_world_B = [None] * num_frames
+        all_hand_poses = {}  # key: camera base name, value: list of pose matrices (or None)
+        
+        # Process each camera independently
+        for cam, frames_list in cameras_frames_dict.items():
+            num_frames = len(frames_list)
+            pose_list = [None] * num_frames
 
-        # -----------------
-        # CAMERA A LOGIC
-        # -----------------
-        for chunk_start in range(0, num_frames, self.batch_size):
-            chunk_end = min(chunk_start + self.batch_size, num_frames)
-            images_chunk = []
-            bboxes_chunk = []
-            depth_chunk = None
+            # Get the corresponding depth list for this camera (if provided)
+            depth_list = None
+            if cameras_depth_dict is not None:
+                depth_list = cameras_depth_dict.get(cam, None)
 
-            # If we have depth, slice it
-            if cameraA_depth_list is not None:
-                depth_chunk = cameraA_depth_list[chunk_start:chunk_end]
-
-            # Gather bounding boxes
-            for idx in range(chunk_start, chunk_end):
-                img = cameraA_frames_list[idx]
-                box_hand = find_color_bounding_box(img, color_name="green")
-                if box_hand is not None:
-                    # instance_id=0 for single object
-                    bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
-                else:
-                    bboxes_chunk.append([])
-                images_chunk.append(img)
-
-            # Batched pose estimation for chunk
-            chunk_results = estimate_pose_batched(
-                list_of_images=images_chunk,
-                list_of_bboxes=bboxes_chunk,
-                K=self.cameraA_K,
-                pose_estimator=self.pose_estimator,
-                model_info=self.model_info,
-                depth_list=depth_chunk,
-                depth_minmax=DEPTH_MINMAX[f'{cameraA_name}_depth']
-            )
-
-            # Store results for A
-            for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
-                pose_est_for_frame = chunk_results[offset]
-                if len(pose_est_for_frame) < 1:
-                    all_hand_poses_world_A[global_idx] = None
-                else:
-                    T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
-                    T_world_obj = self.cameraA_R @ T_cam_obj
-                    all_hand_poses_world_A[global_idx] = T_world_obj
-
-        # ----------------
-        # CAMERA B LOGIC
-        # ----------------
-        if cameraB_frames_list is not None:
-            # We assume cameraB_frames_list has the same length
+            # Process frames in batches
             for chunk_start in range(0, num_frames, self.batch_size):
                 chunk_end = min(chunk_start + self.batch_size, num_frames)
-                b_images_chunk = []
-                b_bboxes_chunk = []
+                images_chunk = []
+                bboxes_chunk = []
+                depth_chunk = None
 
+                if depth_list is not None:
+                    depth_chunk = depth_list[chunk_start:chunk_end]
+
+                # For each frame in this batch, compute the bounding box for the "green" hand.
                 for idx in range(chunk_start, chunk_end):
-                    b_img = cameraB_frames_list[idx]
-                    box_hand_side = find_color_bounding_box(b_img, color_name="green")
-                    if box_hand_side is not None:
-                        b_bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand_side, "instance_id": 0}])
+                    img = frames_list[idx]
+                    box_hand = find_color_bounding_box(img, color_name="green")
+                    if box_hand is not None:
+                        # Use instance_id 0 for a single object
+                        bboxes_chunk.append([{"label": "panda-hand", "bbox": box_hand, "instance_id": 0}])
                     else:
-                        b_bboxes_chunk.append([])
-                    b_images_chunk.append(b_img)
+                        bboxes_chunk.append([])
+                    images_chunk.append(img)
 
-                # Batched pose estimation for camera B chunk
-                b_chunk_results = estimate_pose_batched(
-                    list_of_images=b_images_chunk,
-                    list_of_bboxes=b_bboxes_chunk,
-                    K=self.cameraB_K,
+                # Determine depth_minmax for this camera if available.
+                this_depth_minmax = None
+                if depth_minmax is not None:
+                    this_depth_minmax = depth_minmax.get(f"{cam}_depth", None)
+
+                # Batched pose estimation for this camera's chunk.
+                chunk_results = estimate_pose_batched(
+                    list_of_images=images_chunk,
+                    list_of_bboxes=bboxes_chunk,
+                    K=self.camera_Ks[cam],
                     pose_estimator=self.pose_estimator,
                     model_info=self.model_info,
-                    depth_list=cameraB_depth_list[chunk_start:chunk_end] if cameraB_depth_list is not None else None,
-                    depth_minmax=DEPTH_MINMAX[f'{cameraB_name}_depth']
+                    depth_list=depth_chunk,
+                    depth_minmax=this_depth_minmax
                 )
 
-                # Store results for B
+                # Convert each result to a 4×4 transform in world coordinates.
                 for offset, global_idx in enumerate(range(chunk_start, chunk_end)):
-                    pose_est_for_frame_side = b_chunk_results[offset]
-                    if len(pose_est_for_frame_side) < 1:
-                        all_hand_poses_world_B[global_idx] = None
+                    pose_est_for_frame = chunk_results[offset]
+                    if len(pose_est_for_frame) < 1:
+                        pose_list[global_idx] = None
                     else:
-                        T_cam_obj_side = pose_est_for_frame_side.poses[0].cpu().numpy()
-                        T_world_obj_side = self.cameraB_R @ T_cam_obj_side
-                        all_hand_poses_world_B[global_idx] = T_world_obj_side
+                        T_cam_obj = pose_est_for_frame.poses[0].cpu().numpy()
+                        T_world_obj = self.camera_Rs[cam] @ T_cam_obj
+                        pose_list[global_idx] = T_world_obj
 
-        return all_hand_poses_world_A, all_hand_poses_world_B
+            # Store the results for this camera.
+            all_hand_poses[cam] = pose_list
+
+        return all_hand_poses
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  APPROACH A: small increments
