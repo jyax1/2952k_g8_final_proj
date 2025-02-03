@@ -408,10 +408,23 @@ def imitate_trajectory_with_action_identifier(
 
             # 11) Run pose estimation across all cameras.
             # (Assume you have updated get_poses_from_frames to accept dictionaries.)
-            all_hand_poses = action_identifier.get_poses_from_frames(
-                cameras_frames_dict=cameras_frames,
-                cameras_depth_dict=cameras_depth
-            )
+            cache_cam_string = "_".join(sorted(camera_names))
+            cache_file = os.path.join('/debug', f"hand_poses_{cache_cam_string}_cache.npz")
+
+            if os.path.exists(cache_file):
+                print(f"Loading cached poses from {cache_file} ...")
+                # Load with allow_pickle=True since we're saving dictionaries.
+                data = np.load(cache_file, allow_pickle=True)
+                # Assuming that you saved the dictionary under the key "all_hand_poses".
+                all_hand_poses = data["all_hand_poses"].item()
+            else:
+                print(f"No cache found. Running inference to get poses for cameras {camera_names} ...")
+                all_hand_poses = action_identifier.get_poses_from_frames(
+                    cameras_frames_dict=cameras_frames,
+                    cameras_depth_dict=cameras_depth
+                )
+                # Save the dictionary of poses under the key "all_hand_poses"
+                np.savez(cache_file, all_hand_poses=all_hand_poses)
             # all_hand_poses is now a dictionary mapping camera name -> list of poses.
 
             # 12) Build absolute actions.

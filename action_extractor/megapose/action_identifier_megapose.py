@@ -1213,7 +1213,6 @@ class ActionIdentifierMegapose:
         self,
         cameras_frames_dict: dict[str, list[np.ndarray]],
         cameras_depth_dict: Optional[dict[str, list[np.ndarray]]] = None,
-        depth_minmax: Optional[dict[str, tuple[float, float]]] = None,
     ) -> dict[str, list[Optional[np.ndarray]]]:
         """
         Given a dictionary of RGB frames for multiple cameras (optionally with matching depth),
@@ -1270,9 +1269,7 @@ class ActionIdentifierMegapose:
                     images_chunk.append(img)
 
                 # Determine depth_minmax for this camera if available.
-                this_depth_minmax = None
-                if depth_minmax is not None:
-                    this_depth_minmax = depth_minmax.get(f"{cam}_depth", None)
+                depth_minmax = DEPTH_MINMAX[f"{cam}_depth"]
 
                 # Batched pose estimation for this camera's chunk.
                 chunk_results = estimate_pose_batched(
@@ -1282,7 +1279,7 @@ class ActionIdentifierMegapose:
                     pose_estimator=self.pose_estimator,
                     model_info=self.model_info,
                     depth_list=depth_chunk,
-                    depth_minmax=this_depth_minmax
+                    depth_minmax=depth_minmax
                 )
 
                 # Convert each result to a 4×4 transform in world coordinates.
