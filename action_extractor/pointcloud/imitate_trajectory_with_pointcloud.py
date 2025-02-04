@@ -259,151 +259,318 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     return all_actions
 
-def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, save_debug=True):
+# def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
+#     """
+#     For each point cloud (a list element of points and corresponding colors),
+#     find the 6DOF pose (a 4x4 homogeneous transformation matrix) of a fixed–sized 
+#     bounding box (with dimensions box_dims) that maximizes the number of “very 
+#     green” points contained within it.
+
+#     The box is placed so that:
+#       - Its orientation is (nearly) aligned with the principal directions of the green points.
+#       - Its translation (the center) is chosen (in that frame) so that the fixed box 
+#         [−box_dims/2, +box_dims/2] contains the maximum number of green points.
+
+#     Parameters:
+#       point_clouds_points: list of numpy arrays of shape (N,3)
+#       point_clouds_colors: list of numpy arrays of shape (N,3)
+      
+#     Returns:
+#       poses: list of 4x4 numpy arrays (each in SE(3)), one per input point cloud.
+#              (If no green points are found in a given cloud, an identity matrix is returned.)
+#     """
+#     poses = []
+#     # fixed bounding box dimensions (in meters, for example)
+#     box_dims = np.array([0.063045, 0.204516, 0.091946])
+#     half_dims = box_dims / 2.0
+
+#     # thresholds for selecting "very green" points.
+#     # We assume colors are in [0,1]. Adjust as needed.
+#     green_threshold = 0.8
+#     non_green_max = 0.2
+
+#     for pts, cols in zip(point_clouds_points, point_clouds_colors):
+#         # pts: (N,3); cols: (N,3)
+#         # Create a boolean mask: points with G>0.8 and R and B below 0.2
+#         green_mask = (cols[:, 1] > green_threshold) & \
+#                      (cols[:, 0] < non_green_max) & \
+#                      (cols[:, 2] < non_green_max)
+#         green_pts = pts[green_mask]
+        
+#         # If there are no green points, we cannot determine a pose.
+#         if green_pts.shape[0] == 0:
+#             poses.append(np.eye(4))
+#             continue
+
+#         # --- Step 2: Get an orientation from the PCA of green points ---
+#         # Compute the mean of the green points.
+#         mean = green_pts.mean(axis=0)
+#         # Compute the covariance matrix.
+#         cov = np.cov(green_pts.T)
+#         # Eigen-decomposition. (Using eigh because cov is symmetric.)
+#         eigenvalues, eigenvectors = np.linalg.eigh(cov)
+#         # Order the eigenvectors so that the largest eigenvalue comes first.
+#         order = eigenvalues.argsort()[::-1]
+#         eigenvectors = eigenvectors[:, order]
+#         # Ensure a right-handed coordinate system.
+#         if np.linalg.det(eigenvectors) < 0:
+#             eigenvectors[:, 2] *= -1
+
+#         # The rotation matrix R (from local to global) is given by the eigenvectors.
+#         R = eigenvectors
+
+#         # --- Step 3: Transform points into the PCA (local) coordinate frame ---
+#         local_pts = (green_pts - mean) @ R  # each row is a point in the local frame
+
+#         # --- Step 4: Find the best translation in the local frame ---
+#         # We wish to choose a translation T_local so that
+#         #   for each axis i, we have T_local[i] - half_dims[i] <= local_pts[:,i] <= T_local[i] + half_dims[i].
+#         # Since the count changes only when a point exactly hits one of the faces,
+#         # we consider candidates T_local[i] = (point coordinate ± half_dims[i]).
+#         candidates = []
+#         for i in range(3):
+#             coords = local_pts[:, i]
+#             # Each candidate for axis i is a point coordinate shifted by ± half_dims.
+#             cands_i = np.concatenate((coords + half_dims[i], coords - half_dims[i]))
+#             # Use only unique candidate values.
+#             candidates.append(np.unique(cands_i))
+            
+#         best_count = -1
+#         best_T_local = None
+        
+#         # Loop over all candidate translations.
+#         for t0 in candidates[0]:
+#             for t1 in candidates[1]:
+#                 for t2 in candidates[2]:
+#                     T_candidate = np.array([t0, t1, t2])
+#                     # For each axis, check if the point falls inside the box (in the local frame).
+#                     inside = np.all(np.abs(local_pts - T_candidate) <= half_dims, axis=1)
+#                     count = np.count_nonzero(inside)
+#                     if count > best_count:
+#                         best_count = count
+#                         best_T_local = T_candidate
+
+#         # --- Step 5: Compute the box’s pose in the global frame ---
+#         # The center of the box in the global frame is:
+#         center = mean + R @ best_T_local
+
+#         # Build the 4x4 homogeneous transform.
+#         T_pose = np.eye(4)
+#         T_pose[:3, :3] = R
+#         T_pose[:3, 3] = center
+
+#         poses.append(T_pose)
+
+#     return poses
+
+
+def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
     """
-    Estimate highly accurate poses from green points in point clouds using PCA, robust filtering, and ICP.
-    Optionally saves visualizations of bounding boxes.
-
-    Args:print("Initial Pose:", initial_pose)
-        point_clouds_points (list): List of (N,3) numpy arrays of 3D points (meters)
-        point_clouds_colors (list): List of (N,3) numpy arrays of RGB colors (0-255)
-        save_debug (bool): If True, saves the filtered point clouds and bounding boxes as .ply files.
-
-    Returns:
-        list: SE(3) pose matrices (4x4) for each point cloud
+    Given a list of point-clouds (points and corresponding colors),
+    finds, for each point-cloud, a 4x4 SE(3) pose matrix of a fixed-size
+    bounding box that encloses the maximum number of 'very green' points.
+    
+    :param point_clouds_points: list of arrays, where each array is shape (N, 3)
+                                representing (x, y, z) for N points.
+    :param point_clouds_colors: list of arrays, where each array is shape (N, 3)
+                                representing color channels (R, G, B) in [0, 1]
+                                for the same N points.
+    :return: a list of 4x4 numpy arrays, each the SE(3) pose of the bounding box
     """
-    # Known object dimensions (converted from mm to meters)
-    box_dims = np.array([0.063045, 0.204516, 0.091946])  # [thickness, width, length]
-    box_dims = np.array([0.07, 0.25, 0.1])  # [thickness, width, length]
-
-    # Create debug directory if needed
-    debug_dir = "debug/pointclouds_bbox"
-    if save_debug and not os.path.exists(debug_dir):
-        os.makedirs(debug_dir)
-
+    
+    # Fixed bounding box dimensions (X, Y, Z)
+    box_dims = np.array([0.063045, 0.204516, 0.091946])
+    
+    # Number of random orientations to sample
+    num_random_orientations = 200  # Increase for better coverage (but more computation)
+    
     poses = []
-
-    for i, (points, colors) in enumerate(zip(point_clouds_points, point_clouds_colors)):
-        # 1. Filter green points with a stricter threshold
-        green_mask = (colors[:, 1] > colors[:, 0]) & \
-                     (colors[:, 1] > colors[:, 2]) & \
-                     (colors[:, 1] > 200) & \
-                     (colors[:, 0] < 50) & \
-                     (colors[:, 2] < 50)
+    
+    for points, colors in zip(point_clouds_points, point_clouds_colors):
+        # ----------------------------------------------------
+        # 1) Filter to get the 'very green' points
+        # ----------------------------------------------------
+        # Example thresholding; adjust to your needs/data:
+        #   - G significantly larger than R and B
+        #   - G absolutely above a certain threshold
+        R = colors[:, 0]
+        G = colors[:, 1]
+        B = colors[:, 2]
+        
+        # A simple "very green" condition:
+        green_mask = (G > 0.5) & ((G - R) > 0.2) & ((G - B) > 0.2)
         
         green_points = points[green_mask]
         
-        if len(green_points) < 10:  # Skip if too few points
+        # If there are no green points at all, just return an identity pose
+        # or some default. We'll do that as a fallback.
+        if len(green_points) == 0:
             poses.append(np.eye(4))
             continue
-
-        # 2. Create Open3D point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(green_points)
-
-        # 3. Apply filtering for better accuracy
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=30, std_ratio=1.5)  # Remove noise
-        pcd = pcd.voxel_down_sample(voxel_size=0.002)  # Downsample for uniformity
-
-        # 4. Estimate orientation using PCA
-        pca = PCA(n_components=3)
-        pca.fit(np.asarray(pcd.points))
-
-        # Principal axes (sorted by variance)
-        R_pca = pca.components_.T  # Rotation matrix
-
-        # Ensure right-handed coordinate system (if necessary)
-        if np.linalg.det(R_pca) < 0:
-            R_pca[:, 2] *= -1
-
-        # Get bounding box center
-        center = np.mean(np.asarray(pcd.points), axis=0)
-
-        # Reorder axes to match known box dimensions
-        sorted_pca_dims = np.sort(pca.explained_variance_)
-        sorted_box_dims = np.sort(box_dims)
-
-        axis_permutation = np.argsort(sorted_pca_dims)  # Match PCA axes to box
-        aligned_R = R_pca[:, axis_permutation]
-
-        # Compute bottom center
-        bottom_center_local = np.array([0, 0, -box_dims[2] / 2])
-        bottom_center_world = center + aligned_R @ bottom_center_local
-
-        # 5. Construct initial SE(3) transformation
-        initial_pose = np.eye(4)
-        initial_pose[:3, :3] = aligned_R
-        initial_pose[:3, 3] = bottom_center_world
-
-        # 6. Use ICP for fine alignment
-        # box_pcd = o3d.geometry.PointCloud()
-        # box_points = np.array([
-        #     [-box_dims[0] / 2, -box_dims[1] / 2, -box_dims[2] / 2],
-        #     [ box_dims[0] / 2, -box_dims[1] / 2, -box_dims[2] / 2],
-        #     [ box_dims[0] / 2,  box_dims[1] / 2, -box_dims[2] / 2],
-        #     [-box_dims[0] / 2,  box_dims[1] / 2, -box_dims[2] / 2],
-        #     [-box_dims[0] / 2, -box_dims[1] / 2,  box_dims[2] / 2],
-        #     [ box_dims[0] / 2, -box_dims[1] / 2,  box_dims[2] / 2],
-        #     [ box_dims[0] / 2,  box_dims[1] / 2,  box_dims[2] / 2],
-        #     [-box_dims[0] / 2,  box_dims[1] / 2,  box_dims[2] / 2]
-        # ])
-        # box_pcd.points = o3d.utility.Vector3dVector(box_points)
-
-        # # Transform box to initial pose
-        # box_pcd.transform(initial_pose)
         
-        # box_pcd.estimate_normals(
-        #     search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=30)
-        # )
-
-        # # Apply point-to-plane ICP
-        # reg_p2plane = o3d.pipelines.registration.registration_icp(
-        #     pcd, box_pcd, max_correspondence_distance=0.005,
-        #     estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-        #     criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
-        # )
-
-        # refined_pose = reg_p2plane.transformation
-        poses.append(initial_pose)
-
-        # 7. Save debug visualization (if enabled)
-        if save_debug:
-            # Save filtered point cloud
-            pcd_file_path = f"{debug_dir}/pcd_{i}.ply"
-            print(f"Saving filtered point cloud to {pcd_file_path}")
-            o3d.io.write_point_cloud(pcd_file_path, pcd)
+        # ----------------------------------------------------
+        # 2) Randomly sample orientations in SO(3).
+        #    We'll sample random Euler angles for illustration.
+        # ----------------------------------------------------
+        # A small helper to create rotation matrix from Euler angles:
+        def euler_to_rot3(euler_angles):
+            """ Convert euler angles (rx, ry, rz) to a 3x3 rotation matrix. """
+            rx, ry, rz = euler_angles
+            # Rotation about X
+            Rx = np.array([
+                [1,             0,              0],
+                [0,  np.cos(rx),   -np.sin(rx)],
+                [0,  np.sin(rx),    np.cos(rx)]
+            ])
+            # Rotation about Y
+            Ry = np.array([
+                [ np.cos(ry), 0, np.sin(ry)],
+                [          0, 1,          0],
+                [-np.sin(ry), 0, np.cos(ry)]
+            ])
+            # Rotation about Z
+            Rz = np.array([
+                [np.cos(rz), -np.sin(rz), 0],
+                [np.sin(rz),  np.cos(rz), 0],
+                [         0,           0, 1]
+            ])
+            return Rz @ Ry @ Rx
+        
+        # Pre-generate a list of random rotations:
+        random_orientations = []
+        for _ in range(num_random_orientations):
+            # Sample each euler angle in [-pi, pi], for instance
+            rx = np.random.uniform(-np.pi, np.pi)
+            ry = np.random.uniform(-np.pi, np.pi)
+            rz = np.random.uniform(-np.pi, np.pi)
+            R_rand = euler_to_rot3((rx, ry, rz))
+            random_orientations.append(R_rand)
+        
+        # Also add an identity orientation as a candidate
+        random_orientations.append(np.eye(3))
+        
+        # ----------------------------------------------------
+        # 3) For each orientation, transform points, then
+        #    find the best 3D axis-aligned bounding box center
+        #    of size `box_dims` in that rotated space that
+        #    encloses the maximum green points.
+        # ----------------------------------------------------
+        
+        max_inliers = 0
+        best_overall_center = None
+        best_overall_rotation = None
+        
+        # We'll define half-dims for convenience
+        half_dims = 0.5 * box_dims
+        
+        # A function to count how many points are in the box
+        # from (center - half_dims) to (center + half_dims).
+        def count_inliers(rot_pts, candidate_center):
+            """
+            rot_pts: Nx3 points in the rotated frame
+            candidate_center: the center of the bounding box (in rotated frame)
+            """
+            lower = candidate_center - half_dims
+            upper = candidate_center + half_dims
             
-            # Create bounding box edges for visualization with thicker lines
-            obb = o3d.geometry.OrientedBoundingBox(center, aligned_R, box_dims)
-            bbox_edges = obb.get_box_points()
-            bbox_lines = [
-                [0, 1], [1, 2], [2, 3], [3, 0],  # Bottom face
-                [4, 5], [5, 6], [6, 7], [7, 4],  # Top face
-                [0, 4], [1, 5], [2, 6], [3, 7]   # Vertical edges
-            ]
-            bbox_line_set = o3d.geometry.LineSet(
-                points=o3d.utility.Vector3dVector(bbox_edges),
-                lines=o3d.utility.Vector2iVector(bbox_lines)
+            mask = (
+                (rot_pts[:, 0] >= lower[0]) & (rot_pts[:, 0] <= upper[0]) &
+                (rot_pts[:, 1] >= lower[1]) & (rot_pts[:, 1] <= upper[1]) &
+                (rot_pts[:, 2] >= lower[2]) & (rot_pts[:, 2] <= upper[2])
             )
+            return np.count_nonzero(mask)
+        
+        # A helper to get candidate 1D intervals of length L that cover the
+        # max number of points. Returns a small set of intervals that achieve
+        # near-maximum coverage. We'll do a standard sliding approach on sorted coords.
+        def best_1d_intervals(coords, L):
+            """
+            coords: 1D numpy array of the coordinate to search over
+            L: the length of the bounding box dimension
+            returns: list of (start, end) intervals that have near-max coverage
+            """
+            sorted_coords = np.sort(coords)
+            N = len(sorted_coords)
+            if N == 0:
+                return [(0.0, L)]  # trivial fallback
             
-            # Increase the line width to make the bounding box easier to see
-            bbox_line_set.paint_uniform_color([1, 0, 0])  # Red color for visibility
-            bbox_line_set.lines = o3d.utility.Vector2iVector(bbox_lines)  # Reapply lines
-
-            # Save bounding box as .ply
-            bbox_file_path = f"{debug_dir}/bbox_{i}.ply"
-            print(f"Saving bounding box to {bbox_file_path}")
-            o3d.io.write_line_set(bbox_file_path, bbox_line_set)
-
-            # Combine point cloud and bounding box into a single visualization list
-            combined_geometries = [pcd, bbox_line_set]
+            best_count = 0
+            best_intervals = []
+            left = 0
+            for right in range(N):
+                # Move left pointer while interval is too large
+                while sorted_coords[right] - sorted_coords[left] > L:
+                    left += 1
+                # Now [sorted_coords[left], sorted_coords[right]] <= L
+                window_count = (right - left + 1)
+                if window_count > best_count:
+                    best_count = window_count
+                    best_intervals = [(sorted_coords[left], sorted_coords[left] + L)]
+                elif window_count == best_count:
+                    best_intervals.append((sorted_coords[left], sorted_coords[left] + L))
             
-            # Save the combined point cloud and bounding box as separate .ply files for later use
-            combined_ply_path = f"{debug_dir}/combined_{i}.ply"
-            print(f"Saving combined visualization to {combined_ply_path}")
-            o3d.io.write_point_cloud(combined_ply_path, pcd)  # Saving just the point cloud as usual
-            o3d.io.write_line_set(f"{debug_dir}/combined_bbox_{i}.ply", bbox_line_set)  # Saving just the bounding box
-
+            return best_intervals
+        
+        # Main search over orientations
+        for R_candidate in random_orientations:
+            # Transform green points into this orientation
+            # We'll treat the origin as (0,0,0) for rotation only
+            rotated_points = green_points @ R_candidate.T  # shape (G, 3)
+            
+            # For each dimension, find best intervals of length box_dims[d]
+            x_intervals = best_1d_intervals(rotated_points[:, 0], box_dims[0])
+            y_intervals = best_1d_intervals(rotated_points[:, 1], box_dims[1])
+            z_intervals = best_1d_intervals(rotated_points[:, 2], box_dims[2])
+            
+            # We form candidate centers by taking midpoints from each dimension
+            # We'll combine them in a small cross-product to avoid enumerating too many.
+            # If each dimension has M_x, M_y, M_z best intervals, we get M_x*M_y*M_z combos
+            candidate_centers = []
+            for (x_start, x_end) in x_intervals:
+                x_center = 0.5 * (x_start + x_end)
+                for (y_start, y_end) in y_intervals:
+                    y_center = 0.5 * (y_start + y_end)
+                    for (z_start, z_end) in z_intervals:
+                        z_center = 0.5 * (z_start + z_end)
+                        candidate_centers.append(np.array([x_center, y_center, z_center]))
+            
+            # Evaluate each candidate center
+            for c_center in candidate_centers:
+                # Count how many green points fall inside the box
+                inliers = count_inliers(rotated_points, c_center)
+                if inliers > max_inliers:
+                    max_inliers = inliers
+                    best_overall_center = c_center
+                    best_overall_rotation = R_candidate
+        
+        # ----------------------------------------------------
+        # 4) We now have best rotation and best center in the
+        #    rotated space. We must convert center back to the
+        #    original coordinate system. That is:
+        #
+        #    p_in_original = R * p_in_rotated
+        #
+        #    But c_center is in the rotated frame, so the actual
+        #    center c_orig = R_candidate * c_center.
+        # ----------------------------------------------------
+        if best_overall_rotation is None:
+            # fallback if something went wrong
+            poses.append(np.eye(4))
+            continue
+        
+        R_final = best_overall_rotation
+        c_rotated = best_overall_center
+        c_final = R_final @ c_rotated  # Convert center back to original frame
+        
+        # ----------------------------------------------------
+        # 5) Construct the 4x4 pose matrix
+        # ----------------------------------------------------
+        T = np.eye(4)
+        T[:3, :3] = R_final
+        T[:3, 3] = c_final
+        
+        poses.append(T)
+    
     return poses
 
 
