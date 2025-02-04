@@ -38,6 +38,7 @@ from tqdm import tqdm
 from pathlib import Path
 from zarr import DirectoryStore, ZipStore
 import itertools
+import copy
 
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
@@ -373,419 +374,451 @@ def save_pointclouds_with_bbox_as_ply(point_clouds_points,
                 f.write(f"{x} {y} {z} {rr} {gg} {bb}\n")
 
         print(f"Saved {filename}")
+        
+# def save_open3d_pcd_to_ply(pcd, filename="output_model.ply"):
+#     """
+#     Saves the given Open3D point cloud (pcd) to a .ply file.
 
-def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
+#     Args:
+#         pcd: open3d.geometry.PointCloud object
+#         filename: str, path to save .ply file
+#     """
+#     # Write point cloud to .ply (ASCII or binary)
+#     # You can set write_ascii=True if you prefer readable ASCII files
+#     success = o3d.io.write_point_cloud(filename, pcd, write_ascii=True)
+#     if success:
+#         print(f"Saved point cloud to {filename}")
+#     else:
+#         print(f"Failed to save point cloud to {filename}")
+        
+# def load_model_as_pointcloud(model_path, num_points=5000):
+#     """
+#     Load a .ply model (which could be a triangle mesh) and
+#     convert it into a point cloud by sampling points on the surface.
+#     """
+#     mesh = o3d.io.read_triangle_mesh(model_path)
+#     if mesh.is_empty():
+#         raise ValueError(f"Could not load mesh from: {model_path}")
+
+#     # Convert the mesh to a point cloud by sampling points uniformly.
+#     # Adjust num_points as needed to balance accuracy vs. runtime.
+#     pcd = mesh.sample_points_uniformly(number_of_points=num_points)
+#     return pcd
+
+# def get_poses_from_pointclouds(point_clouds_points, 
+#                                point_clouds_colors,
+#                                model_path,
+#                                green_threshold=0.9,
+#                                non_green_max=0.7,
+#                                voxel_size=0.005,
+#                                mesh_num_points=5000):
+#     """
+#     Estimate the 6D pose (4x4 SE(3) transform) of a known green object in each 
+#     point cloud by registering the subset of "very green" points against a 
+#     known 3D model (which may be a CAD mesh .ply).
+
+#     Returns a list of 4x4 np.ndarray. If no green points or registration fails,
+#     returns an identity matrix for that frame.
+#     """
+
+#     # ----------------------------------------------------------------
+#     # 1) Load the known object model as a mesh, then sample it to get a point cloud
+#     # ----------------------------------------------------------------
+#     object_model_o3d = load_model_as_pointcloud(model_path, num_points=mesh_num_points)
+
+#     # ----------------------------------------------------------------
+#     # Helper Functions
+#     # ----------------------------------------------------------------
+#     def preprocess_pcd(pcd, voxel_size):
+#         """
+#         - Optionally downsample with voxel_size
+#         - Estimate normals
+#         - Remove outliers (statistical)
+#         Returns the cleaned inlier point cloud.
+#         """
+#         # 1) Downsample
+#         if voxel_size > 0:
+#             pcd_down = pcd.voxel_down_sample(voxel_size=voxel_size)
+#         else:
+#             pcd_down = pcd
+
+#         # 2) Estimate normals
+#         pcd_down.estimate_normals(
+#             search_param=o3d.geometry.KDTreeSearchParamHybrid(
+#                 radius=2.0 * voxel_size if voxel_size > 0 else 0.01,
+#                 max_nn=30
+#             )
+#         )
+
+#         # 3) Remove outliers
+#         #    Open3D returns two outputs:
+#         #       - inlier_cloud  = the subset of pcd_down that are considered inliers
+#         #       - inlier_indices = the indices in pcd_down that pass the test
+#         #
+#         # pcd_inlier is ALREADY the subset of inliers, so we can return it directly.
+#         pcd_inlier, inlier_indices = pcd_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+
+#         # Don't call select_by_index(inlier_indices) again on pcd_inlier 
+#         # or you'll use the old indices on the new subset. That triggers memory errors.
+#         return pcd_inlier
+
+#     def compute_fpfh(pcd, voxel_size):
+#         # Ensure normals
+#         pcd.estimate_normals(
+#             search_param=o3d.geometry.KDTreeSearchParamHybrid(
+#                 radius=2.0*voxel_size if voxel_size>0 else 0.01, 
+#                 max_nn=30
+#             )
+#         )
+#         radius_feature = 5.0 * voxel_size if voxel_size>0 else 0.05
+#         fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+#             pcd,
+#             o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
+#         )
+#         return fpfh
+
+#     def global_registration(source, target, source_fpfh, target_fpfh, voxel_size):
+#         distance_threshold = max(voxel_size * 1.5, 0.002)
+#         # Turn off mutual_filter to see if we get more correspondences
+#         result_ransac = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+#             source, 
+#             target,
+#             source_fpfh, 
+#             target_fpfh,
+#             mutual_filter=False,  # disabled
+#             max_correspondence_distance=distance_threshold,
+#             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+#             ransac_n=4,
+#             checkers=[
+#                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+#                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+#             ],
+#             criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(
+#                 max_iteration=100000, # lower iteration for speed
+#                 confidence=0.99
+#             )
+#         )
+#         return result_ransac
+
+#     def refine_registration(source, target, init_transform, voxel_size):
+#         distance_threshold = max(voxel_size * 0.5, 0.001)
+#         result_icp = o3d.pipelines.registration.registration_icp(
+#             source, 
+#             target,
+#             distance_threshold,
+#             init_transform,
+#             o3d.pipelines.registration.TransformationEstimationPointToPlane()
+#         )
+#         return result_icp
+
+#     def register_green_points_to_model(green_pts_np, model_pcd_o3d, 
+#                                        init_transform=None, voxel_size=0.005):
+#         """
+#         Align the green points to the known model.
+#         If 'init_transform' is given, skip global reg and do ICP only.
+#         Returns 4x4 from green->model. If it fails, returns identity.
+#         """
+#         if len(green_pts_np) < 10:
+#             return np.eye(4)
+
+#         green_o3d = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
+
+#         # Preprocess
+#         green_o3d_clean = preprocess_pcd(green_o3d, voxel_size)
+#         model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
+
+#         if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
+#             return np.eye(4)
+
+#         # 1) If we do NOT have an init_transform, attempt global reg
+#         if init_transform is None:
+#             source_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
+#             target_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
+
+#             result_ransac = global_registration(
+#                 green_o3d_clean, 
+#                 model_o3d_clean, 
+#                 source_fpfh, 
+#                 target_fpfh, 
+#                 voxel_size
+#             )
+
+#             # Evaluate if we have enough inliers or if it obviously failed
+#             # There's no direct "inlier count" from RANSAC, but we can check fitness or some heuristic
+#             ransac_inlier_rmse = result_ransac.inlier_rmse
+#             transform = result_ransac.transformation
+#             # If it's basically identity or weird, we can fallback
+#             # or just proceed. We'll do ICP next.
+
+#             init_transform = transform
+
+#         # 2) Local refinement (ICP)
+#         result_icp = refine_registration(
+#             green_o3d_clean, 
+#             model_o3d_clean, 
+#             init_transform, 
+#             voxel_size
+#         )
+#         final_transform = result_icp.transformation
+#         # result_icp.fitness might be 0 if it fails to align, but
+#         # we'll just return whatever we got.
+#         return final_transform
+
+#     # ----------------------------------------------------------------
+#     # 2) Main Loop Over Each Point Cloud
+#     # ----------------------------------------------------------------
+#     poses = []
+#     prev_transform = None
+
+#     for pts, cols in zip(point_clouds_points, point_clouds_colors):
+#         # Filter "very green" points
+#         mask = (
+#             (cols[:, 1] >= green_threshold) &
+#             (cols[:, 0] <= non_green_max) &
+#             (cols[:, 2] <= non_green_max)
+#         )
+#         green_pts = pts[mask]
+
+#         if len(green_pts) == 0:
+#             poses.append(np.eye(4))
+#             continue
+
+#         # Attempt to register
+#         transform_green_to_model = register_green_points_to_model(
+#             green_pts, 
+#             object_model_o3d, 
+#             init_transform=prev_transform,  
+#             voxel_size=voxel_size
+#         )
+
+#         # Invert if you want model->cloud
+#         T_model_in_cloud = np.linalg.inv(transform_green_to_model)
+
+#         poses.append(T_model_in_cloud)
+#         prev_transform = transform_green_to_model
+
+#     return poses
+
+def load_model_as_pointcloud(model_path, num_points=30000, model_in_mm=True):
     """
-    For each point cloud, find the 6DOF pose (4x4 matrix in SE(3)) of a fixed–sized 
-    bounding box that maximizes the number of “very green” points inside.
-
-    We:
-      1) Filter for "very green" points.
-      2) Use PCA on those green points to get a principal-axis alignment (3x3 rotation).
-      3) Transform points to that local frame.
-      4) For each axis, use a 1D sliding-window approach to find intervals of length 
-         box_dims[i] that contain the maximum # of points (in that axis).
-      5) Cross the best intervals from x, y, z to form candidate 3D centers in the local frame.
-      6) Pick the center that yields the best coverage. Then transform back to the world frame.
-
-    Returns a list of 4x4 numpy arrays (SE(3) poses).
-    If no green points in a given cloud, we return identity for that entry.
+    Loads a 3D model (possibly a .ply mesh) and samples points to form a cloud.
+    If model_in_mm=True, convert from millimeters to meters by scaling 0.001.
+    Increasing num_points helps capture finer details for ICP.
     """
+    mesh = o3d.io.read_triangle_mesh(model_path)
+    if mesh.is_empty():
+        raise ValueError(f"Could not load mesh from: {model_path}")
+
+    # If the model is in mm, scale to m
+    if model_in_mm:
+        mesh.scale(0.001, center=(0,0,0))
+
+    # Sample points more densely to improve alignment accuracy
+    pcd = mesh.sample_points_uniformly(number_of_points=num_points)
+    return pcd
+
+def cluster_and_keep_largest(pcd_o3d, eps=0.02, min_points=20):
+    """
+    DBSCAN cluster. Return only largest cluster. 
+    """
+    if len(pcd_o3d.points) == 0:
+        return pcd_o3d
+
+    labels = np.array(pcd_o3d.cluster_dbscan(eps=eps, min_points=min_points))
+    if len(labels) == 0 or np.all(labels < 0):
+        return o3d.geometry.PointCloud()
+
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    valid_mask = (unique_labels >= 0)
+    if not np.any(valid_mask):
+        return o3d.geometry.PointCloud()
+    valid_labels = unique_labels[valid_mask]
+    valid_counts = counts[valid_mask]
+    largest_label = valid_labels[np.argmax(valid_counts)]
+    indices_largest = np.where(labels == largest_label)[0]
+    return pcd_o3d.select_by_index(indices_largest)
+
+def get_poses_from_pointclouds(point_clouds_points, 
+                               point_clouds_colors,
+                               model_path,
+                               green_threshold=0.9,
+                               non_green_max=0.7,
+                               voxel_size=0.005,
+                               mesh_num_points=30000,
+                               debug_dir="debug/pointclouds_with_model",
+                               model_in_mm=True,
+                               dbscan_eps=0.02,
+                               dbscan_min_points=20):
+    """
+    Improves accuracy by:
+      - Denser model sampling (default 30k).
+      - Multi-scale ICP for refined alignment.
+      - Clustering to keep largest green cluster.
+    """
+
+    os.makedirs(debug_dir, exist_ok=True)
+
+    # Load model with higher sampling
+    object_model_o3d = load_model_as_pointcloud(model_path,
+                                                num_points=mesh_num_points,
+                                                model_in_mm=model_in_mm)
+
+    def preprocess_pcd(pcd, voxel):
+        # Instead of removing outliers, let's try skipping or relaxing:
+        # 1) Downsample (optional)
+        if voxel > 0:
+            pcd_down = pcd.voxel_down_sample(voxel)
+        else:
+            pcd_down = pcd
+        
+        # 2) Estimate normals (adjust radius if needed)
+        pcd_down.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                radius=2.0*voxel if voxel>0 else 0.01,
+                max_nn=30
+            )
+        )
+        return pcd_down
+        # If you still want outlier removal, uncomment below:
+        #pcd_inlier, _ = pcd_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        #return pcd_inlier
+
+    def multi_scale_icp(source, target, init_trans):
+        """
+        Perform a multi-scale ICP approach with decreasing distance thresholds.
+        Helps refine alignment in coarse->fine steps.
+        """
+        # Example thresholds (tweak as needed):
+        #  - coarse: 5 * voxel_size
+        #  - medium: 2 * voxel_size
+        #  - fine:   1 * voxel_size (or 0.5*voxel_size)
+        distances = [5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
+        current_transform = init_trans
+        for idx, dist in enumerate(distances):
+            # Could use point-to-plane or point-to-point
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                dist,
+                current_transform,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane()
+            )
+            current_transform = result_icp.transformation
+            print(f"  [Multi-Scale ICP] Level {idx} -> fitness={result_icp.fitness:.4f}, inlier_rmse={result_icp.inlier_rmse:.5f}")
+        return current_transform
+
+    def compute_fpfh(pcd, voxel):
+        # Re-estimate normals (especially if downsample changed geometry)
+        pcd.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                radius=2.0*voxel if voxel>0 else 0.01,
+                max_nn=30
+            )
+        )
+        radius_feature = 5.0 * voxel if voxel>0 else 0.05
+        return o3d.pipelines.registration.compute_fpfh_feature(
+            pcd,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
+        )
+
+    def global_registration(source, target, source_fpfh, target_fpfh):
+        # For coarse global alignment
+        dist_thresh = max(voxel_size * 1.5, 0.002)
+        result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+            source, target,
+            source_fpfh, target_fpfh,
+            mutual_filter=False,
+            max_correspondence_distance=dist_thresh,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+            ransac_n=4,
+            checkers=[
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(dist_thresh)
+            ],
+            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(
+                max_iteration=100000, confidence=0.99
+            )
+        )
+        return result
+
+    def register_green_points_to_model(green_pts_np, model_pcd_o3d, init_transform=None):
+        """
+        Align the green points to the known model with multi-scale ICP.
+        Returns 4x4 from green->model. If fails, returns identity.
+        """
+        if len(green_pts_np) < 10:
+            print("    Not enough green points (<10). Identity.")
+            return np.eye(4)
+
+        # Convert to open3d
+        green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
+
+        # 1) Keep only largest cluster
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
+        if len(largest_cluster.points) < 10:
+            print("    Largest cluster <10 points, identity.")
+            return np.eye(4)
+
+        # 2) Preprocess
+        green_o3d_clean = preprocess_pcd(largest_cluster, voxel_size)
+        model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
+
+        if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
+            print("    After cleaning, too few points. Identity.")
+            return np.eye(4)
+
+        # 3) If no initial transform, do global reg
+        if init_transform is None:
+            src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
+            tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
+            result_ransac = global_registration(green_o3d_clean, model_o3d_clean, src_fpfh, tgt_fpfh)
+            print(f"    RANSAC -> fitness={result_ransac.fitness:.4f}, rmse={result_ransac.inlier_rmse:.5f}")
+            init_transform = result_ransac.transformation
+
+        # 4) Multi-scale ICP refinement
+        final_transform = multi_scale_icp(green_o3d_clean, model_o3d_clean, init_transform)
+        return final_transform
 
     poses = []
-    # fixed bounding box dimensions
-    box_dims  = np.array([0.063045, 0.204516, 0.091946])
-    half_dims = 0.5 * box_dims
+    prev_transform = None
 
-    # thresholds for selecting "very green" points
-    green_threshold = 0.9
-    non_green_max   = 0.7
-
-    # --------------------------------------------------------
-    # Helper: 1D sliding-window to find intervals of length L
-    # that contain the maximum # of points. We'll return the
-    # intervals (by their center) that achieve this max coverage.
-    # --------------------------------------------------------
-    def best_1d_intervals(coords, L):
-        """
-        coords : (N,) array, sorted ascending
-        L      : length of the bounding box in 1D
-        Returns: list of center positions that yield the maximum coverage
-        """
-        N = len(coords)
-        if N == 0:
-            return [0.0]  # trivial fallback
-
-        left = 0
-        max_count = 0
-        best_centers = []
-
-        for right in range(N):
-            # Move left pointer while the interval [coords[left], coords[right]] is bigger than L
-            while coords[right] - coords[left] > L:
-                left += 1
-            # Now the interval from coords[left] to coords[right] is <= L
-            window_count = right - left + 1
-            if window_count > max_count:
-                max_count = window_count
-                # The best center in 1D for an interval [a, b] of length <= L can be anywhere
-                # between (a + L/2) and (b - L/2). A simple choice is the midpoint of [a, b].
-                a = coords[left]
-                b = coords[right]
-                center = 0.5 * (a + b)
-                best_centers = [center]
-            elif window_count == max_count:
-                # Add the center for this interval as well
-                a = coords[left]
-                b = coords[right]
-                center = 0.5 * (a + b)
-                best_centers.append(center)
-
-        # remove duplicates (just in case)
-        best_centers = list(set(best_centers))
-        return best_centers
-
-    # Loop over each point cloud
-    for pts, cols in zip(point_clouds_points, point_clouds_colors):
-        # 1) Filter green points
-        green_mask = (
-            (cols[:, 1] > green_threshold) &
-            (cols[:, 0] < non_green_max) &
-            (cols[:, 2] < non_green_max)
+    for i, (pts, cols) in enumerate(zip(point_clouds_points, point_clouds_colors)):
+        print(f"\n=== Frame {i} ===")
+        mask = (
+            (cols[:,1] >= green_threshold) &
+            (cols[:,0] <= non_green_max) &
+            (cols[:,2] <= non_green_max)
         )
-        green_pts = pts[green_mask]
+        green_pts = pts[mask]
+        print(f"  #points={len(pts)}, #green={len(green_pts)}")
 
         if len(green_pts) == 0:
-            # No green points => identity pose
+            print(f"  No green points, identity.")
             poses.append(np.eye(4))
             continue
 
-        # 2) PCA orientation
-        mean = np.mean(green_pts, axis=0)
-        cov  = np.cov(green_pts.T)
-        e_vals, e_vecs = np.linalg.eigh(cov)
-        order = e_vals.argsort()[::-1]
-        e_vecs = e_vecs[:, order]
-        # ensure right-handed
-        if np.linalg.det(e_vecs) < 0:
-            e_vecs[:, 2] *= -1
-        R = e_vecs  # local->global rotation
+        transform_green_to_model = register_green_points_to_model(green_pts, object_model_o3d, init_transform=prev_transform)
+        T_model_in_cloud = np.linalg.inv(transform_green_to_model)
+        poses.append(T_model_in_cloud)
+        prev_transform = transform_green_to_model
 
-        # 3) Transform green points into local frame
-        local_pts = (green_pts - mean) @ R  # shape: (N_g, 3)
-
-        # 4) For each axis i, find 1D intervals that yield max coverage
-        # Sort points along each local axis first
-        sorted_x = np.sort(local_pts[:, 0])
-        sorted_y = np.sort(local_pts[:, 1])
-        sorted_z = np.sort(local_pts[:, 2])
-
-        candidates_x = best_1d_intervals(sorted_x, box_dims[0])
-        candidates_y = best_1d_intervals(sorted_y, box_dims[1])
-        candidates_z = best_1d_intervals(sorted_z, box_dims[2])
-
-        # 5) Combine the candidate centers for x, y, z
-        best_count = -1
-        best_center_local = np.zeros(3)
-
-        for cx in candidates_x:
-            for cy in candidates_y:
-                for cz in candidates_z:
-                    center_local = np.array([cx, cy, cz])
-                    # Count how many local_pts are inside +/- half_dims
-                    diff = local_pts - center_local
-                    inside_mask = np.all(np.abs(diff) <= half_dims, axis=1)
-                    ccount = np.count_nonzero(inside_mask)
-                    if ccount > best_count:
-                        best_count = ccount
-                        best_center_local = center_local
-
-        # 6) Convert best center back to global coords
-        box_center_global = mean + R @ best_center_local
-
-        # Build homogeneous transform
-        T = np.eye(4)
-        T[:3, :3] = R
-        T[:3, 3]  = box_center_global
-        poses.append(T)
+        # Visualization
+        green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
+        green_pcd.colors = o3d.utility.Vector3dVector(np.tile([0,1,0], (len(green_pts),1)))
+        model_copy = copy.deepcopy(object_model_o3d)
+        model_copy.transform(T_model_in_cloud)
+        if len(model_copy.points) > 0:
+            model_copy.colors = o3d.utility.Vector3dVector(np.tile([1,0,0], (len(model_copy.points),1)))
+        out_pcd = model_copy + green_pcd
+        out_path = os.path.join(debug_dir, f"frame_{i:04d}.ply")
+        o3d.io.write_point_cloud(out_path, out_pcd)
+        print(f"  Saved debug PLY: {out_path}")
 
     return poses
 
-
-# def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
-#     """
-#     Given a list of point-clouds (points and corresponding colors),
-#     finds, for each point-cloud, a 4x4 SE(3) pose matrix of a fixed-size
-#     bounding box that encloses the maximum number of 'very green' points.
-    
-#     :param point_clouds_points: list of arrays, where each array is shape (N, 3)
-#                                 representing (x, y, z) for N points.
-#     :param point_clouds_colors: list of arrays, where each array is shape (N, 3)
-#                                 representing color channels (R, G, B) in [0, 1]
-#                                 for the same N points.
-#     :return: a list of 4x4 numpy arrays, each the SE(3) pose of the bounding box
-#     """
-    
-#     # Fixed bounding box dimensions (X, Y, Z)
-#     box_dims = np.array([0.063045, 0.204516, 0.091946])
-    
-#     # Number of random orientations to sample
-#     num_random_orientations = 200  # Increase for better coverage (but more computation)
-    
-#     poses = []
-    
-#     for points, colors in zip(point_clouds_points, point_clouds_colors):
-#         # ----------------------------------------------------
-#         # 1) Filter to get the 'very green' points
-#         # ----------------------------------------------------
-#         # Example thresholding; adjust to your needs/data:
-#         #   - G significantly larger than R and B
-#         #   - G absolutely above a certain threshold
-#         R = colors[:, 0]
-#         G = colors[:, 1]
-#         B = colors[:, 2]
-        
-#         # A simple "very green" condition:
-#         green_mask = (G > 0.5) & ((G - R) > 0.2) & ((G - B) > 0.2)
-        
-#         green_points = points[green_mask]
-        
-#         # If there are no green points at all, just return an identity pose
-#         # or some default. We'll do that as a fallback.
-#         if len(green_points) == 0:
-#             poses.append(np.eye(4))
-#             continue
-        
-#         # ----------------------------------------------------
-#         # 2) Randomly sample orientations in SO(3).
-#         #    We'll sample random Euler angles for illustration.
-#         # ----------------------------------------------------
-#         # A small helper to create rotation matrix from Euler angles:
-#         def euler_to_rot3(euler_angles):
-#             """ Convert euler angles (rx, ry, rz) to a 3x3 rotation matrix. """
-#             rx, ry, rz = euler_angles
-#             # Rotation about X
-#             Rx = np.array([
-#                 [1,             0,              0],
-#                 [0,  np.cos(rx),   -np.sin(rx)],
-#                 [0,  np.sin(rx),    np.cos(rx)]
-#             ])
-#             # Rotation about Y
-#             Ry = np.array([
-#                 [ np.cos(ry), 0, np.sin(ry)],
-#                 [          0, 1,          0],
-#                 [-np.sin(ry), 0, np.cos(ry)]
-#             ])
-#             # Rotation about Z
-#             Rz = np.array([
-#                 [np.cos(rz), -np.sin(rz), 0],
-#                 [np.sin(rz),  np.cos(rz), 0],
-#                 [         0,           0, 1]
-#             ])
-#             return Rz @ Ry @ Rx
-        
-#         # Pre-generate a list of random rotations:
-#         random_orientations = []
-#         for _ in range(num_random_orientations):
-#             # Sample each euler angle in [-pi, pi], for instance
-#             rx = np.random.uniform(-np.pi, np.pi)
-#             ry = np.random.uniform(-np.pi, np.pi)
-#             rz = np.random.uniform(-np.pi, np.pi)
-#             R_rand = euler_to_rot3((rx, ry, rz))
-#             random_orientations.append(R_rand)
-        
-#         # Also add an identity orientation as a candidate
-#         random_orientations.append(np.eye(3))
-        
-#         # ----------------------------------------------------
-#         # 3) For each orientation, transform points, then
-#         #    find the best 3D axis-aligned bounding box center
-#         #    of size `box_dims` in that rotated space that
-#         #    encloses the maximum green points.
-#         # ----------------------------------------------------
-        
-#         max_inliers = 0
-#         best_overall_center = None
-#         best_overall_rotation = None
-        
-#         # We'll define half-dims for convenience
-#         half_dims = 0.5 * box_dims
-        
-#         # A function to count how many points are in the box
-#         # from (center - half_dims) to (center + half_dims).
-#         def count_inliers(rot_pts, candidate_center):
-#             """
-#             rot_pts: Nx3 points in the rotated frame
-#             candidate_center: the center of the bounding box (in rotated frame)
-#             """
-#             lower = candidate_center - half_dims
-#             upper = candidate_center + half_dims
-            
-#             mask = (
-#                 (rot_pts[:, 0] >= lower[0]) & (rot_pts[:, 0] <= upper[0]) &
-#                 (rot_pts[:, 1] >= lower[1]) & (rot_pts[:, 1] <= upper[1]) &
-#                 (rot_pts[:, 2] >= lower[2]) & (rot_pts[:, 2] <= upper[2])
-#             )
-#             return np.count_nonzero(mask)
-        
-#         # A helper to get candidate 1D intervals of length L that cover the
-#         # max number of points. Returns a small set of intervals that achieve
-#         # near-maximum coverage. We'll do a standard sliding approach on sorted coords.
-#         def best_1d_intervals(coords, L):
-#             """
-#             coords: 1D numpy array of the coordinate to search over
-#             L: the length of the bounding box dimension
-#             returns: list of (start, end) intervals that have near-max coverage
-#             """
-#             sorted_coords = np.sort(coords)
-#             N = len(sorted_coords)
-#             if N == 0:
-#                 return [(0.0, L)]  # trivial fallback
-            
-#             best_count = 0
-#             best_intervals = []
-#             left = 0
-#             for right in range(N):
-#                 # Move left pointer while interval is too large
-#                 while sorted_coords[right] - sorted_coords[left] > L:
-#                     left += 1
-#                 # Now [sorted_coords[left], sorted_coords[right]] <= L
-#                 window_count = (right - left + 1)
-#                 if window_count > best_count:
-#                     best_count = window_count
-#                     best_intervals = [(sorted_coords[left], sorted_coords[left] + L)]
-#                 elif window_count == best_count:
-#                     best_intervals.append((sorted_coords[left], sorted_coords[left] + L))
-            
-#             return best_intervals
-        
-#         # Main search over orientations
-#         for R_candidate in random_orientations:
-#             # Transform green points into this orientation
-#             # We'll treat the origin as (0,0,0) for rotation only
-#             rotated_points = green_points @ R_candidate.T  # shape (G, 3)
-            
-#             # For each dimension, find best intervals of length box_dims[d]
-#             x_intervals = best_1d_intervals(rotated_points[:, 0], box_dims[0])
-#             y_intervals = best_1d_intervals(rotated_points[:, 1], box_dims[1])
-#             z_intervals = best_1d_intervals(rotated_points[:, 2], box_dims[2])
-            
-#             # We form candidate centers by taking midpoints from each dimension
-#             # We'll combine them in a small cross-product to avoid enumerating too many.
-#             # If each dimension has M_x, M_y, M_z best intervals, we get M_x*M_y*M_z combos
-#             candidate_centers = []
-#             for (x_start, x_end) in x_intervals:
-#                 x_center = 0.5 * (x_start + x_end)
-#                 for (y_start, y_end) in y_intervals:
-#                     y_center = 0.5 * (y_start + y_end)
-#                     for (z_start, z_end) in z_intervals:
-#                         z_center = 0.5 * (z_start + z_end)
-#                         candidate_centers.append(np.array([x_center, y_center, z_center]))
-            
-#             # Evaluate each candidate center
-#             for c_center in candidate_centers:
-#                 # Count how many green points fall inside the box
-#                 inliers = count_inliers(rotated_points, c_center)
-#                 if inliers > max_inliers:
-#                     max_inliers = inliers
-#                     best_overall_center = c_center
-#                     best_overall_rotation = R_candidate
-        
-#         # ----------------------------------------------------
-#         # 4) We now have best rotation and best center in the
-#         #    rotated space. We must convert center back to the
-#         #    original coordinate system. That is:
-#         #
-#         #    p_in_original = R * p_in_rotated
-#         #
-#         #    But c_center is in the rotated frame, so the actual
-#         #    center c_orig = R_candidate * c_center.
-#         # ----------------------------------------------------
-#         if best_overall_rotation is None:
-#             # fallback if something went wrong
-#             poses.append(np.eye(4))
-#             continue
-        
-#         R_final = best_overall_rotation
-#         c_rotated = best_overall_center
-#         c_final = R_final @ c_rotated  # Convert center back to original frame
-        
-#         # ----------------------------------------------------
-#         # 5) Construct the 4x4 pose matrix
-#         # ----------------------------------------------------
-#         T = np.eye(4)
-#         T[:3, :3] = R_final
-#         T[:3, 3] = c_final
-        
-#         poses.append(T)
-    
-#     return poses
-
-
-def debug_pointcloud_poses(point_clouds_points, point_clouds_colors, output_dir="debug/pointclouds"):
-    """
-    Save point clouds with colors and detected bounding boxes for visualization.
-
-    Args:
-        point_clouds_points (list): List of (N,3) numpy arrays
-        point_clouds_colors (list): List of (N,3) numpy arrays (0-255)
-        output_dir (str): Output directory for PLY files
-    """
-    os.makedirs(output_dir, exist_ok=True)
-
-    for idx, (points, colors) in enumerate(zip(point_clouds_points, point_clouds_colors)):
-        # Create main colored point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        pcd.colors = o3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
-
-        # Save the original point cloud
-        o3d.io.write_point_cloud(os.path.join(output_dir, f"pc_{idx:03d}.ply"), pcd)
-
-        # Filter green points
-        green_mask = (colors[:, 1] > colors[:, 0]) & \
-                     (colors[:, 1] > colors[:, 2]) & \
-                     (colors[:, 1] > 100) & \
-                     (colors[:, 0] < 100) & \
-                     (colors[:, 2] < 100)
-        green_points = points[green_mask]
-
-        if len(green_points) > 10:
-            # Create green points point cloud
-            green_pcd = o3d.geometry.PointCloud()
-            green_pcd.points = o3d.utility.Vector3dVector(green_points)
-            green_pcd.paint_uniform_color([0, 1, 0])  # Green color
-            
-            # Save the green points separately
-            o3d.io.write_point_cloud(os.path.join(output_dir, f"green_pc_{idx:03d}.ply"), green_pcd)
-
-            # Compute Oriented Bounding Box (OBB)
-            obb = green_pcd.get_oriented_bounding_box()
-            obb.color = [1, 0, 0]  # Red color for bbox
-
-            # Convert OBB to a LineSet for visualization
-            obb_lineset = o3d.geometry.LineSet.create_from_oriented_bounding_box(obb)
-
-            # Save bounding box separately
-            o3d.io.write_line_set(os.path.join(output_dir, f"obb_{idx:03d}.ply"), obb_lineset)
-
-            # Create a coordinate frame at the bottom center of the box
-            extent = obb.extent
-            R = obb.R
-            bottom_center = obb.center + R @ np.array([0, 0, -extent[2] / 2])
-            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            coord_frame.translate(bottom_center)
-            coord_frame.rotate(R)
-
-            # Save coordinate frame separately
-            o3d.io.write_triangle_mesh(os.path.join(output_dir, f"coord_frame_{idx:03d}.ply"), coord_frame)
-
-            # Visualize all elements
-            o3d.visualization.draw_geometries([pcd, green_pcd, obb_lineset, coord_frame])
-
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
-    hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+    hand_mesh="",
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
@@ -805,15 +838,10 @@ def imitate_trajectory_with_action_identifier(
     """
     # 0) Create output directory.
     os.makedirs(output_dir, exist_ok=True)
-
-    # 1) Build object dataset.
-    hand_object_dataset = make_object_dataset_from_folder(Path(hand_mesh_dir))
-
     # 2) Load the pose estimation model once.
     model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
     model_info = NAMED_MODELS[model_name]
     logger.info(f"Loading model {model_name} once at script start.")
-    hand_pose_estimator = load_named_model(model_name, hand_object_dataset).cuda()
 
     # 3) Preprocess dataset => convert HDF5 to Zarr.
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -892,18 +920,7 @@ def imitate_trajectory_with_action_identifier(
         mode="rgb_array",
         camera_name=camera_names[1],
     )
-
-    # 8) Build the ActionIdentifierMegapose using all camera info.
-    # Here we update the signature to accept dictionaries instead of individual cameras.
-    action_identifier = ActionIdentifierMegapose(
-        pose_estimator=hand_pose_estimator,
-        camera_Rs=camera_Rs,  # dictionary mapping camera name -> extrinsic matrix
-        camera_Ks=camera_Ks,  # dictionary mapping camera name -> intrinsic matrix
-        model_info=model_info,
-        batch_size=batch_size,
-        scale_translation=80.0,
-    )
-
+    
     n_success = 0
     total_n = 0
     results = []
@@ -944,15 +961,18 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
                     
-            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors)
+            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh)
             
-            save_pointclouds_with_bbox_as_ply(
-                point_clouds_points,
-                point_clouds_colors,
-                all_hand_poses,
-                box_dims=np.array([0.063045, 0.204516, 0.091946]),
-                output_dir="debug/pointcloud_traj"
-            )
+            # for pose in all_hand_poses:
+            #     print(pose[:3, 3])
+            
+            # save_pointclouds_with_bbox_as_ply(
+            #     point_clouds_points,
+            #     point_clouds_colors,
+            #     all_hand_poses,
+            #     box_dims=np.array([0.063045, 0.204516, 0.091946]),
+            #     output_dir="debug/pointcloud_traj"
+            # )
             
             # debug_pointcloud_poses(point_clouds_points[:10], point_clouds_colors[:10], output_dir=os.path.join(output_dir, "pointcloud_debug"))
 
@@ -1033,7 +1053,7 @@ def imitate_trajectory_with_action_identifier(
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
-        hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
+        hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
         num_demos=3,
         save_webp=False,
