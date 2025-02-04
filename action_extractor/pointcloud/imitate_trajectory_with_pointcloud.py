@@ -259,24 +259,32 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     return all_actions
 
-def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
+def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, save_debug=True):
     """
-    Estimate accurate poses from green points in point clouds using a predefined rectangular box.
-    
-    Args:
+    Estimate highly accurate poses from green points in point clouds using PCA, robust filtering, and ICP.
+    Optionally saves visualizations of bounding boxes.
+
+    Args:print("Initial Pose:", initial_pose)
         point_clouds_points (list): List of (N,3) numpy arrays of 3D points (meters)
         point_clouds_colors (list): List of (N,3) numpy arrays of RGB colors (0-255)
-    
+        save_debug (bool): If True, saves the filtered point clouds and bounding boxes as .ply files.
+
     Returns:
         list: SE(3) pose matrices (4x4) for each point cloud
     """
-    # Predefined box dimensions (converted from mm to meters)
+    # Known object dimensions (converted from mm to meters)
     box_dims = np.array([0.063045, 0.204516, 0.091946])  # [thickness, width, length]
+    box_dims = np.array([0.07, 0.25, 0.1])  # [thickness, width, length]
+
+    # Create debug directory if needed
+    debug_dir = "debug/pointclouds_bbox"
+    if save_debug and not os.path.exists(debug_dir):
+        os.makedirs(debug_dir)
 
     poses = []
 
-    for points, colors in zip(point_clouds_points, point_clouds_colors):
-        # 1. Filter green points using a strict threshold
+    for i, (points, colors) in enumerate(zip(point_clouds_points, point_clouds_colors)):
+        # 1. Filter green points with a stricter threshold
         green_mask = (colors[:, 1] > colors[:, 0]) & \
                      (colors[:, 1] > colors[:, 2]) & \
                      (colors[:, 1] > 200) & \
@@ -285,49 +293,119 @@ def get_poses_from_pointclouds(point_clouds_points, point_clouds_colors):
         
         green_points = points[green_mask]
         
-        if len(green_points) < 10:  # Skip if insufficient points
+        if len(green_points) < 10:  # Skip if too few points
             poses.append(np.eye(4))
             continue
 
-        # 2. Create Open3D point cloud and remove outliers
+        # 2. Create Open3D point cloud
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(green_points)
 
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        # 3. Apply filtering for better accuracy
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=30, std_ratio=1.5)  # Remove noise
+        pcd = pcd.voxel_down_sample(voxel_size=0.002)  # Downsample for uniformity
 
-        # 3. Compute Oriented Bounding Box (OBB)
-        obb = pcd.get_oriented_bounding_box()
-        
-        # 4. Align OBB to the known box dimensions
-        R_obb = obb.R  # Rotation matrix (3x3)
-        center = obb.center  # OBB center
+        # 4. Estimate orientation using PCA
+        pca = PCA(n_components=3)
+        pca.fit(np.asarray(pcd.points))
 
-        # Reorder the OBB axes to match the known box dimensions
-        obb_dims = obb.extent  # Estimated dimensions
+        # Principal axes (sorted by variance)
+        R_pca = pca.components_.T  # Rotation matrix
 
-        # Find the best permutation of obb_dims that matches box_dims
-        permuted_dims = sorted(obb_dims)
-        sorted_box_dims = sorted(box_dims)
+        # Ensure right-handed coordinate system (if necessary)
+        if np.linalg.det(R_pca) < 0:
+            R_pca[:, 2] *= -1
 
-        if not np.allclose(permuted_dims, sorted_box_dims, atol=0.02):  # Allow small tolerance
-            print("Warning: OBB dimensions don't match the expected box size!")
+        # Get bounding box center
+        center = np.mean(np.asarray(pcd.points), axis=0)
 
-        # Align OBB axes with known dimensions
-        axis_permutation = np.argsort(obb_dims)  # Reorder axes to match sorted dimensions
-        aligned_R = R_obb[:, axis_permutation]  # Apply permutation to rotation matrix
+        # Reorder axes to match known box dimensions
+        sorted_pca_dims = np.sort(pca.explained_variance_)
+        sorted_box_dims = np.sort(box_dims)
 
-        # 5. Compute the bottom center (assuming thickness is along Z)
-        bottom_center_local = np.array([0, 0, -box_dims[2] / 2])  # Local frame
+        axis_permutation = np.argsort(sorted_pca_dims)  # Match PCA axes to box
+        aligned_R = R_pca[:, axis_permutation]
+
+        # Compute bottom center
+        bottom_center_local = np.array([0, 0, -box_dims[2] / 2])
         bottom_center_world = center + aligned_R @ bottom_center_local
 
-        # 6. Construct SE(3) pose matrix
-        pose = np.eye(4)
-        pose[:3, :3] = aligned_R
-        pose[:3, 3] = bottom_center_world
+        # 5. Construct initial SE(3) transformation
+        initial_pose = np.eye(4)
+        initial_pose[:3, :3] = aligned_R
+        initial_pose[:3, 3] = bottom_center_world
+
+        # 6. Use ICP for fine alignment
+        # box_pcd = o3d.geometry.PointCloud()
+        # box_points = np.array([
+        #     [-box_dims[0] / 2, -box_dims[1] / 2, -box_dims[2] / 2],
+        #     [ box_dims[0] / 2, -box_dims[1] / 2, -box_dims[2] / 2],
+        #     [ box_dims[0] / 2,  box_dims[1] / 2, -box_dims[2] / 2],
+        #     [-box_dims[0] / 2,  box_dims[1] / 2, -box_dims[2] / 2],
+        #     [-box_dims[0] / 2, -box_dims[1] / 2,  box_dims[2] / 2],
+        #     [ box_dims[0] / 2, -box_dims[1] / 2,  box_dims[2] / 2],
+        #     [ box_dims[0] / 2,  box_dims[1] / 2,  box_dims[2] / 2],
+        #     [-box_dims[0] / 2,  box_dims[1] / 2,  box_dims[2] / 2]
+        # ])
+        # box_pcd.points = o3d.utility.Vector3dVector(box_points)
+
+        # # Transform box to initial pose
+        # box_pcd.transform(initial_pose)
         
-        poses.append(pose)
+        # box_pcd.estimate_normals(
+        #     search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=30)
+        # )
+
+        # # Apply point-to-plane ICP
+        # reg_p2plane = o3d.pipelines.registration.registration_icp(
+        #     pcd, box_pcd, max_correspondence_distance=0.005,
+        #     estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+        #     criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+        # )
+
+        # refined_pose = reg_p2plane.transformation
+        poses.append(initial_pose)
+
+        # 7. Save debug visualization (if enabled)
+        if save_debug:
+            # Save filtered point cloud
+            pcd_file_path = f"{debug_dir}/pcd_{i}.ply"
+            print(f"Saving filtered point cloud to {pcd_file_path}")
+            o3d.io.write_point_cloud(pcd_file_path, pcd)
+            
+            # Create bounding box edges for visualization with thicker lines
+            obb = o3d.geometry.OrientedBoundingBox(center, aligned_R, box_dims)
+            bbox_edges = obb.get_box_points()
+            bbox_lines = [
+                [0, 1], [1, 2], [2, 3], [3, 0],  # Bottom face
+                [4, 5], [5, 6], [6, 7], [7, 4],  # Top face
+                [0, 4], [1, 5], [2, 6], [3, 7]   # Vertical edges
+            ]
+            bbox_line_set = o3d.geometry.LineSet(
+                points=o3d.utility.Vector3dVector(bbox_edges),
+                lines=o3d.utility.Vector2iVector(bbox_lines)
+            )
+            
+            # Increase the line width to make the bounding box easier to see
+            bbox_line_set.paint_uniform_color([1, 0, 0])  # Red color for visibility
+            bbox_line_set.lines = o3d.utility.Vector2iVector(bbox_lines)  # Reapply lines
+
+            # Save bounding box as .ply
+            bbox_file_path = f"{debug_dir}/bbox_{i}.ply"
+            print(f"Saving bounding box to {bbox_file_path}")
+            o3d.io.write_line_set(bbox_file_path, bbox_line_set)
+
+            # Combine point cloud and bounding box into a single visualization list
+            combined_geometries = [pcd, bbox_line_set]
+            
+            # Save the combined point cloud and bounding box as separate .ply files for later use
+            combined_ply_path = f"{debug_dir}/combined_{i}.ply"
+            print(f"Saving combined visualization to {combined_ply_path}")
+            o3d.io.write_point_cloud(combined_ply_path, pcd)  # Saving just the point cloud as usual
+            o3d.io.write_line_set(f"{debug_dir}/combined_bbox_{i}.ply", bbox_line_set)  # Saving just the bounding box
 
     return poses
+
 
 def debug_pointcloud_poses(point_clouds_points, point_clouds_colors, output_dir="debug/pointclouds"):
     """
@@ -560,7 +638,8 @@ def imitate_trajectory_with_action_identifier(
             actions_for_demo = poses_to_absolute_actions(
                 poses=all_hand_poses,
                 gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                env=env_camera0  # using camera0 environment for execution
+                env=env_camera0,  # using camera0 environment for execution
+                smooth=False
             )
 
             initial_state = root_z["data"][demo]["states"][0]

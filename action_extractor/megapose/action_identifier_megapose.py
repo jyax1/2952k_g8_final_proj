@@ -537,6 +537,7 @@ def poses_to_absolute_actions(
     poses, 
     gripper_actions,
     env,
+    smooth=True
 ):
     """
     We smooth out the translation portion by looking ahead for a future
@@ -575,7 +576,10 @@ def poses_to_absolute_actions(
         return np.zeros((0, 7), dtype=np.float32)
 
     # 1) Compute a smoothed set of positions
-    smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    if smooth:
+        smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    else:
+        smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
 
     # 2) Start from environment's known initial eef quaternion 
     #    (assuming it's [w, x, y, z], confirm shape/order as needed).
