@@ -33,6 +33,12 @@ from robomimic.utils.obs_utils import DEPTH_MINMAX
 
 logger = get_logger(__name__)
 
+from robosuite.utils.camera_utils import (
+    get_camera_extrinsic_matrix,
+    get_camera_intrinsic_matrix,
+)
+
+
 # -----------------------------------------------------------------------------
 # Make a dataset from your dedicated mesh folder
 # -----------------------------------------------------------------------------
@@ -529,6 +535,127 @@ def smooth_positions(
 
 def poses_to_absolute_actions(
     poses, 
+    gripper_actions,
+    env,
+):
+    """
+    We smooth out the translation portion by looking ahead for a future
+    index j where the jump is acceptable, and linearly interpolate intermediate
+    positions. If no such j is found (end of trajectory), we do a linear 
+    extrapolation from the past velocity or hold the last stable position.
+
+    The orientation logic remains the same as before:
+    - orientation is computed incrementally from poses[i]->poses[i+1].
+    - we do not alter orientation if there's a large jump in position.
+
+    Steps in detail:
+    1) SMOOTH POSITIONS:
+        - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
+        - Starting from i=0, if jump i->i+1 is small, keep it.
+        If jump is big, search forward for j with a small jump from i.
+        If found, linearly interpolate from i..j.
+        If not found (end), extrapolate or hold constant.
+    2) ORIENTATION:
+        - For each i in [0 .. num_samples-2],
+        compute delta quaternion from poses[i]-> poses[i+1].
+        Accumulate into `current_orientation`.
+        Convert to axis-angle (with sign unification).
+    3) BUILD ACTIONS:
+        - For each i in [0 .. num_samples-2], the final action 
+        uses `smoothed_positions[i+1]` as [px,py,pz] 
+        and the just-computed orientation as [rx,ry,rz].
+        - Set gripper=1.0 or your logic.
+
+    Returns:
+    all_actions of shape (num_samples-1, 7).
+    """
+
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute a smoothed set of positions
+    smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+
+    # 2) Start from environment's known initial eef quaternion 
+    #    (assuming it's [w, x, y, z], confirm shape/order as needed).
+    # starting_orientation = env.env.env._eef_xquat.astype(np.float32)
+    current_orientation = env.env.env._eef_xquat.astype(np.float32)
+    current_orientation = quat_normalize(current_orientation)
+    current_position = env.env.env._eef_xpos.astype(np.float32)
+
+    # We'll have num_actions = num_samples - 1
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+
+    prev_rvec = None
+    z_offset = None
+
+    for i in range(num_actions):
+        # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
+        # --- Position from the precomputed 'smoothed_positions' ---
+        if z_offset is None:
+            z_offset = smoothed_positions[i][2] - current_position[2]
+            
+        px, py, pz = smoothed_positions[i+1]
+        
+        R_i  = poses[i][:3, :3]
+        R_i1 = poses[i+1][:3, :3]
+
+        q_i  = rotation_matrix_to_quaternion(R_i)
+        q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
+        q_inv = quat_inv(q_i)
+
+        q_delta = quat_multiply(q_inv, q_i1)
+        q_delta = quat_normalize(q_delta)
+        
+        '''
+        Only z-axis rotation allowed
+        '''
+        # rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
+        # roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+
+        # # Zero out roll & pitch, keep only yaw
+        # roll = 0.0
+        # pitch = 0.0
+
+        # # Build new rotation solely around z (yaw)
+        # rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
+        # q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
+        '''
+        Only z-axis rotation allowed
+        '''
+
+        # Accumulate orientation
+        current_orientation = quat_multiply(current_orientation, q_delta)
+        current_orientation = quat_normalize(current_orientation)
+
+        # Convert to axis-angle, unify sign
+        rvec = quat2axisangle(current_orientation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+        
+        # print(f"pz_front: {pz_front}, pz_side: {pz}")
+        pz -= z_offset
+
+        # Build the 7D action
+        current_position = np.array([px, py, pz], dtype=np.float32)
+        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i][-1] = gripper_actions[i]
+
+    # Add 10 buffer absolute actions that are copies of the last action
+    for i in range(10):
+        all_actions[num_actions+i] = all_actions[num_actions-1]
+        
+    return all_actions
+
+def poses_to_absolute_actions_two_cameras(
+    poses, 
     poses_side, 
     gripper_actions,
     env,
@@ -903,7 +1030,6 @@ def poses_to_absolute_actions_average(
     return all_actions
 
 def poses_to_absolute_actions_from_multiple_cameras(
-    self,
     poses_dict: dict[str, list[Optional[np.ndarray]]],
     gripper_actions: list[float],
     env,
@@ -961,7 +1087,7 @@ def poses_to_absolute_actions_from_multiple_cameras(
         for cam, pos_array in smoothed_positions_dict.items():
             pos = pos_array[i+1]
             # Use the translation part of the camera extrinsic matrix as the camera's location.
-            cam_pos = self.camera_Rs[cam][:3, 3]
+            cam_pos = get_camera_extrinsic_matrix(env.env.env.sim, camera_name=cam)[:3, 3]
             dist = np.linalg.norm(pos - cam_pos) + epsilon
             weight = 1.0 / dist
             pos_sum += weight * pos
@@ -994,7 +1120,7 @@ def poses_to_absolute_actions_from_multiple_cameras(
             # Compute weight based on distance as before.
             pos_array = smoothed_positions_dict[cam]
             pos_cam = pos_array[i+1]
-            cam_pos = self.camera_Rs[cam][:3, 3]
+            cam_pos = get_camera_extrinsic_matrix(env.env.env.sim, camera_name=cam)[:3, 3]
             dist = np.linalg.norm(pos_cam - cam_pos) + epsilon
             weight = 1.0 / dist
             # For combining quaternions, we use slerp.

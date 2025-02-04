@@ -386,10 +386,11 @@ def imitate_trajectory_with_action_identifier(
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
-            # Create video paths for each camera.
-            video_paths = { cam: os.path.join(output_dir, f"{demo_id}_{cam}.mp4") for cam in camera_names }
-            # For quadrant (or multi-view) combination, you might later combine all videos.
-            combined_video_path = os.path.join(output_dir, f"{demo_id}_combined.mp4")
+            upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
+            upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
+            lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
+            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
+            combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
             obs_group = root_z["data"][demo]["obs"]
             num_samples = obs_group[cameras[0]].shape[0]
@@ -405,11 +406,18 @@ def imitate_trajectory_with_action_identifier(
                     cameras_depth[base] = [obs_group[depth_key][i] for i in range(num_samples)]
                 else:
                     cameras_depth[base] = None
+                    
+            with imageio.get_writer(upper_left_video_path, fps=20) as writer:
+                for frame in cameras_frames[camera_names[0]]:
+                    writer.append_data(frame)
+            with imageio.get_writer(lower_left_video_path, fps=20) as writer:
+                for frame in cameras_frames[camera_names[1]]:
+                    writer.append_data(frame)
 
             # 11) Run pose estimation across all cameras.
             # (Assume you have updated get_poses_from_frames to accept dictionaries.)
             cache_cam_string = "_".join(sorted(camera_names))
-            cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug")
+            cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "debug")
             os.makedirs(cache_dir, exist_ok=True)  # Ensure the directory exists
             cache_file = os.path.join(cache_dir, f"hand_poses_{cache_cam_string}_cache.npz")
 
@@ -445,7 +453,7 @@ def imitate_trajectory_with_action_identifier(
             # Top-right video from camera0 environment:
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
-            env_camera0.file_path = video_paths[camera_names[0]]
+            env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
             for action in actions_for_demo:
                 env_camera0.step(action)
@@ -455,7 +463,7 @@ def imitate_trajectory_with_action_identifier(
             # Bottom-right video from camera1 environment:
             env_camera1.reset()
             env_camera1.reset_to({"states": initial_state})
-            env_camera1.file_path = video_paths[camera_names[1]]
+            env_camera1.file_path = lower_right_video_path
             env_camera1.step_count = 0
             for action in actions_for_demo:
                 env_camera1.step(action)
@@ -472,16 +480,16 @@ def imitate_trajectory_with_action_identifier(
             # Combine videos from all cameras (if desired).
             # Here, we assume a function that can combine multiple videos.
             combine_videos_quadrants(
-                video_paths[camera_names[0]],
-                video_paths[camera_names[1]],
-                # For now, if more than 2 cameras are available, you would add them appropriately.
-                video_paths[camera_names[0]],  # placeholder
-                video_paths[camera_names[1]],  # placeholder
+                upper_left_video_path,
+                upper_right_video_path,
+                lower_left_video_path,
+                lower_right_video_path,
                 combined_video_path
             )
-            # Optionally remove the individual videos.
-            for vp in video_paths.values():
-                os.remove(vp)
+            os.remove(upper_left_video_path)
+            os.remove(upper_right_video_path)
+            os.remove(lower_left_video_path)
+            os.remove(lower_right_video_path)
 
     success_rate = (n_success / total_n)*100 if total_n else 0
     results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")
@@ -504,7 +512,7 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_tableview",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
         hand_mesh_dir="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
         num_demos=3,
