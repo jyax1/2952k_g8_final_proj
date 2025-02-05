@@ -643,7 +643,7 @@ def get_poses_from_pointclouds(point_clouds_points,
                                model_path,
                                green_threshold=0.9,
                                non_green_max=0.7,
-                               voxel_size=0.005,
+                               voxel_size=0.001,
                                mesh_num_points=30000,
                                debug_dir="debug/pointclouds_with_model",
                                model_in_mm=True,
@@ -692,19 +692,31 @@ def get_poses_from_pointclouds(point_clouds_points,
         #  - coarse: 5 * voxel_size
         #  - medium: 2 * voxel_size
         #  - fine:   1 * voxel_size (or 0.5*voxel_size)
-        distances = [5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
+        thresholds = [5.0 * voxel_size, 2.0 * voxel_size, 1 * voxel_size]
+        iterations = [1000, 1000, 2000]  # you can tweak these as desired
+
         current_transform = init_trans
-        for idx, dist in enumerate(distances):
-            # Could use point-to-plane or point-to-point
+
+        for idx, (dist, max_iter) in enumerate(zip(thresholds, iterations)):
+            icp_criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=max_iter,
+                relative_fitness=1e-6,  # tighten if you want
+                relative_rmse=1e-6
+            )
+
             result_icp = o3d.pipelines.registration.registration_icp(
                 source,
                 target,
                 dist,
                 current_transform,
-                o3d.pipelines.registration.TransformationEstimationPointToPlane()
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=icp_criteria
             )
+
             current_transform = result_icp.transformation
-            print(f"  [Multi-Scale ICP] Level {idx} -> fitness={result_icp.fitness:.4f}, inlier_rmse={result_icp.inlier_rmse:.5f}")
+            print(f"  [Multi-Scale ICP] Level {idx} (dist={dist:.4f}), "
+                f"iter={max_iter} -> fitness={result_icp.fitness:.4f}, "
+                f"inlier_rmse={result_icp.inlier_rmse:.5f}")
         return current_transform
 
     def compute_fpfh(pcd, voxel):
