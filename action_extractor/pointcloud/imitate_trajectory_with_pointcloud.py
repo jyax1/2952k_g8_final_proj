@@ -541,7 +541,7 @@ def get_poses_from_pointclouds(point_clouds_points,
         best_threshold = threshold
         best_rmse = 1.0
 
-        while threshold >= 1.75 * voxel_size:
+        while threshold >= 1 * voxel_size:
             fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)
             if debug:
                 print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, "
@@ -552,7 +552,7 @@ def get_poses_from_pointclouds(point_clouds_points,
                     print("No iteration budget left, break up/down loop.")
                 break
 
-            if fitness >= 0.96 - 1e-12:
+            if fitness >= 0.98 - 1e-12:
                 threshold *= 0.5
                 current_transform = new_transform
                 if threshold < best_threshold:
@@ -565,15 +565,15 @@ def get_poses_from_pointclouds(point_clouds_points,
                 current_transform = new_transform
 
         # final pass
-        if threshold >= 1.75 * voxel_size:
+        if threshold >= 1 * voxel_size:
             if debug:
-                print("Threshold never shrank below 1.75 * voxel_size.")
+                print("Threshold never shrank below 1 * voxel_size.")
                 print(f"[UpDownICP] Best threshold={best_threshold:.4f}, used_iters={max_total_iterations}, "
                       f"fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
             return best_transform
         else:
             if debug:
-                print(f"Threshold < 1.75 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
+                print(f"Threshold < 1 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
 
         f_final, rmse_final, final_transform, used_iters_final = run_icp(threshold, current_transform)
         if debug:
