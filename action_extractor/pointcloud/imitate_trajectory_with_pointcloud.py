@@ -376,27 +376,17 @@ def save_pointclouds_with_bbox_as_ply(point_clouds_points,
         print(f"Saved {filename}")
 
 def load_model_as_pointcloud(model_path, num_points=30000, model_in_mm=True):
-    """
-    Loads a 3D model (possibly a .ply mesh) and samples points to form a cloud.
-    If model_in_mm=True, convert from millimeters to meters by scaling 0.001.
-    Increasing num_points helps capture finer details for ICP.
-    """
     mesh = o3d.io.read_triangle_mesh(model_path)
     if mesh.is_empty():
         raise ValueError(f"Could not load mesh from: {model_path}")
 
-    # If the model is in mm, scale to m
     if model_in_mm:
         mesh.scale(0.001, center=(0,0,0))
 
-    # Sample points more densely to improve alignment accuracy
     pcd = mesh.sample_points_uniformly(number_of_points=num_points)
     return pcd
 
 def cluster_and_keep_largest(pcd_o3d, eps=0.02, min_points=20):
-    """
-    DBSCAN cluster. Return only largest cluster. 
-    """
     if len(pcd_o3d.points) == 0:
         return pcd_o3d
 
@@ -414,7 +404,7 @@ def cluster_and_keep_largest(pcd_o3d, eps=0.02, min_points=20):
     indices_largest = np.where(labels == largest_label)[0]
     return pcd_o3d.select_by_index(indices_largest)
 
-def get_poses_from_pointclouds(point_clouds_points, 
+def get_poses_from_pointclouds(point_clouds_points,
                                point_clouds_colors,
                                model_path,
                                green_threshold=0.9,
@@ -426,57 +416,39 @@ def get_poses_from_pointclouds(point_clouds_points,
                                dbscan_eps=0.02,
                                dbscan_min_points=20):
     """
-    Improves accuracy by:
-      - Denser model sampling (default 30k).
-      - Multi-scale ICP for refined alignment.
-      - Clustering to keep largest green cluster.
+    Runs global RANSAC multiple times with different seeds when init_transform is None.
+    Chooses whichever RANSAC transform has the highest fitness, then does multi-scale ICP.
     """
 
     os.makedirs(debug_dir, exist_ok=True)
 
-    # Load model with higher sampling
     object_model_o3d = load_model_as_pointcloud(model_path,
                                                 num_points=mesh_num_points,
                                                 model_in_mm=model_in_mm)
 
     def preprocess_pcd(pcd, voxel):
-        # Instead of removing outliers, let's try skipping or relaxing:
-        # 1) Downsample (optional)
         if voxel > 0:
             pcd_down = pcd.voxel_down_sample(voxel)
         else:
             pcd_down = pcd
-        
-        # 2) Estimate normals (adjust radius if needed)
+
         pcd_down.estimate_normals(
             search_param=o3d.geometry.KDTreeSearchParamHybrid(
-                radius=2.0*voxel if voxel>0 else 0.01,
+                radius=2.0 * voxel if voxel > 0 else 0.01,
                 max_nn=30
             )
         )
         return pcd_down
-        # If you still want outlier removal, uncomment below:
-        #pcd_inlier, _ = pcd_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-        #return pcd_inlier
 
     def multi_scale_icp(source, target, init_trans):
-        """
-        Perform a multi-scale ICP approach with decreasing distance thresholds.
-        Helps refine alignment in coarse->fine steps.
-        """
-        # Example thresholds (tweak as needed):
-        #  - coarse: 5 * voxel_size
-        #  - medium: 2 * voxel_size
-        #  - fine:   1 * voxel_size (or 0.5*voxel_size)
         thresholds = [10.0 * voxel_size, 5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
-        iterations = [1000, 20000, 20000, 20000]  # you can tweak these as desired
+        iterations = [1000, 20000, 20000, 20000]
 
         current_transform = init_trans
-
         for idx, (dist, max_iter) in enumerate(zip(thresholds, iterations)):
             icp_criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
                 max_iteration=max_iter,
-                relative_fitness=1e-6,  # tighten if you want
+                relative_fitness=1e-6,
                 relative_rmse=1e-6
             )
 
@@ -491,30 +463,35 @@ def get_poses_from_pointclouds(point_clouds_points,
 
             current_transform = result_icp.transformation
             print(f"  [Multi-Scale ICP] Level {idx} (dist={dist:.4f}), "
-                f"iter={max_iter} -> fitness={result_icp.fitness:.4f}, "
-                f"inlier_rmse={result_icp.inlier_rmse:.5f}")
+                  f"iter={max_iter} -> fitness={result_icp.fitness:.4f}, "
+                  f"inlier_rmse={result_icp.inlier_rmse:.5f}")
+
         return current_transform
 
     def compute_fpfh(pcd, voxel):
-        # Re-estimate normals (especially if downsample changed geometry)
         pcd.estimate_normals(
             search_param=o3d.geometry.KDTreeSearchParamHybrid(
-                radius=2.0*voxel if voxel>0 else 0.01,
+                radius=2.0 * voxel if voxel > 0 else 0.01,
                 max_nn=30
             )
         )
-        radius_feature = 5.0 * voxel if voxel>0 else 0.05
-        return o3d.pipelines.registration.compute_fpfh_feature(
+        radius_feature = 5.0 * voxel if voxel > 0 else 0.05
+        fpfh = o3d.pipelines.registration.compute_fpfh_feature(
             pcd,
             o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
         )
+        return fpfh
 
-    def global_registration(source, target, source_fpfh, target_fpfh):
-        # For coarse global alignment
+    def global_registration(source, target, source_fpfh, target_fpfh, seed):
+        # Set random seed for RANSAC
+        o3d.utility.random.seed(seed)
+
         dist_thresh = max(voxel_size * 1.5, 0.04)
         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-            source, target,
-            source_fpfh, target_fpfh,
+            source,
+            target,
+            source_fpfh,
+            target_fpfh,
             mutual_filter=False,
             max_correspondence_distance=dist_thresh,
             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
@@ -530,24 +507,16 @@ def get_poses_from_pointclouds(point_clouds_points,
         return result
 
     def register_green_points_to_model(green_pts_np, model_pcd_o3d, init_transform=None):
-        """
-        Align the green points to the known model with multi-scale ICP.
-        Returns 4x4 from green->model. If fails, returns identity.
-        """
         if len(green_pts_np) < 10:
             print("    Not enough green points (<10). Identity.")
             return np.eye(4)
 
-        # Convert to open3d
         green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
-
-        # 1) Keep only largest cluster
         largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
         if len(largest_cluster.points) < 10:
             print("    Largest cluster <10 points, identity.")
             return np.eye(4)
 
-        # 2) Preprocess
         green_o3d_clean = preprocess_pcd(largest_cluster, voxel_size)
         model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
 
@@ -555,15 +524,28 @@ def get_poses_from_pointclouds(point_clouds_points,
             print("    After cleaning, too few points. Identity.")
             return np.eye(4)
 
-        # 3) If no initial transform, do global reg 
+        # If no initial transform, we do multiple RANSAC tries with different seeds
         if init_transform is None:
             src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
             tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
-            result_ransac = global_registration(green_o3d_clean, model_o3d_clean, src_fpfh, tgt_fpfh)
-            print(f"    RANSAC -> fitness={result_ransac.fitness:.4f}, rmse={result_ransac.inlier_rmse:.5f}")
-            init_transform = result_ransac.transformation
 
-        # 4) Multi-scale ICP refinement
+            best_ransac_fitness = -1.0
+            best_transform = np.eye(4)
+
+            # Try multiple seeds to reduce randomness
+            seeds_to_try = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # pick any seeds
+            for seed in seeds_to_try:
+                result_ransac = global_registration(green_o3d_clean, model_o3d_clean,
+                                                    src_fpfh, tgt_fpfh, seed=seed)
+                print(f"      RANSAC seed={seed} -> fitness={result_ransac.fitness:.4f}, rmse={result_ransac.inlier_rmse:.5f}")
+                if result_ransac.fitness > best_ransac_fitness:
+                    best_ransac_fitness = result_ransac.fitness
+                    best_transform = result_ransac.transformation
+
+            print(f"    Best RANSAC from seeds {seeds_to_try}: fitness={best_ransac_fitness:.4f}")
+            init_transform = best_transform
+
+        # Then multi-scale ICP
         final_transform = multi_scale_icp(green_o3d_clean, model_o3d_clean, init_transform)
         return final_transform
 
@@ -585,7 +567,9 @@ def get_poses_from_pointclouds(point_clouds_points,
             poses.append(np.eye(4))
             continue
 
-        transform_green_to_model = register_green_points_to_model(green_pts, object_model_o3d, init_transform=prev_transform)
+        transform_green_to_model = register_green_points_to_model(
+            green_pts, object_model_o3d, init_transform=prev_transform
+        )
         T_model_in_cloud = np.linalg.inv(transform_green_to_model)
         poses.append(T_model_in_cloud)
         prev_transform = transform_green_to_model
