@@ -152,7 +152,7 @@ def find_index_after_pattern(text, pattern, after_pattern):
         # Return the index after the pattern
         return index_after_pattern + len(pattern)
 
-def exclude_cameras_from_obs(traj, camera_names, store_voxel):
+def exclude_cameras_from_obs(traj, camera_names, store_voxel, store_point_cloud):
     if len(camera_names) > 0:
         for cam in camera_names:
             del traj['obs'][f"{cam}_image"]
@@ -160,6 +160,9 @@ def exclude_cameras_from_obs(traj, camera_names, store_voxel):
             del traj['obs'][f"{cam}_rgbd"]
     if not store_voxel:
         del traj['obs']['voxels']
+    if not store_point_cloud:
+        del traj['obs']['pointcloud_points']
+        del traj['obs']['pointcloud_colors']
 
 
 def visualize_voxel(traj):
@@ -338,11 +341,12 @@ def add_rgbd_obs(traj, camera_names, depth_minmax):
 
 def dataset_states_to_obs(args):
     store_voxel = args.store_voxel
+    store_point_cloud = args.store_point_cloud
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['squared0view', 'squared0view2', 'squared0view3', 'squared0view4', 'fronttableview', 'sidetableview']
-    additional_camera_for_voxel = ['birdview', 'sideview2', 'backview'] if store_voxel else []
+    camera_names = ['squared0view',  'sidetableview']
+    additional_camera_for_voxel = ['squared0view2', 'squared0view3', 'squared0view4', 'fronttableview', 'birdview', 'sideview2', 'backview'] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
 
     env = EnvUtils.create_env_for_data_processing(
@@ -415,7 +419,7 @@ def dataset_states_to_obs(args):
         for j, ind in enumerate(range(i, end)):
             ep = demos[ind]
             traj = trajs[j]
-            exclude_cameras_from_obs(traj, additional_camera_for_voxel, store_voxel)
+            exclude_cameras_from_obs(traj, additional_camera_for_voxel, store_voxel, store_point_cloud)
             # maybe copy reward or done signal from source file
             if args.copy_rewards:
                 traj["rewards"] = f["data/{}/rewards".format(ep)][()]
@@ -571,6 +575,12 @@ if __name__ == "__main__":
         "--store_voxel", 
         action='store_true',
         help="(optional) save voxels in dataset",
+    )
+    
+    parser.add_argument(
+        "--store_point_cloud", 
+        action='store_true',
+        help="(optional) save point clouds in dataset",
     )
 
     args = parser.parse_args()
