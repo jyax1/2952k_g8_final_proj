@@ -39,6 +39,7 @@ from pathlib import Path
 from zarr import DirectoryStore, ZipStore
 import itertools
 import copy
+import random
 
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
@@ -404,6 +405,23 @@ def cluster_and_keep_largest(pcd_o3d, eps=0.02, min_points=20):
     indices_largest = np.where(labels == largest_label)[0]
     return pcd_o3d.select_by_index(indices_largest)
 
+# Helper to convert a 3x3 rotation matrix to a quaternion (x,y,z,w)
+def matrix_to_quat(R_mat):
+    R_mat_copy = np.array(R_mat, copy=True, dtype=np.float64)
+    rot = R.from_matrix(R_mat_copy)
+    q = rot.as_quat()  # [x, y, z, w]
+    return q
+
+# Compute the orientation difference (in radians) between a rotation matrix R_mat
+# and a base quaternion q_base (x,y,z,w).
+def orientation_angle_diff(R_mat, q_base):
+    q_curr = matrix_to_quat(R_mat)
+    # Dot product of unit quaternions => cos(half the angle)
+    dot = np.abs(np.dot(q_curr, q_base))
+    dot = np.clip(dot, -1.0, 1.0)
+    angle = 2.0 * np.arccos(dot)
+    return angle
+
 def get_poses_from_pointclouds(point_clouds_points,
                                point_clouds_colors,
                                model_path,
@@ -414,10 +432,23 @@ def get_poses_from_pointclouds(point_clouds_points,
                                debug_dir="debug/pointclouds_with_model",
                                model_in_mm=True,
                                dbscan_eps=0.02,
-                               dbscan_min_points=20):
+                               dbscan_min_points=20,
+                               base_orientation_quat=np.array([0.7253942, 0.6844675, 0.05062998, 0.05238412]),
+                               max_orientation_angle=np.pi/2
+                               ):
     """
-    Runs global RANSAC multiple times with different seeds when init_transform is None.
-    Chooses whichever RANSAC transform has the highest fitness, then does multi-scale ICP.
+    For every frame:
+      - If it's the first frame (i=0), do multi-seed RANSAC + pick only solutions
+        whose orientation is within `max_orientation_angle` of 'base_orientation_quat'.
+        If all solutions are out of range, we re-try RANSAC multiple times.
+        If still none found, fallback to identity.
+      - Then refine with multi-scale ICP.
+      - For subsequent frames, we do the same multi-seed logic (but we do NOT
+        filter by base orientation, or you can keep that logic if you want).
+        (You can easily adapt to skip or apply the orientation filter for later frames too.)
+
+    :param base_orientation_quat: The reference orientation as [x, y, z, w].
+    :param max_orientation_angle: The maximum angle (radians) difference from base.
     """
 
     os.makedirs(debug_dir, exist_ok=True)
@@ -460,13 +491,376 @@ def get_poses_from_pointclouds(point_clouds_points,
                 o3d.pipelines.registration.TransformationEstimationPointToPlane(),
                 criteria=icp_criteria
             )
-
             current_transform = result_icp.transformation
             print(f"  [Multi-Scale ICP] Level {idx} (dist={dist:.4f}), "
                   f"iter={max_iter} -> fitness={result_icp.fitness:.4f}, "
                   f"inlier_rmse={result_icp.inlier_rmse:.5f}")
 
         return current_transform
+    
+    def multi_scale_icp_early_stop(source, target, init_trans):
+        """
+        Multi-scale ICP that stops early within each scale if the transform/fitness stops improving.
+        """
+        import numpy as np
+        import open3d as o3d
+
+        thresholds = [10.0 * voxel_size, 5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
+        max_iters_per_scale = [1000, 20000, 20000, 20000]
+
+        # Criteria for "no further improvement"
+        transform_epsilon = 1e-7
+        fitness_epsilon   = 1e-7
+        min_iters         = 50          # allow at least some iterations
+        stable_iters_req  = 15          # number of consecutive stable iterations
+
+        current_transform = init_trans
+
+        for idx, (dist, max_iter) in enumerate(zip(thresholds, max_iters_per_scale)):
+
+            print(f"\n  [EarlyStopICP] Scale {idx} threshold={dist:.4f}, max_iter={max_iter}")
+            consecutive_stable_iters = 0
+            prev_fitness   = 0.0
+            prev_transform = current_transform.copy()
+
+            for iter_i in range(max_iter):
+                # Run exactly one iteration of ICP
+                result_icp = o3d.pipelines.registration.registration_icp(
+                    source, target,
+                    dist,
+                    current_transform,
+                    o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                    criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=1)
+                )
+                new_transform = result_icp.transformation
+                fitness = result_icp.fitness
+
+                # Evaluate changes
+                delta_transform = np.linalg.norm(new_transform - current_transform)
+                delta_fitness   = abs(fitness - prev_fitness)
+
+                current_transform = new_transform
+                prev_fitness      = fitness
+
+                # Check if changes are below thresholds
+                if delta_transform < transform_epsilon and delta_fitness < fitness_epsilon and iter_i > min_iters:
+                    consecutive_stable_iters += 1
+                else:
+                    consecutive_stable_iters = 0
+
+                if consecutive_stable_iters >= stable_iters_req:
+                    print(f"    Early stop at iteration={iter_i}, fitness={fitness:.4f}")
+                    break
+
+            # Print final result at this scale
+            print(f"    Scale {idx} final => fitness={prev_fitness:.4f}")
+
+        return current_transform
+    
+    def progressive_icp(source, target, init_trans,
+                    start_dist, end_dist,
+                    steps=5, max_iter=2000):
+        """
+        A single-loop approach: we gradually reduce the distance threshold from 'start_dist' 
+        to 'end_dist' over 'steps' passes, each pass runs up to 'max_iter' but can exit early.
+        """
+
+        import numpy as np
+        import open3d as o3d
+
+        current_transform = init_trans
+
+        def adaptive_icp_pass(src, tgt, init_tr, dist_thr, max_it=2000):
+            # This pass can be similar to the early-stop approach from above,
+            # or a simpler fixed iteration approach. We'll do a simpler version here:
+            icp_criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=max_it, relative_fitness=1e-6, relative_rmse=1e-6
+            )
+            result = o3d.pipelines.registration.registration_icp(
+                src, tgt, dist_thr, init_tr,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=icp_criteria
+            )
+            return result.transformation, result.fitness
+
+        for step in range(steps):
+            # Compute the threshold for this step (geometric interpolation or linear)
+            alpha = step / float(steps - 1)
+            current_dist = start_dist * (end_dist / start_dist) ** alpha   # geometric
+            # Or do a linear approach: current_dist = start_dist + alpha*(end_dist - start_dist)
+
+            print(f"\n  [ProgressiveICP] step={step}, dist={current_dist:.4f}, max_iter={max_iter}")
+            new_transform, fitness = adaptive_icp_pass(source, target, current_transform, current_dist, max_iter)
+            current_transform = new_transform
+            print(f"    => step {step} done. fitness={fitness:.4f}")
+
+        return current_transform
+    
+    def multi_scale_icp_dynamic_skip(source, target, init_trans):
+        """
+        Similar to your existing multi-scale approach, but if we hit a high fitness 
+        or minimal transform change, we skip the next levels or reduce iteration.
+        """
+
+        import numpy as np
+        import open3d as o3d
+
+        thresholds = [10.0 * voxel_size, 5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
+        iterations = [1000, 20000, 20000, 20000]
+
+        fitness_skip = 0.99  # If we exceed this, skip the next levels
+        transform_epsilon = 1e-7
+
+        current_transform = init_trans
+        prev_transform    = init_trans
+
+        for idx, (dist, max_iter) in enumerate(zip(thresholds, iterations)):
+            if idx > 0:
+                # Compare to see if we want to skip
+                # if the last iteration had high fitness or we changed the transform very little
+                delta_t = np.linalg.norm(current_transform - prev_transform)
+                # We'll do a smaller ICP pass
+                if last_fitness > fitness_skip or delta_t < transform_epsilon:
+                    print(f"  [DynamicSkipICP] Scale {idx}: skipping because fitness={last_fitness:.4f} or delta_t={delta_t:.1e}")
+                    continue
+
+            # If not skipping, proceed
+            icp_criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=max_iter,
+                relative_fitness=1e-6,
+                relative_rmse=1e-6
+            )
+
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                dist,
+                current_transform,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=icp_criteria
+            )
+            prev_transform  = current_transform
+            current_transform = result_icp.transformation
+            last_fitness   = result_icp.fitness
+            print(f"  [DynamicSkipICP] Level {idx} (dist={dist:.4f}), "
+                f"iter={max_iter} -> fitness={result_icp.fitness:.4f}, "
+                f"inlier_rmse={result_icp.inlier_rmse:.5f}")
+
+        return current_transform
+    
+    def multi_scale_icp_guarantee_fitness(source, target, init_trans,
+                                      desired_fitness=0.99,
+                                      max_scale_retries=3):
+        """
+        Multi-scale ICP that attempts to ensure each scale
+        hits at least 'desired_fitness' before proceeding.
+        
+        If the scale finishes below that fitness, we increase
+        the iteration count and re-run the same scale.
+        If after 'max_scale_retries' expansions it still fails,
+        we move on anyway (or we can just remain stuck).
+        
+        This can help ensure each scale is "maxed out" in alignment
+        before going finer.
+        """
+
+        import open3d as o3d
+        import numpy as np
+
+        # Original thresholds
+        thresholds = [10.0 * voxel_size, 5.0 * voxel_size, 2.0 * voxel_size, 1.0 * voxel_size]
+        # Starting iteration counts
+        iterations = [1000, 20000, 20000, 20000]
+
+        current_transform = init_trans
+
+        for idx, (dist, base_iter) in enumerate(zip(thresholds, iterations)):
+
+            print(f"\n[GuaranteeFitnessICP] Scale {idx}, dist={dist:.4f}, base_iter={base_iter}")
+            # We'll attempt re-runs if we fail to meet desired fitness.
+            scale_pass_iter = base_iter
+            best_fitness = 0.0
+            best_transform = current_transform.copy()
+
+            for retry_i in range(max_scale_retries):
+                # Build the ICP criteria with the current iteration count
+                icp_criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
+                    max_iteration=scale_pass_iter,
+                    relative_fitness=1e-6,
+                    relative_rmse=1e-6
+                )
+
+                result_icp = o3d.pipelines.registration.registration_icp(
+                    source,
+                    target,
+                    dist,
+                    best_transform,  # start from the best transform so far
+                    o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                    criteria=icp_criteria
+                )
+
+                new_fitness = result_icp.fitness
+                new_transform = result_icp.transformation
+
+                print(f"  Scale {idx}, Retry {retry_i}, iter={scale_pass_iter} -> fitness={new_fitness:.4f}, rmse={result_icp.inlier_rmse:.5f}")
+
+                if new_fitness > best_fitness:
+                    best_fitness = new_fitness
+                    best_transform = new_transform
+
+                # Check if we have reached the desired fitness
+                if best_fitness >= desired_fitness:
+                    print(f"    Achieved desired fitness {best_fitness:.4f} >= {desired_fitness} => proceed.")
+                    break
+                else:
+                    # Otherwise, expand iteration count for the next try
+                    scale_pass_iter = int(scale_pass_iter * 1.5)  # or double, etc.
+                    print(f"    Not reached {desired_fitness} fitness => increase iteration to {scale_pass_iter} and re-try...")
+
+            # After possibly multiple retries, we store the best result
+            current_transform = best_transform
+
+        return current_transform
+    
+    def icp_threshold_updown_force_one(
+        source,
+        target,
+        init_transform,
+        max_total_iterations=2_000_000,
+        debug=True
+    ):
+        """
+        Implements this strategy with factor=1.5 up, factor=0.75 down, ignoring final pass fitness:
+        - Start threshold = 8*voxel_size
+        - Do an ICP pass:
+            if fitness=1 => threshold *= 0.75
+            else => threshold *= 1.5
+        - Keep repeating until threshold < 1.2 * voxel_size
+        - Then do ONE final pass at that threshold, ignoring fitness in the final result.
+
+        The iteration formula for each pass is:
+            iteration_count = 10000 * (voxel_size/threshold) * 8 * (1 + 0.1 * times_visited[threshold]),
+        plus we clamp to 'max_total_iterations' in total usage across all passes.
+
+        :param source, target: Open3D point clouds
+        :param init_transform: initial (4x4) guess
+        :param voxel_size: base measure => final threshold ~1 * voxel_size
+        :param max_total_iterations: sum of all iteration usage. If we exceed, we must stop.
+        :param debug: if True, print threshold, iteration, fitness, rmse each pass.
+        :return: final transform from the last pass at threshold < 1.2*voxel_size, ignoring that pass’s fitness
+        """
+
+        import open3d as o3d
+        import numpy as np
+
+        # We track how many times we've visited each threshold (float) to raise iteration with repeated visits
+        times_visited = {}
+        total_iterations_used = 0
+
+        # Helper: compute iteration count by your formula
+        def get_iteration_count(threshold):
+            """
+            iteration_count = 10000 * (voxel_size / threshold) * 8 * (1 + 0.1 * times_visited[threshold])
+            """
+            t_key = float(threshold)
+            vcount = times_visited.get(t_key, 0)
+            it_count = 10000 * (voxel_size / threshold) * 8 * (1 + 0.1 * vcount)
+            return max(1, int(it_count))
+
+        def run_icp(threshold, init_pose):
+            """
+            Run one ICP pass at the given threshold, with iteration_count from get_iteration_count(...).
+            Increase times_visited and clamp usage to max_total_iterations if needed.
+            """
+            nonlocal total_iterations_used
+
+            # increment times_visited
+            t_key = float(threshold)
+            old_visits = times_visited.get(t_key, 0)
+            times_visited[t_key] = old_visits + 1
+
+            it_count = get_iteration_count(threshold)
+
+            # clamp if we exceed total budget
+            if total_iterations_used + it_count > max_total_iterations:
+                it_count = max_total_iterations - total_iterations_used
+                if it_count <= 0:
+                    # no iterations left => return dummy
+                    return 0.0, 999999.0, init_pose, 0
+
+            crit = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=it_count,
+                relative_fitness=1e-6,
+                relative_rmse=1e-6
+            )
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                threshold,
+                init_pose,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=crit
+            )
+
+            total_iterations_used += it_count
+            return result_icp.fitness, result_icp.inlier_rmse, result_icp.transformation, it_count
+
+        # 1) Start
+        current_transform = init_transform.copy()
+        best_transform = current_transform.copy()
+        best_fitness = 0.0
+        threshold = 8.0 * voxel_size
+        best_threshold = threshold
+        best_rmse = 1.0
+
+        # 2) Up/Down logic: if fitness=1 => threshold*=0.75, else => threshold*=1.5
+        # Keep going until threshold < 1.2 * voxel_size
+        while threshold >= 1.75 * voxel_size:
+            fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)  
+
+            if debug:
+                print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, fitness={fitness:.4f}, rmse={rmse:.5f}")
+
+            if used_iters <= 0:
+                if debug:
+                    print("No iteration budget left, break up/down loop.")
+                break
+
+            if fitness >= 0.96 - 1e-12:
+                # success => threshold *= 0.75
+                threshold *= 0.5
+                current_transform = new_transform
+                
+                if threshold < best_threshold:
+                    best_transform = current_transform.copy()
+                    best_threshold = threshold
+                    best_fitness = fitness
+                    best_rmse = rmse
+            else:
+                # fail => threshold *= 1.5
+                threshold *= 1.5
+                current_transform = new_transform
+
+        # 3) We do one final pass at the last threshold, ignoring fitness
+        # As per instructions, "the final result comes from the result at threshold < 1.2*voxel_size"
+        if threshold >= 1.75 * voxel_size:
+            # If we never shrank below 1.2 => just return best transform
+            if debug:
+                print("Threshold never shrank below 1.75 * voxel_size.")
+                print(f"[UpDownICP] Best threshold={best_threshold:.4f}, used_iters={max_total_iterations}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+                
+            return best_transform
+        else:
+            if debug:
+                print(f"Threshold < 1.75 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
+
+        # final pass
+        f_final, rmse_final, final_transform, used_iters_final = run_icp(threshold, current_transform)
+        if debug:
+            print(f"[UpDownICP] Final pass threshold={threshold:.4f}, used_iters={used_iters_final}, fitness={f_final:.4f}, rmse={rmse_final:.5f}")
+            print("Ignoring final pass fitness. Returning transform anyway.")
+
+        return final_transform
 
     def compute_fpfh(pcd, voxel):
         pcd.estimate_normals(
@@ -483,9 +877,7 @@ def get_poses_from_pointclouds(point_clouds_points,
         return fpfh
 
     def global_registration(source, target, source_fpfh, target_fpfh, seed):
-        # Set random seed for RANSAC
         o3d.utility.random.seed(seed)
-
         dist_thresh = max(voxel_size * 1.5, 0.04)
         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
             source,
@@ -506,7 +898,12 @@ def get_poses_from_pointclouds(point_clouds_points,
         )
         return result
 
-    def register_green_points_to_model(green_pts_np, model_pcd_o3d, init_transform=None):
+    def register_green_points_to_model_first_frame(green_pts_np, model_pcd_o3d):
+        """
+        For the first frame: we do multi-seed RANSAC, keep only transformations
+        whose orientation is within 'max_orientation_angle' of 'base_orientation_quat'.
+        If all are out of range, we can re-try multiple times. If still none, fallback identity.
+        """
         if len(green_pts_np) < 10:
             print("    Not enough green points (<10). Identity.")
             return np.eye(4)
@@ -524,57 +921,122 @@ def get_poses_from_pointclouds(point_clouds_points,
             print("    After cleaning, too few points. Identity.")
             return np.eye(4)
 
-        # If no initial transform, we do multiple RANSAC tries with different seeds
-        if init_transform is None:
-            src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
-            tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
+        src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
+        tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
 
-            best_ransac_fitness = -1.0
-            best_transform = np.eye(4)
+        # We'll allow up to 3 attempts. Each attempt tries multiple seeds.
+        # If we find no orientation that passes the threshold, we try again.
+        # If still none, fallback to identity.
+        found_1_point_0 = False
+        best_transform   = None
 
-            # Try multiple seeds to reduce randomness
-            seeds_to_try = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # pick any seeds
-            for seed in seeds_to_try:
-                result_ransac = global_registration(green_o3d_clean, model_o3d_clean,
-                                                    src_fpfh, tgt_fpfh, seed=seed)
-                print(f"      RANSAC seed={seed} -> fitness={result_ransac.fitness:.4f}, rmse={result_ransac.inlier_rmse:.5f}")
-                if result_ransac.fitness > best_ransac_fitness:
-                    best_ransac_fitness = result_ransac.fitness
-                    best_transform = result_ransac.transformation
+        attempt = 0
 
-            print(f"    Best RANSAC from seeds {seeds_to_try}: fitness={best_ransac_fitness:.4f}")
-            init_transform = best_transform
+        while True:
+            # If you want to enforce a limit, uncomment:
+            # if max_tries is not None and attempt >= max_tries:
+            #     raise RuntimeError("Never found fitness=1.0 after max_tries seeds!")
 
-        # Then multi-scale ICP
-        final_transform = multi_scale_icp(green_o3d_clean, model_o3d_clean, init_transform)
+            # Generate a random seed
+            seed = random.randint(0, 2**31 - 1)  # or a bigger range if you like
+            result_ransac = global_registration(green_o3d_clean, model_o3d_clean,
+                                                src_fpfh, tgt_fpfh, seed=seed)
+            attempt += 1
+
+            print(f"[Try #{attempt}] RANSAC seed={seed} -> fitness={result_ransac.fitness:.4f}, "
+                f"rmse={result_ransac.inlier_rmse:.5f}")
+
+            # Check orientation difference
+            R_est = result_ransac.transformation[:3, :3]
+            angle_diff = orientation_angle_diff(R_est, base_orientation_quat)
+            if angle_diff <= max_orientation_angle:
+                # It's orientation-compatible
+                if result_ransac.fitness >= 1.0 - 1e-12:
+                    # Good enough => fitness ~ 1.0
+                    found_1_point_0 = True
+                    best_transform  = result_ransac.transformation
+                    print("Found a valid transform with ~1.0 fitness. Done.")
+                    break
+                else:
+                    print("Orientation is valid, but fitness < 1.0. Trying another seed.")
+            else:
+                print("Orientation is not valid, trying another seed.")
+
+        # After we exit the loop, we either found 1.0 or we're in an infinite loop if no limit
+        if found_1_point_0:
+            # proceed with best_transform
+            # e.g. init_transform = best_transform
+            # Do multi-scale ICP
+            # final_transform = multi_scale_icp(green_o3d_clean, model_o3d_clean, best_transform)
+            # final_transform = multi_scale_icp_early_stop(green_o3d_clean, model_o3d_clean, best_transform)
+            # final_transform = progressive_icp(green_o3d_clean, model_o3d_clean, best_transform, 100*voxel_size, 1*voxel_size, steps=5, max_iter=2000)
+            final_transform = icp_threshold_updown_force_one(green_o3d_clean, model_o3d_clean, best_transform)
+            # final_transform = multi_scale_icp_dynamic_skip(green_o3d_clean, model_o3d_clean, best_transform)
+            return final_transform
+
+        # If we exit the loop, means we failed all attempts
+        print("    All attempts failed to find orientation near base. Fallback identity.")
+        return np.eye(4)
+
+    def register_green_points_to_model_subsequent_frames(green_pts_np, model_pcd_o3d):
+        """
+        For subsequent frames, we do the multi-seed RANSAC with no orientation filter.
+        (You can keep the filter if you wish. Just replicate the logic above.)
+        """
+        if len(green_pts_np) < 10:
+            return np.eye(4)
+
+        green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
+        if len(largest_cluster.points) < 10:
+            return np.eye(4)
+
+        green_o3d_clean = preprocess_pcd(largest_cluster, voxel_size)
+        model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
+        if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
+            return np.eye(4)
+
+        src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
+        tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
+
+        best_ransac_fitness = -1.0
+        best_transform = np.eye(4)
+        seeds_to_try = [0,1,2,3,4,5,6,7,8,9]
+        for seed in seeds_to_try:
+            result_ransac = global_registration(green_o3d_clean, model_o3d_clean,
+                                                src_fpfh, tgt_fpfh, seed=seed)
+            if result_ransac.fitness > best_ransac_fitness:
+                best_ransac_fitness = result_ransac.fitness
+                best_transform = result_ransac.transformation
+
+        final_transform = icp_threshold_updown_force_one(green_o3d_clean, model_o3d_clean, best_transform)
         return final_transform
 
     poses = []
-    prev_transform = None
-
     for i, (pts, cols) in enumerate(zip(point_clouds_points, point_clouds_colors)):
         print(f"\n=== Frame {i} ===")
-        mask = (
-            (cols[:,1] >= green_threshold) &
-            (cols[:,0] <= non_green_max) &
-            (cols[:,2] <= non_green_max)
-        )
+        mask = ((cols[:,1] >= green_threshold) &
+                (cols[:,0] <= non_green_max) &
+                (cols[:,2] <= non_green_max))
         green_pts = pts[mask]
         print(f"  #points={len(pts)}, #green={len(green_pts)}")
 
-        if len(green_pts) == 0:
+        if len(green_pts) < 10:
             print(f"  No green points, identity.")
             poses.append(np.eye(4))
             continue
 
-        transform_green_to_model = register_green_points_to_model(
-            green_pts, object_model_o3d, init_transform=prev_transform
-        )
+        if i == 0:
+            # First frame => filter orientation vs. base quaternion
+            transform_green_to_model = register_green_points_to_model_first_frame(green_pts, object_model_o3d)
+        else:
+            # Subsequent frames => no orientation filter
+            transform_green_to_model = register_green_points_to_model_subsequent_frames(green_pts, object_model_o3d)
+
         T_model_in_cloud = np.linalg.inv(transform_green_to_model)
         poses.append(T_model_in_cloud)
-        prev_transform = transform_green_to_model
 
-        # Visualization
+        # (Optional) Save debug .ply
         green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
         green_pcd.colors = o3d.utility.Vector3dVector(np.tile([0,1,0], (len(green_pts),1)))
         model_copy = copy.deepcopy(object_model_o3d)
@@ -595,7 +1057,6 @@ def imitate_trajectory_with_action_identifier(
     num_demos=100,
     save_webp=False,
     cameras: list[str] = ["squared0view_image", "sidetableview_image", "squared0view2_image"],
-    batch_size=40,
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -754,7 +1215,7 @@ def imitate_trajectory_with_action_identifier(
                 poses=all_hand_poses,
                 gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                 env=env_camera0,  # using camera0 environment for execution
-                smooth=False
+                smooth=True
             )
 
             initial_state = root_z["data"][demo]["states"][0]
@@ -828,6 +1289,5 @@ if __name__ == "__main__":
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
         num_demos=3,
-        save_webp=False,
-        batch_size=40
+        save_webp=False
     )
