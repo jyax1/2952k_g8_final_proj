@@ -686,7 +686,7 @@ def get_poses_from_pointclouds(point_clouds_points,
     # We accept a 'prev_transform' argument so we can store or re-use it if desired.
     # By default, we do *not* use 'prev_transform' inside RANSAC, but you could adapt it.
     # -------------------------------------------------------------------------
-    def register_green_points_to_model_subsequent_frames(green_pts_np, model_pcd_o3d, prev_transform=None):
+    def register_green_points_to_model_subsequent_frames(green_pts_np, model_pcd_o3d, prev_transform):
         """
         If you want to skip RANSAC and just do ICP from prev_transform,
         you can do that easily: check if prev_transform is not None,
