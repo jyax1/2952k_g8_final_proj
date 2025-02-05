@@ -643,7 +643,7 @@ def get_poses_from_pointclouds(point_clouds_points,
                                model_path,
                                green_threshold=0.9,
                                non_green_max=0.7,
-                               voxel_size=0.001,
+                               voxel_size=0.005,
                                mesh_num_points=30000,
                                debug_dir="debug/pointclouds_with_model",
                                model_in_mm=True,
@@ -692,8 +692,8 @@ def get_poses_from_pointclouds(point_clouds_points,
         #  - coarse: 5 * voxel_size
         #  - medium: 2 * voxel_size
         #  - fine:   1 * voxel_size (or 0.5*voxel_size)
-        thresholds = [5.0 * voxel_size, 2.0 * voxel_size, 1 * voxel_size]
-        iterations = [1000, 1000, 2000]  # you can tweak these as desired
+        thresholds = [2.0 * voxel_size, 1.0 * voxel_size, 0.5 * voxel_size]
+        iterations = [1000, 1000, 7000]  # you can tweak these as desired
 
         current_transform = init_trans
 
