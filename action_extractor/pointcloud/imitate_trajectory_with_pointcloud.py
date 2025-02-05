@@ -779,7 +779,7 @@ def get_poses_from_pointclouds(point_clouds_points,
             print("    After cleaning, too few points. Identity.")
             return np.eye(4)
 
-        # 3) If no initial transform, do global reg
+        # 3) If no initial transform, do global reg 
         if init_transform is None:
             src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
             tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
