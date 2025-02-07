@@ -27,8 +27,9 @@ from action_extractor.utils.dataset_utils import (
 
 from action_extractor.utils.angles import *
 
-from action_extractor.megapose.action_identifier_megapose import (
+from action_extractor.poses_to_actions import (
     poses_to_absolute_actions,
+    poses_to_delta_actions,
 )
 
 from action_extractor.point_cloud.action_identifier_point_cloud import (
@@ -346,6 +347,7 @@ def imitate_trajectory_with_action_identifier(
     num_demos=100,
     save_webp=False,
     cameras: list[str] = ["squared0view_image", "sidetableview_image", "squared0view2_image"],
+    absolute_actions=True
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -487,12 +489,19 @@ def imitate_trajectory_with_action_identifier(
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
-            actions_for_demo = poses_to_absolute_actions(
-                poses=all_hand_poses,
-                gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                env=env_camera0,  # using camera0 environment for execution
-                smooth=True
-            )
+            if absolute_actions:
+                actions_for_demo = poses_to_absolute_actions(
+                    poses=all_hand_poses,
+                    gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+                    env=env_camera0,  # using camera0 environment to get initial orientation
+                    smooth=True
+                )
+            else:
+                actions_for_demo = poses_to_delta_actions(
+                    poses=all_hand_poses,
+                    gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+                    smooth=True
+                )
 
             initial_state = root_z["data"][demo]["states"][0]
 
@@ -565,5 +574,6 @@ if __name__ == "__main__":
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
         num_demos=100,
-        save_webp=False
+        save_webp=False,
+        absolute_actions=True,
     )
