@@ -195,3 +195,88 @@ def poses_to_absolute_actions(
         all_actions[num_actions+i] = all_actions[num_actions-1]
         
     return all_actions
+
+
+def poses_to_delta_actions(
+    poses, 
+    gripper_actions,
+    smooth=True
+):
+    """
+    Convert a sequence of 4x4 pose matrices into delta actions (position + orientation).
+    The orientation is represented as the axis-angle difference between consecutive poses.
+
+    Steps:
+    1) SMOOTH POSITIONS (optional):
+       - We either smooth the positions using a user-defined `smooth_positions` function
+         or directly take the translation part of each pose.
+       - The result is `smoothed_positions` (N x 3).
+    2) ORIENTATION DIFFERENCE:
+       - For each consecutive pair of rotation matrices R_i -> R_i+1, compute the 
+         quaternion difference q_delta = inv(q_i) * q_i+1, then convert to axis-angle.
+       - Unify sign with the previous axis-angle (so orientation does not flip signs).
+    3) BUILD DELTA ACTIONS:
+       - Delta translation: smoothed_positions[i+1] - smoothed_positions[i]
+       - Delta rotation: axis-angle of q_delta
+       - Gripper action: from gripper_actions[i]
+    4) BUFFER AT THE END:
+       - Repeat the last action 10 times at the end.
+
+    Args:
+        poses (list of ndarray): Each element is a 4x4 transformation matrix.
+        gripper_actions (array-like): 1D array of gripper values (length must match len(poses)).
+        smooth (bool): If True, uses a smoothing function on positions.
+
+    Returns:
+        all_actions (ndarray): shape (num_samples - 1 + 10, 7)
+                               Each row = [dx, dy, dz, rx, ry, rz, gripper]
+    """
+    
+    num_samples = len(poses)
+    if num_samples < 2:
+        # Not enough poses to form a delta
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute a smoothed set of positions
+    if smooth:
+        smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    else:
+        smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
+
+    # We'll have num_actions = num_samples - 1
+    num_actions = num_samples - 1
+    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+
+    # Keep track of the previous axis-angle to unify sign
+    prev_rvec = None
+
+    for i in range(num_actions):
+        # --- Position delta ---
+        dx, dy, dz = smoothed_positions[i+1] - smoothed_positions[i]
+
+        # --- Orientation delta: poses[i] -> poses[i+1] ---
+        R_i  = poses[i][:3, :3]
+        R_i1 = poses[i+1][:3, :3]
+
+        q_i  = rotation_matrix_to_quaternion(R_i)
+        q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
+
+        q_inv = quat_inv(q_i)
+        q_delta = quat_multiply(q_inv, q_i1)
+        q_delta = quat_normalize(q_delta)
+
+        # Convert to axis-angle, unify sign with previous
+        rvec = quat2axisangle(q_delta)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
+
+        # Build the 7D delta action
+        all_actions[i, :3]  = [dx, dy, dz]
+        all_actions[i, 3:6] = rvec
+        all_actions[i, 6]   = gripper_actions[i]
+        
+    return all_actions

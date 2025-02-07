@@ -51,20 +51,21 @@ def orientation_angle_diff(R_mat, q_base):
     angle = 2.0 * np.arccos(dot)
     return angle
 
-def get_poses_from_pointclouds(point_clouds_points,
-                               point_clouds_colors,
-                               model_path,
-                               green_threshold=0.9,
-                               non_green_max=0.7,
-                               voxel_size=0.00,
-                               mesh_num_points=30000,
-                               debug_dir="debug/pointclouds_with_model",
-                               model_in_mm=True,
-                               dbscan_eps=0.02,
-                               dbscan_min_points=20,
-                               base_orientation_quat=np.array([0.7253942, 0.6844675, 0.05062998, 0.05238412]),
-                               max_orientation_angle=np.pi/2
-                               ):
+def get_poses_from_pointclouds(
+    point_clouds_points,
+    point_clouds_colors,
+    model_path,
+    green_threshold=0.9,
+    non_green_max=0.7,
+    voxel_size=0.00,
+    mesh_num_points=30000,
+    debug_dir="debug/pointclouds_with_model",
+    model_in_mm=True,
+    dbscan_eps=0.02,
+    dbscan_min_points=20,
+    base_orientation_quat=np.array([0.7253942, 0.6844675, 0.05062998, 0.05238412]),
+    max_orientation_angle=np.pi/2
+):
     """
     Modified to store and use the 'previous-frame transform' logic:
       - On the first frame (i=0), multi-seed RANSAC + orientation filter + ICP.
@@ -398,3 +399,7 @@ def get_poses_from_pointclouds(point_clouds_points,
         print(f"  Saved debug PLY: {out_path}")
 
     return poses
+
+
+def get_gripper_distances_from_pointclouds():
+    return None
