@@ -1,9 +1,6 @@
 import os
 import numpy as np
-import torch
-import math
 import imageio
-import cv2
 import zarr
 import shutil
 from glob import glob
@@ -40,7 +37,7 @@ from action_extractor.point_cloud.action_identifier_point_cloud import (
 
 from action_extractor.poses_to_actions import *
 
-from robosuite.utils.camera_utils import (
+from robosuite.utils.camera_utils import ( # type: ignore
     get_camera_extrinsic_matrix,
     get_camera_intrinsic_matrix,
 )
@@ -487,19 +484,6 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
                     
             all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh)
-            
-            # for pose in all_hand_poses:
-            #     print(pose[:3, 3])
-            
-            # save_pointclouds_with_bbox_as_ply(
-            #     point_clouds_points,
-            #     point_clouds_colors,
-            #     all_hand_poses,
-            #     box_dims=np.array([0.063045, 0.204516, 0.091946]),
-            #     output_dir="debug/pointcloud_traj"
-            # )
-            
-            # debug_pointcloud_poses(point_clouds_points[:10], point_clouds_colors[:10], output_dir=os.path.join(output_dir, "pointcloud_debug"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
@@ -580,6 +564,6 @@ if __name__ == "__main__":
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
         output_dir="/home/yilong/Documents/action_extractor/debug/megapose_weighted_average_squared0view12",
-        num_demos=3,
+        num_demos=100,
         save_webp=False
     )
