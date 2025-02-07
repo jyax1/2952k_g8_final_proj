@@ -582,8 +582,6 @@ def poses_to_absolute_actions(
         smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
 
     # 2) Start from environment's known initial eef quaternion 
-    #    (assuming it's [w, x, y, z], confirm shape/order as needed).
-    # starting_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
     current_position = env.env.env._eef_xpos.astype(np.float32)
@@ -615,23 +613,6 @@ def poses_to_absolute_actions(
 
         q_delta = quat_multiply(q_inv, q_i1)
         q_delta = quat_normalize(q_delta)
-        
-        '''
-        Only z-axis rotation allowed
-        '''
-        # rot = R.from_quat(q_delta)     # q_delta => [x, y, z, w]
-        # roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
-
-        # # Zero out roll & pitch, keep only yaw
-        # roll = 0.0
-        # pitch = 0.0
-
-        # # Build new rotation solely around z (yaw)
-        # rot_only_yaw = R.from_euler('xyz', [roll, pitch, yaw], degrees=False)
-        # q_delta = rot_only_yaw.as_quat()  # back to quaternion [x, y, z, w]
-        '''
-        Only z-axis rotation allowed
-        '''
 
         # Accumulate orientation
         current_orientation = quat_multiply(current_orientation, q_delta)
@@ -643,7 +624,6 @@ def poses_to_absolute_actions(
             rvec = -rvec
         prev_rvec = rvec
         
-        # print(f"pz_front: {pz_front}, pz_side: {pz}")
         pz -= z_offset
 
         # Build the 7D action

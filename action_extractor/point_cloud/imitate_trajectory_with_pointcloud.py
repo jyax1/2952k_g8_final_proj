@@ -64,7 +64,6 @@ from action_extractor.megapose.action_identifier_megapose import (
 from action_extractor.point_cloud.action_identifier_point_cloud import (
     get_poses_from_pointclouds,
 )
-    
 
 from robosuite.utils.camera_utils import (
     get_camera_extrinsic_matrix,
