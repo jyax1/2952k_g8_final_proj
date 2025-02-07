@@ -1,30 +1,3 @@
-#####################################################################
-# Add these lines BEFORE other Panda3D imports to silence logs:
-#####################################################################
-import logging
-
-# Silence "Loading model ..." logs from your python code
-logging.getLogger("action_extractor.megapose.action_identifier_megapose").setLevel(logging.WARNING)
-
-import panda3d.core as p3d
-# Suppress "Known pipe types", "Xlib extension missing", etc.
-p3d.load_prc_file_data("", "notify-level-glxdisplay fatal\n")
-p3d.load_prc_file_data("", "notify-level-x11display fatal\n")
-p3d.load_prc_file_data("", "notify-level-gsg fatal\n")
-
-# video (unlabeled) -> use pose estimation to label videos -> video with pseudo labels -> train policy
-
-# This script:
-# 1) Takes video from dataset
-# 2) Pass video into megapose to get pose estimations
-# 3) Use pose estimations to get actions
-# 4) Use actions to roll-out in the simulator
-# 5) Save video into designated mp4 file
-# Function: evaluate quality of pose estimation
-
-#####################################################################
-# Normal imports
-#####################################################################
 import os
 import numpy as np
 import torch
@@ -64,6 +37,8 @@ from action_extractor.megapose.action_identifier_megapose import (
 from action_extractor.point_cloud.action_identifier_point_cloud import (
     get_poses_from_pointclouds,
 )
+
+from action_extractor.poses_to_actions import *
 
 from robosuite.utils.camera_utils import (
     get_camera_extrinsic_matrix,
