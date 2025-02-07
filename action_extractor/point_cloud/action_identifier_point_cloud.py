@@ -407,5 +407,116 @@ def get_poses_from_pointclouds(
 
 
 
-def get_gripper_distances_from_pointclouds():
-    return None
+def get_fingers_distances_from_pointclouds(
+    point_clouds_points,
+    point_clouds_colors,
+    cyan_threshold=0.9,
+    magenta_threshold=0.9,
+    non_cyan_max=0.3,
+    non_magenta_max=0.3,
+    dbscan_eps=0.02,
+    dbscan_min_points=20,
+    debug_dir="debug/fingers",
+    verbose=True
+):
+    """
+    Computes a simple estimate of the distance between two gripper fingers:
+      - One finger is assumed to be colored 'cyan' (high G and B, low R).
+      - The other finger is assumed to be colored 'magenta' (high R and B, low G).
+    For each frame:
+      1) We extract points belonging to each color via a mask.
+      2) Cluster them, keep the largest cluster.
+      3) Compute cluster centroids.
+      4) Compute the distance between the two centroids.
+
+    Args:
+        point_clouds_points (list of np.ndarray): Each element is (N_i x 3) array of XYZ points.
+        point_clouds_colors (list of np.ndarray): Each element is (N_i x 3) array of RGB in [0,1].
+        cyan_threshold (float): Minimum G and B for a point to be considered "very cyan".
+        magenta_threshold (float): Minimum R and B for a point to be considered "very magenta".
+        non_cyan_max (float): Maximum R for a point to be considered "very cyan".
+        non_magenta_max (float): Maximum G for a point to be considered "very magenta".
+        dbscan_eps (float): DBSCAN eps parameter for clustering.
+        dbscan_min_points (int): Minimum cluster size for DBSCAN.
+        debug_dir (str): Directory path to save debug PLY files.
+        verbose (bool): If True, prints out status messages and saves debug files.
+
+    Returns:
+        distances (list of float): Distance between the two centroids for each frame.
+                                  If either cluster is empty in a frame, the distance is np.nan.
+    """
+    os.makedirs(debug_dir, exist_ok=True)
+
+    # We'll store the distances here (one distance per frame)
+    distances = []
+
+    # Loop over each frame in the sequence
+    for i, (pts, cols) in enumerate(zip(point_clouds_points, point_clouds_colors)):
+        if verbose:
+            print(f"\n=== Frame {i} ===")
+
+        # 1) Identify mask for "cyan" points:
+        #    - R <= non_cyan_max
+        #    - G >= cyan_threshold
+        #    - B >= cyan_threshold
+        mask_cyan = (
+            (cols[:, 0] <= non_cyan_max) & 
+            (cols[:, 1] >= cyan_threshold) &
+            (cols[:, 2] >= cyan_threshold)
+        )
+
+        # 2) Identify mask for "magenta" points:
+        #    - R >= magenta_threshold
+        #    - G <= non_magenta_max
+        #    - B >= magenta_threshold
+        mask_magenta = (
+            (cols[:, 0] >= magenta_threshold) &
+            (cols[:, 1] <= non_magenta_max) &
+            (cols[:, 2] >= magenta_threshold)
+        )
+
+        cyan_pts = pts[mask_cyan]
+        magenta_pts = pts[mask_magenta]
+
+        if verbose:
+            print(f"  #points total={len(pts)}")
+            print(f"    #cyan   ={len(cyan_pts)}")
+            print(f"    #magenta={len(magenta_pts)}")
+
+        # 3) Make Open3D point clouds for each color
+        cyan_pcd_o3d = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(cyan_pts))
+        magenta_pcd_o3d = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(magenta_pts))
+
+        # 4) Cluster and keep the largest cluster for each color
+        largest_cyan_pcd    = cluster_and_keep_largest(cyan_pcd_o3d, eps=dbscan_eps, min_points=dbscan_min_points)
+        largest_magenta_pcd = cluster_and_keep_largest(magenta_pcd_o3d, eps=dbscan_eps, min_points=dbscan_min_points)
+
+        # 5) Compute centroids. If empty, we'll store np.nan
+        if len(largest_cyan_pcd.points) < 1 or len(largest_magenta_pcd.points) < 1:
+            if verbose:
+                print("  One or both finger clusters are empty. Distance = NaN")
+            distance = np.nan
+        else:
+            cyan_centroid = np.mean(np.asarray(largest_cyan_pcd.points), axis=0)
+            magenta_centroid = np.mean(np.asarray(largest_magenta_pcd.points), axis=0)
+            distance = np.linalg.norm(cyan_centroid - magenta_centroid)
+            if verbose:
+                print(f"  Distance = {distance:.4f}")
+
+        distances.append(distance)
+
+        # 6) Optionally save debug PLY if verbose
+        if verbose:
+            # Paint the largest cluster for visualization
+            if len(largest_cyan_pcd.points) > 0:
+                largest_cyan_pcd.paint_uniform_color([0.0, 1.0, 1.0])  # cyan
+            if len(largest_magenta_pcd.points) > 0:
+                largest_magenta_pcd.paint_uniform_color([1.0, 0.0, 1.0])  # magenta
+
+            # Combine them for a single debug cloud
+            out_pcd = largest_cyan_pcd + largest_magenta_pcd
+            out_path = os.path.join(debug_dir, f"fingers_frame_{i:04d}.ply")
+            o3d.io.write_point_cloud(out_path, out_pcd)
+            print(f"  Saved debug PLY: {out_path}")
+
+    return distances
