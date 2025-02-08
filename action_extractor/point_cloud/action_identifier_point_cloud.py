@@ -107,40 +107,68 @@ def get_poses_from_pointclouds(
         source,
         target,
         init_transform,
-        max_total_iterations=2_000_000
+        total_iterations=2_000_000,
+        verbose=True
     ):
         """
-        Runs a custom "up-down" ICP procedure. 
-        All print statements are controlled by the outer `verbose` flag.
+        Runs a custom "up-down" ICP procedure until the total iteration budget is exhausted.
+        Each call to ICP uses it_count iterations, so we accumulate usage and stop once
+        total_iterations are used up (or if used_iters <= 0).
+
+        Args:
+            source (o3d.geometry.PointCloud): Source point cloud.
+            target (o3d.geometry.PointCloud): Target point cloud.
+            init_transform (np.ndarray): Initial 4x4 guess for ICP.
+            total_iterations (int): Overall iteration budget. Each call to ICP uses it_count
+                                    of these iterations. Once used, we stop.
+            voxel_size (float): Used to compute thresholds and iteration counts.
+            verbose (bool): If True, prints debug statements.
+
+        Returns:
+            np.ndarray: A 4x4 transform (the best found).
         """
+
+        # A small dictionary to keep track of how many times we've used a given threshold.
         times_visited = {}
         total_iterations_used = 0
 
         def get_iteration_count(threshold):
+            """
+            Compute how many ICP iterations to run in a single call,
+            based on the current threshold and how often we've visited it.
+            """
             t_key = float(threshold)
             vcount = times_visited.get(t_key, 0)
+            # Example formula from original code; can be modified as needed.
             it_count = 10000 * (voxel_size / threshold) * 8 * (1 + 0.1 * vcount)
             return max(1, int(it_count))
 
         def run_icp(threshold, init_pose):
             nonlocal total_iterations_used
 
+            # Track visits
             t_key = float(threshold)
             old_visits = times_visited.get(t_key, 0)
             times_visited[t_key] = old_visits + 1
 
+            # Determine how many iterations to use for this ICP call
             it_count = get_iteration_count(threshold)
 
-            if total_iterations_used + it_count > max_total_iterations:
-                it_count = max_total_iterations - total_iterations_used
-                if it_count <= 0:
-                    return 0.0, 999999.0, init_pose, 0
+            # If using it_count would exceed our total budget, clamp it
+            if total_iterations_used + it_count > total_iterations:
+                it_count = total_iterations - total_iterations_used
 
+            # If there's no iteration budget left, exit immediately
+            if it_count <= 0:
+                return 0.0, 999999.0, init_pose, 0
+
+            # Configure ICP
             crit = o3d.pipelines.registration.ICPConvergenceCriteria(
                 max_iteration=it_count,
                 relative_fitness=1e-6,
                 relative_rmse=1e-6
             )
+            # Run ICP
             result_icp = o3d.pipelines.registration.registration_icp(
                 source,
                 target,
@@ -150,12 +178,17 @@ def get_poses_from_pointclouds(
                 criteria=crit
             )
 
+            # Update how many iterations we've used
             total_iterations_used += it_count
+
             return (result_icp.fitness,
                     result_icp.inlier_rmse,
                     result_icp.transformation,
                     it_count)
 
+        # ------------------------------
+        # Initialization
+        # ------------------------------
         current_transform = init_transform.copy()
         best_transform = current_transform.copy()
         best_fitness = 0.0
@@ -163,20 +196,27 @@ def get_poses_from_pointclouds(
         best_threshold = threshold
         best_rmse = 1.0
 
-        while threshold >= 1 * voxel_size:
+        # ------------------------------
+        # Loop until we exhaust total_iterations
+        # ------------------------------
+        while total_iterations_used < total_iterations:
             fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)
+
             if verbose:
                 print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, "
-                      f"fitness={fitness:.4f}, rmse={rmse:.5f}")
+                    f"fitness={fitness:.4f}, rmse={rmse:.5f}, total_used={total_iterations_used}/{total_iterations}")
 
+            # If run_icp reports used_iters = 0, no more budget => stop
             if used_iters <= 0:
                 if verbose:
-                    print("No iteration budget left, break up/down loop.")
+                    print("No iteration budget left or 0 used in ICP => break.")
                 break
 
+            # Decide whether to move threshold up or down
             if fitness >= 0.99:
                 threshold *= 0.5
                 current_transform = new_transform
+                # Keep track of best transform if we improved threshold
                 if threshold < best_threshold:
                     best_transform = current_transform.copy()
                     best_threshold = threshold
@@ -186,25 +226,16 @@ def get_poses_from_pointclouds(
                 threshold *= 1.5
                 current_transform = new_transform
 
-        # final pass
-        # if threshold >= 1 * voxel_size:
+        # ------------------------------
+        # Final logging
+        # ------------------------------
         if verbose:
-            print("Threshold never shrank below 1 * voxel_size.")
-            print(f"[UpDownICP] Best threshold={best_threshold:.4f}, "
-                    f"used_iters={max_total_iterations}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+            print(f"[UpDownICP] Finished or ran out of budget.")
+            print(f"    total_iterations_used = {total_iterations_used}")
+            print(f"    best_threshold={best_threshold:.4f}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+
         return best_transform
-        # else:
-        #     if verbose:
-        #         print(f"Threshold < 1 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
-
-        # f_final, rmse_final, final_transform, used_iters_final = run_icp(threshold, current_transform)
-        # if verbose:
-        #     print(f"[UpDownICP] Final pass threshold={threshold:.4f}, used_iters={used_iters_final}, "
-        #           f"fitness={f_final:.4f}, rmse={rmse_final:.5f}")
-        #     print("Ignoring final pass fitness. Returning transform anyway.")
-
-        # return final_transform
-
+    
     # -------------------------------------------------------------------------
     # FPFH
     # -------------------------------------------------------------------------
