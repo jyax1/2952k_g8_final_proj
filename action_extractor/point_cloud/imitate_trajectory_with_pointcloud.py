@@ -572,7 +572,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_iterations2_000_000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_vox0.002_iterations1_000_000",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,

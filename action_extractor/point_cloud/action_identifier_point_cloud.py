@@ -57,7 +57,7 @@ def get_poses_from_pointclouds(
     model_path,
     green_threshold=0.9,
     non_green_max=0.7,
-    voxel_size=0.001,
+    voxel_size=0.002,
     mesh_num_points=50000,
     debug_dir="debug/pointclouds_with_model",
     model_in_mm=True,
