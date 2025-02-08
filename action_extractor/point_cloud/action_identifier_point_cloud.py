@@ -165,16 +165,16 @@ def get_poses_from_pointclouds(
 
         while threshold >= 1 * voxel_size:
             fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)
-            # if verbose:
-            #     print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, "
-            #           f"fitness={fitness:.4f}, rmse={rmse:.5f}")
+            if verbose:
+                print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, "
+                      f"fitness={fitness:.4f}, rmse={rmse:.5f}")
 
             if used_iters <= 0:
                 if verbose:
                     print("No iteration budget left, break up/down loop.")
                 break
 
-            if fitness >= 0.98:
+            if fitness >= 0.99:
                 threshold *= 0.5
                 current_transform = new_transform
                 if threshold < best_threshold:
@@ -187,23 +187,23 @@ def get_poses_from_pointclouds(
                 current_transform = new_transform
 
         # final pass
-        if threshold >= 1 * voxel_size:
-            if verbose:
-                print("Threshold never shrank below 1 * voxel_size.")
-                print(f"[UpDownICP] Best threshold={best_threshold:.4f}, "
-                      f"used_iters={max_total_iterations}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
-            return best_transform
-        else:
-            if verbose:
-                print(f"Threshold < 1 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
-
-        f_final, rmse_final, final_transform, used_iters_final = run_icp(threshold, current_transform)
+        # if threshold >= 1 * voxel_size:
         if verbose:
-            print(f"[UpDownICP] Final pass threshold={threshold:.4f}, used_iters={used_iters_final}, "
-                  f"fitness={f_final:.4f}, rmse={rmse_final:.5f}")
-            print("Ignoring final pass fitness. Returning transform anyway.")
+            print("Threshold never shrank below 1 * voxel_size.")
+            print(f"[UpDownICP] Best threshold={best_threshold:.4f}, "
+                    f"used_iters={max_total_iterations}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+        return best_transform
+        # else:
+        #     if verbose:
+        #         print(f"Threshold < 1 * voxel_size => final pass at threshold={threshold:.4f} ignoring fitness...")
 
-        return final_transform
+        # f_final, rmse_final, final_transform, used_iters_final = run_icp(threshold, current_transform)
+        # if verbose:
+        #     print(f"[UpDownICP] Final pass threshold={threshold:.4f}, used_iters={used_iters_final}, "
+        #           f"fitness={f_final:.4f}, rmse={rmse_final:.5f}")
+        #     print("Ignoring final pass fitness. Returning transform anyway.")
+
+        # return final_transform
 
     # -------------------------------------------------------------------------
     # FPFH
