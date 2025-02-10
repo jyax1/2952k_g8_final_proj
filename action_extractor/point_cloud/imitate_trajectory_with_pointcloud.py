@@ -446,6 +446,10 @@ def imitate_trajectory_with_action_identifier(
         camera_name=camera_names[1],
     )
     
+    results_file_path = os.path.join(output_dir, "trajectory_results.txt")
+    with open(results_file_path, "w") as f:
+        f.write("Trajectory results:\n")
+    
     n_success = 0
     total_n = 0
     results = []
@@ -534,7 +538,13 @@ def imitate_trajectory_with_action_identifier(
             if success:
                 n_success += 1
             total_n += 1
-            results.append(f"{demo}: {'success' if success else 'failed'}")
+            
+            result_str = f"demo_{demo_id}: {'success' if success else 'fail'}"
+            print(result_str)
+
+            # Immediately append to the results file in "a" (append) mode
+            with open(results_file_path, "a") as f:
+                f.write(result_str + "\n")
 
             # Combine videos from all cameras (if desired).
             # Here, we assume a function that can combine multiple videos.
@@ -551,9 +561,10 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_right_video_path)
 
     success_rate = (n_success / total_n)*100 if total_n else 0
-    results.append(f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%")
-    with open(os.path.join(output_dir, "trajectory_results.txt"), "w") as f:
-        f.write("\n".join(results))
+    summary_str = f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%"
+    print(summary_str)
+    with open(results_file_path, "a") as f:
+        f.write(summary_str + "\n")
 
     if save_webp:
         print("Converting to webp...")
@@ -571,7 +582,7 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
         output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_vox0.002_iterations2_000_000",
         num_demos=100,
