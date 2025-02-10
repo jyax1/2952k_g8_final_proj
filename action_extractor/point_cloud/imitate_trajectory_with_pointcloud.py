@@ -493,7 +493,7 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
                     
             all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh)
-            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, "all_hand_poses_2.npy"))
+            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, "all_hand_poses_3.npy"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)

@@ -442,6 +442,15 @@ def get_poses_from_pointclouds(
         green_pts = pts[mask]
         if verbose:
             print(f"  #points={len(pts)}, #green={len(green_pts)}")
+            
+        # NEW DEBUG CODE: Save the FIRST FRAME's green points to a PLY
+        if i == 0:
+            debug_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
+            debug_pcd.colors = o3d.utility.Vector3dVector(np.tile([0,1,0], (len(green_pts),1)))
+            debug_out_path = os.path.join(debug_dir, "first_frame_green_points.ply")
+            o3d.io.write_point_cloud(debug_out_path, debug_pcd)
+            if verbose:
+                print(f"  Saved first frame green points to {debug_out_path}")
 
         if len(green_pts) < 10:
             if verbose:
