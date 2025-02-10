@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 from action_extractor.utils.dataset_utils import (
     hdf5_to_zarr_parallel_with_progress,
     directorystore_to_zarr_zip,
+    copy_hdf5_to_zarr_chunked
 )
 
 from action_extractor.utils.angles import *
@@ -353,7 +354,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras: list[str] = ["squared0view_image", "sidetableview_image", "squared0view2_image"],
+    cameras: list[str] = ["squared0view_image", "sidetableview_image"],
     absolute_actions=True
 ):
     """
@@ -367,6 +368,8 @@ def imitate_trajectory_with_action_identifier(
       - When calling the pose estimator, it now passes dictionaries of frames and depth lists for all cameras.
       - (Later you can update the pose-to-action conversion function to combine an arbitrary number of cameras.)
     """
+    
+    os.makedirs(output_dir, exist_ok=True)
 
     # 3) Preprocess dataset => convert HDF5 to Zarr.
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -374,7 +377,7 @@ def imitate_trajectory_with_action_identifier(
         ds_dir = seq_dir.replace(".hdf5", ".zarr")
         zarr_path = seq_dir.replace(".hdf5", ".zarr.zip")
         if not os.path.exists(zarr_path):
-            hdf5_to_zarr_parallel_with_progress(seq_dir, max_workers=16)
+            copy_hdf5_to_zarr_chunked(seq_dir, chunk_size_mb=1024)
             store = DirectoryStore(ds_dir)
             root_z = zarr.group(store, overwrite=False)
             store.close()
@@ -387,7 +390,25 @@ def imitate_trajectory_with_action_identifier(
     roots = [zarr.group(store) for store in stores]
 
     # 5) Create environment metadata.
-    env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
+    try:
+        # Try using the first file found in sequence_dirs
+        env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
+    except Exception as e:
+        print(f"Failed to get environment metadata from {sequence_dirs[0]}: {e}")
+
+        # If it fails, switch to the parent directory of dataset_path
+        parent_path = os.path.dirname(dataset_path)
+        print(f"Using parent directory instead: {parent_path}")
+
+        # Now gather .hdf5 files from this parent directory
+        sequence_dirs_parent = glob(f"{parent_path}/**/*.hdf5", recursive=True)
+        if not sequence_dirs_parent:
+            raise RuntimeError(
+                f"No .hdf5 files found in parent directory: {parent_path}"
+            )
+
+        # Attempt to get environment metadata again
+        env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs_parent[0])
     env_meta['env_kwargs']['controller_configs']['control_delta'] = False
     env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
 
@@ -452,7 +473,6 @@ def imitate_trajectory_with_action_identifier(
     
     n_success = 0
     total_n = 0
-    results = []
 
     # 9) Loop over demos.
     for root_z in roots:
@@ -489,8 +509,16 @@ def imitate_trajectory_with_action_identifier(
                     
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
-                    
-            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh, verbose=False)
+            
+            initial_state = root_z["data"][demo]["states"][0]
+            env_camera0.reset()
+            env_camera0.reset_to({"states": initial_state})
+            
+            print(env_camera0.env.env._eef_xquat.astype(np.float32))
+                   
+            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
+                                                        #base_orientation_quat=, 
+                                                        verbose=False)
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
@@ -508,14 +536,10 @@ def imitate_trajectory_with_action_identifier(
                     smooth=True
                 )
 
-            initial_state = root_z["data"][demo]["states"][0]
-
             # 13) Execute actions and record videos.
             # For simplicity, we use env_camera0 and env_camera1 for two views;
             # you can later extend this to record from all cameras.
             # Top-right video from camera0 environment:
-            env_camera0.reset()
-            env_camera0.reset_to({"states": initial_state})
             env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
             for action in actions_for_demo:
@@ -584,8 +608,8 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_vox0.002_iterations2_000_000",
-        num_demos=100,
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_squared0_100",
+        num_demos=4,
         save_webp=False,
         absolute_actions=True,
     )

@@ -158,6 +158,179 @@ def hdf5_to_zarr_parallel_with_progress(hdf5_path, max_workers=64):
     hdf5_file.close()
     print(f'Duplicated {hdf5_path} as zarr file {zarr_path}')
     
+def copy_hdf5_to_zarr_chunked(hdf5_path, chunk_size_mb=16):
+    """
+    Copies an HDF5 file to a Zarr directory, reading each dataset in chunked slices
+    (no concurrency), so there are no thread-safety issues.
+
+    Args:
+        hdf5_path (str): Path to the source HDF5 file.
+        chunk_size_mb (int): Approximate size in MB for read chunks from large datasets.
+
+    Result:
+        Creates a Zarr folder next to the HDF5 file (replace '.hdf5' with '.zarr').
+        E.g., if 'mydata.hdf5' => 'mydata.zarr' directory.
+
+    Usage:
+        copy_hdf5_to_zarr_chunked("/path/to/data.hdf5")
+    """
+    # Open source HDF5 read-only
+    hdf5_file = h5py.File(hdf5_path, 'r')
+
+    # Prepare output Zarr path
+    zarr_path = hdf5_path.replace('.hdf5', '.zarr')
+    if os.path.exists(zarr_path):
+        raise FileExistsError(f"Target Zarr path already exists: {zarr_path}")
+    root_zarr = zarr.open(zarr_path, mode='w')
+
+    # Count how many datasets we have (for the progress bar).
+    # We won't count groups, just datasets, because chunked copying can
+    # take more time for large datasets anyway.
+    def count_datasets(hdf_node):
+        count = 0
+        for v in hdf_node.values():
+            if isinstance(v, h5py.Dataset):
+                count += 1
+            elif isinstance(v, h5py.Group):
+                count += count_datasets(v)
+        return count
+
+    total_datasets = count_datasets(hdf5_file)
+
+    # We'll have one progress bar that increments once per dataset,
+    # plus we show chunk-level progress inside each dataset copy if desired.
+    pbar = tqdm(total=total_datasets, desc="Copying datasets", ncols=100)
+
+    def copy_group(hdf_group, zarr_group):
+        """
+        Recursively copy all groups/datasets from hdf_group to zarr_group.
+        """
+        for key, item in hdf_group.items():
+            if isinstance(item, h5py.Group):
+                # Create the corresponding group in Zarr
+                new_zgroup = zarr_group.create_group(key)
+                copy_group(item, new_zgroup)
+            elif isinstance(item, h5py.Dataset):
+                copy_dataset(item, zarr_group, key)
+                # dataset done => pbar update
+                pbar.update(1)
+
+    def copy_dataset(hdf_dataset, zarr_group, name):
+        """
+        Create a Zarr dataset with the same shape, dtype, compression, etc.,
+        then copy data chunk by chunk from the HDF5 dataset.
+        """
+        shape = hdf_dataset.shape
+        dtype = hdf_dataset.dtype
+        compression = hdf_dataset.compression
+        compression_opts = hdf_dataset.compression_opts
+        chunks = hdf_dataset.chunks  # might be None or a tuple
+        fillvalue = hdf_dataset.fillvalue
+
+        # Create the Zarr dataset
+        zarr_dset = zarr_group.create_dataset(
+            name,
+            shape=shape,
+            dtype=dtype,
+            compression=compression,
+            compression_opts=compression_opts,
+            fill_value=fillvalue
+        )
+
+        if shape is None:
+            # If dataset is scalar, just do zarr_dset[...] = hdf_dataset[...]
+            zarr_dset[()] = hdf_dataset[()]
+            return
+
+        if np.prod(shape) == 0:
+            # Empty dataset
+            return
+
+        # Compute a read-chunk shape for each dimension so that
+        # the chunk doesn't exceed chunk_size_mb in memory.
+        # For example, chunk_size_mb=16 => ~16 MB read per slice.
+        # We'll pick some chunk shape that doesn't exceed that memory usage.
+        # If hdf_dataset has its own chunk shape, we can respect it or at least
+        # not exceed it if it's smaller.
+        elem_size = dtype.itemsize
+        max_bytes = chunk_size_mb * 1024 * 1024  # MB -> bytes
+
+        # We'll create a read shape array, dimension by dimension.
+        # We'll store in read_shape[i].
+        read_shape = [1]*len(shape)
+        # We'll compute how many total elements we can read at once:
+        #   max_elems = max_bytes / elem_size
+        max_elems = max_bytes // elem_size
+
+        # We'll first see if hdf_dataset.chunks is not None; if so, we can start from that chunk size
+        # as an upper bound or so, or we can do a simpler approach: we pick a "desired read shape"
+        # by distributing the max_elems across dims. A naive approach is we want the product
+        # of read_shape <= max_elems, starting from shape for dims that are small.
+        # We'll do a simpler approach: for each dimension i, read_shape[i] = min(shape[i], some factor).
+        # But let's just do a naive approach: we do dimension by dimension from largest to smallest.
+
+        # We'll do a simpler approach: start read_shape = shape (the entire dataset), then keep dividing
+        # largest dimension by 2 until product of read_shape <= max_elems
+        read_shape = list(shape)
+        def product(x):
+            from math import prod
+            return prod(x)
+
+        while product(read_shape) > max_elems:
+            # Find largest dimension i
+            i = np.argmax(read_shape)
+            # Try dividing it by 2, but at least 1
+            new_val = max(1, read_shape[i] // 2)
+            if new_val == read_shape[i]:
+                break  # can't reduce further
+            read_shape[i] = new_val
+
+        # Now we have a read_shape that doesn't exceed ~ chunk_size_mb in memory usage.
+        # We'll iterate over each chunk in shape, read data, and write to zarr_dset.
+
+        # We'll build a multi-dimensional loop for slices. For dimension i, we do ranges of read_shape[i].
+        # e.g. for dim i, we do: for start_i in range(0, shape[i], read_shape[i]) => end_i = min(shape[i], start_i + read_shape[i])
+        # We'll store slices in a list.
+
+        def generate_slices(shape, block):
+            """
+            Yields multi-dimensional slices covering shape in steps of block.
+            E.g. shape=(100,50), block=(20,10) => yields slices like
+              (slice(0,20), slice(0,10)), (slice(0,20), slice(10,20)), etc.
+            """
+            from math import prod
+            nd = len(shape)
+            # We'll do recursion or we can do a queue-based approach.
+            # Let's do a simple recursion.
+            def recurse(dim, start_indices):
+                if dim == nd:
+                    # build slice
+                    slices = []
+                    for d in range(nd):
+                        s0 = start_indices[d]
+                        s1 = min(shape[d], s0 + block[d])
+                        slices.append(slice(s0, s1))
+                    yield tuple(slices)
+                else:
+                    # range for this dimension
+                    step = block[dim]
+                    for start in range(0, shape[dim], step):
+                        # build start_indices for next
+                        yield from recurse(dim+1, start_indices + [start])
+
+            yield from recurse(0, [])
+
+        for slc in generate_slices(shape, read_shape):
+            data_chunk = hdf_dataset[slc]
+            zarr_dset[slc] = data_chunk
+
+    # Start recursion from root
+    copy_group(hdf5_file, root_zarr)
+
+    pbar.close()
+    hdf5_file.close()
+    print(f"Copied {hdf5_path} => {zarr_path} (chunk-based, single-thread).")
+    
 def hdf5_to_zarr_zip_parallel(hdf5_path, max_workers=64, chunk_len=100):
     """
     Converts an existing HDF5 file to a single-file .zarr.zip store, in parallel,
