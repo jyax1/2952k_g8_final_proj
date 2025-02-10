@@ -367,12 +367,6 @@ def imitate_trajectory_with_action_identifier(
       - When calling the pose estimator, it now passes dictionaries of frames and depth lists for all cameras.
       - (Later you can update the pose-to-action conversion function to combine an arbitrary number of cameras.)
     """
-    # 0) Create output directory.
-    os.makedirs(output_dir, exist_ok=True)
-    # 2) Load the pose estimation model once.
-    model_name = "megapose-1.0-RGB-multi-hypothesis-icp"
-    model_info = NAMED_MODELS[model_name]
-    logger.info(f"Loading model {model_name} once at script start.")
 
     # 3) Preprocess dataset => convert HDF5 to Zarr.
     sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
@@ -492,8 +486,7 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
                     
-            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh)
-            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, "all_hand_poses_3.npy"))
+            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh, verbose=False)
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)

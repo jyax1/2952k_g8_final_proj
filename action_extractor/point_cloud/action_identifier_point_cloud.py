@@ -64,7 +64,7 @@ def get_poses_from_pointclouds(
     dbscan_eps=0.02,
     dbscan_min_points=20,
     base_orientation_quat=np.array([2.8445084e-02, 9.9697667e-01, -4.8518830e-04, 7.2306558e-02]), # [0.7253942, 0.6844675, 0.05062998, 0.05238412] [ 2.8445084e-02  9.9697667e-01 -4.8518830e-04  7.2306558e-02]
-    max_orientation_angle=np.pi/2,
+    max_orientation_angle=np.pi/4,
     verbose=True,
     icp_method="multiscale"  # <-- Choose "updown" or "multiscale"
 ):
