@@ -365,7 +365,7 @@
             "name": "Debug imitate_trajectory_with_pointcloud.py with Xvfb",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/action_extractor/pointcloud/imitate_trajectory_with_pointcloud.py",
+            "program": "${workspaceFolder}/action_extractor/point_cloud/imitate_trajectory_with_pointcloud.py",
             // This calls our script in debug mode with your normal breakpoints.
             
             "console": "integratedTerminal",

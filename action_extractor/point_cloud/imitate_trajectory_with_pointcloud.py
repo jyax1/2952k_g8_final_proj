@@ -339,6 +339,13 @@ def save_pointclouds_with_bbox_as_ply(point_clouds_points,
                 f.write(f"{x} {y} {z} {rr} {gg} {bb}\n")
 
         print(f"Saved {filename}")
+        
+def save_hand_poses(all_hand_poses, filename="all_hand_poses.npy"):
+    """
+    Saves the Nx4x4 array of poses to a .npy file.
+    """
+    np.save(filename, all_hand_poses)
+    print(f"Saved poses to {filename}")
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -486,15 +493,16 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
                     
             all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh)
+            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, "all_hand_poses_2.npy"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
             if absolute_actions:
                 actions_for_demo = poses_to_absolute_actions(
-                    poses=all_hand_poses,
+                    poses=all_hand_poses[1:],
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                     env=env_camera0,  # using camera0 environment to get initial orientation
-                    smooth=True
+                    smooth=False
                 )
             else:
                 actions_for_demo = poses_to_delta_actions(
@@ -572,7 +580,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/test/test_pointcloud",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_vox0.002_iterations1_000_000",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_no_opt_thresh_best_vox0.002_iterations2_000_000",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,

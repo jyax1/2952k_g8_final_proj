@@ -58,22 +58,30 @@ def get_poses_from_pointclouds(
     green_threshold=0.9,
     non_green_max=0.7,
     voxel_size=0.002,
-    mesh_num_points=50000,
+    mesh_num_points=20000,
     debug_dir="debug/pointclouds_with_model",
     model_in_mm=True,
     dbscan_eps=0.02,
     dbscan_min_points=20,
     base_orientation_quat=np.array([0.7253942, 0.6844675, 0.05062998, 0.05238412]),
     max_orientation_angle=np.pi/2,
-    verbose=True
+    verbose=True,
+    icp_method="multiscale"  # <-- Choose "updown" or "multiscale"
 ):
     """
-    Modified version that only prints when `verbose=True`.
-
     The function estimates poses for a model in a sequence of green-colored
-    point clouds. For the first frame, it does RANSAC with an orientation filter
-    plus ICP. For subsequent frames, it does RANSAC (without orientation filter)
-    plus ICP, storing the best transform and using it optionally in the next frame.
+    point clouds. For the first frame, it does RANSAC (with orientation filter)
+    + ICP. For subsequent frames, it does RANSAC (without orientation filter)
+    + ICP, or just ICP from the previous transform.
+
+    We now have two ICP methods:
+      - "updown": the custom up-down threshold approach.
+      - "multiscale": a standard multi-scale ICP approach.
+
+    Usage:
+      get_poses_from_pointclouds(..., icp_method="multiscale")
+      or
+      get_poses_from_pointclouds(..., icp_method="updown")
     """
 
     # -------------------------------
@@ -101,7 +109,7 @@ def get_poses_from_pointclouds(
         return pcd_down
 
     # -------------------------------------------------------------------------
-    # Custom Up/Down ICP (modified to use verbose)
+    # 1a) The Existing Up/Down ICP
     # -------------------------------------------------------------------------
     def icp_threshold_updown_force_one(
         source,
@@ -111,84 +119,55 @@ def get_poses_from_pointclouds(
         verbose=True
     ):
         """
-        Runs a custom "up-down" ICP procedure until the total iteration budget is exhausted.
-        Each call to ICP uses it_count iterations, so we accumulate usage and stop once
-        total_iterations are used up (or if used_iters <= 0).
-
-        Args:
-            source (o3d.geometry.PointCloud): Source point cloud.
-            target (o3d.geometry.PointCloud): Target point cloud.
-            init_transform (np.ndarray): Initial 4x4 guess for ICP.
-            total_iterations (int): Overall iteration budget. Each call to ICP uses it_count
-                                    of these iterations. Once used, we stop.
-            voxel_size (float): Used to compute thresholds and iteration counts.
-            verbose (bool): If True, prints debug statements.
-
-        Returns:
-            np.ndarray: A 4x4 transform (the best found).
+        Custom "up-down" ICP procedure:
+          - Dynamically adjusts the threshold up/down based on fitness.
+          - Has a total iteration budget.
         """
-
-        # A small dictionary to keep track of how many times we've used a given threshold.
         times_visited = {}
         total_iterations_used = 0
 
         def get_iteration_count(threshold):
-            """
-            Compute how many ICP iterations to run in a single call,
-            based on the current threshold and how often we've visited it.
-            """
             t_key = float(threshold)
             vcount = times_visited.get(t_key, 0)
-            # Example formula from original code; can be modified as needed.
+            # Example formula
             it_count = 10000 * (voxel_size / threshold) * 8 * (1 + 0.1 * vcount)
-            return max(1, int(it_count))
+            return min(109875, max(1, int(it_count))) # <-- capping at 100k, so that icp call doesn't get stuck
 
-        def run_icp(threshold, init_pose):
+        def run_icp(threshold_val, init_pose):
             nonlocal total_iterations_used
 
-            # Track visits
-            t_key = float(threshold)
+            t_key = float(threshold_val)
             old_visits = times_visited.get(t_key, 0)
             times_visited[t_key] = old_visits + 1
 
-            # Determine how many iterations to use for this ICP call
-            it_count = get_iteration_count(threshold)
+            it_count = get_iteration_count(threshold_val)
 
-            # If using it_count would exceed our total budget, clamp it
             if total_iterations_used + it_count > total_iterations:
                 it_count = total_iterations - total_iterations_used
 
-            # If there's no iteration budget left, exit immediately
             if it_count <= 0:
                 return 0.0, 999999.0, init_pose, 0
 
-            # Configure ICP
             crit = o3d.pipelines.registration.ICPConvergenceCriteria(
                 max_iteration=it_count,
                 relative_fitness=1e-6,
                 relative_rmse=1e-6
             )
-            # Run ICP
             result_icp = o3d.pipelines.registration.registration_icp(
                 source,
                 target,
-                threshold,
+                threshold_val,
                 init_pose,
                 o3d.pipelines.registration.TransformationEstimationPointToPlane(),
                 criteria=crit
             )
 
-            # Update how many iterations we've used
             total_iterations_used += it_count
-
             return (result_icp.fitness,
                     result_icp.inlier_rmse,
                     result_icp.transformation,
                     it_count)
 
-        # ------------------------------
-        # Initialization
-        # ------------------------------
         current_transform = init_transform.copy()
         best_transform = current_transform.copy()
         best_fitness = 0.0
@@ -196,27 +175,22 @@ def get_poses_from_pointclouds(
         best_threshold = threshold
         best_rmse = 1.0
 
-        # ------------------------------
         # Loop until we exhaust total_iterations
-        # ------------------------------
-        while total_iterations_used < total_iterations:
+        while True:
             fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)
 
             if verbose:
-                print(f"[UpDownICP] threshold={threshold:.4f}, used_iters={used_iters}, "
-                    f"fitness={fitness:.4f}, rmse={rmse:.5f}, total_used={total_iterations_used}/{total_iterations}")
+                print(f"[UpDownICP] thr={threshold:.4f}, used_iters={used_iters}, "
+                      f"fitness={fitness:.4f}, rmse={rmse:.5f}, total_used={total_iterations_used}/{total_iterations}")
 
-            # If run_icp reports used_iters = 0, no more budget => stop
             if used_iters <= 0:
                 if verbose:
-                    print("No iteration budget left or 0 used in ICP => break.")
+                    print("No iteration budget left or 0 used => break.")
                 break
 
-            # Decide whether to move threshold up or down
             if fitness >= 0.99:
                 threshold *= 0.5
                 current_transform = new_transform
-                # Keep track of best transform if we improved threshold
                 if threshold < best_threshold:
                     best_transform = current_transform.copy()
                     best_threshold = threshold
@@ -224,20 +198,89 @@ def get_poses_from_pointclouds(
                     best_rmse = rmse
             else:
                 threshold *= 1.5
-                current_transform = new_transform
+                # current_transform = new_transform
 
-        # ------------------------------
-        # Final logging
-        # ------------------------------
+            if total_iterations_used >= total_iterations:
+                break
+
         if verbose:
-            print(f"[UpDownICP] Finished or ran out of budget.")
-            print(f"    total_iterations_used = {total_iterations_used}")
-            print(f"    best_threshold={best_threshold:.4f}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+            print(f"[UpDownICP] total_iterations_used={total_iterations_used}, "
+                  f"best_threshold={best_threshold:.4f}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
 
         return best_transform
-    
+
     # -------------------------------------------------------------------------
-    # FPFH
+    # 1b) A Standard Multi-Scale ICP
+    # -------------------------------------------------------------------------
+    def icp_multiscale_standard(
+        source,
+        target,
+        init_transform,
+        verbose=True,
+    ):
+        """
+        A classic multi-scale ICP pipeline:
+          1. We define multiple voxel sizes (coarse to fine).
+          2. Downsample source & target at each scale.
+          3. Run ICP with some max iteration at each scale.
+          4. Pass the result as initialization to the next scale.
+        """
+
+        # Example multi-scale parameters (tune as needed).
+        voxel_sizes = [5.0 * voxel_size, 2.5 * voxel_size, 1.0 * voxel_size]
+        max_iters = [50, 30, 14]  # number of iterations per scale
+
+        current_transform = init_transform.copy()
+
+        for scale_idx, vsize in enumerate(voxel_sizes):
+            # Downsample
+            source_down = source.voxel_down_sample(vsize)
+            target_down = target.voxel_down_sample(vsize)
+
+            # Re-estimate normals for each downsample
+            source_down.estimate_normals(
+                search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                    radius=vsize * 2.0, max_nn=30
+                )
+            )
+            target_down.estimate_normals(
+                search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                    radius=vsize * 2.0, max_nn=30
+                )
+            )
+
+            # ICP threshold can be e.g. ~1-2x the voxel size
+            icp_dist_thresh = 1.5 * vsize
+
+            if verbose:
+                print(f"[Multi-Scale ICP] scale={scale_idx}, voxel={vsize}, max_iter={max_iters[scale_idx]}")
+
+            # Setup criteria
+            crit = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=max_iters[scale_idx],
+                relative_fitness=1e-6,
+                relative_rmse=1e-6
+            )
+
+            # Run point-to-plane ICP
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source_down,
+                target_down,
+                icp_dist_thresh,
+                current_transform,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=crit
+            )
+
+            current_transform = result_icp.transformation
+
+            if verbose:
+                print(f"   => fitness={result_icp.fitness:.4f}, rmse={result_icp.inlier_rmse:.5f}")
+
+        return current_transform
+
+    # -------------------------------------------------------------------------
+    # Compute FPFH
     # -------------------------------------------------------------------------
     def compute_fpfh(pcd, voxel):
         pcd.estimate_normals(
@@ -275,7 +318,7 @@ def get_poses_from_pointclouds(
         return result
 
     # -------------------------------------------------------------------------
-    # First-frame registration (with orientation filter)
+    # Registration for First Frame (with orientation filter + user-chosen ICP)
     # -------------------------------------------------------------------------
     def register_green_points_to_model_first_frame(green_pts_np, model_pcd_o3d):
         if len(green_pts_np) < 10:
@@ -284,9 +327,7 @@ def get_poses_from_pointclouds(
             return np.eye(4)
 
         green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
-        largest_cluster = cluster_and_keep_largest(
-            green_pcd, eps=dbscan_eps, min_points=dbscan_min_points
-        )
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
         if len(largest_cluster.points) < 10:
             if verbose:
                 print("    Largest cluster <10 points, identity.")
@@ -302,15 +343,13 @@ def get_poses_from_pointclouds(
         src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
         tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
 
-        found_1_point_0 = False
+        found_good_ransac = False
         best_transform = None
         attempt = 0
 
         while True:
             seed = random.randint(0, 2**31 - 1)
-            result_ransac = global_registration(
-                green_o3d_clean, model_o3d_clean, src_fpfh, tgt_fpfh, seed=seed
-            )
+            result_ransac = global_registration(green_o3d_clean, model_o3d_clean, src_fpfh, tgt_fpfh, seed=seed)
             attempt += 1
 
             if verbose:
@@ -319,9 +358,10 @@ def get_poses_from_pointclouds(
 
             R_est = result_ransac.transformation[:3, :3]
             angle_diff = orientation_angle_diff(R_est, base_orientation_quat)
+
             if angle_diff <= max_orientation_angle:
                 if result_ransac.fitness >= 1.0 - 1e-12:
-                    found_1_point_0 = True
+                    found_good_ransac = True
                     best_transform = result_ransac.transformation
                     if verbose:
                         print("Found a valid transform with ~1.0 fitness. Done.")
@@ -333,10 +373,19 @@ def get_poses_from_pointclouds(
                 if verbose:
                     print("Orientation not valid, trying another seed.")
 
-        if found_1_point_0:
-            final_transform = icp_threshold_updown_force_one(
-                green_o3d_clean, model_o3d_clean, best_transform
-            )
+            # You might cap the number of attempts here, to avoid infinite loops
+            # if attempt > 200: break
+
+        if found_good_ransac:
+            # Choose which ICP method to refine with
+            if icp_method == "updown":
+                final_transform = icp_threshold_updown_force_one(
+                    green_o3d_clean, model_o3d_clean, best_transform, verbose=verbose
+                )
+            else:  # "multiscale"
+                final_transform = icp_multiscale_standard(
+                    green_o3d_clean, model_o3d_clean, best_transform, verbose=verbose
+                )
             return final_transform
 
         if verbose:
@@ -344,22 +393,19 @@ def get_poses_from_pointclouds(
         return np.eye(4)
 
     # -------------------------------------------------------------------------
-    # Subsequent-frame registration (no orientation filter)
+    # Registration for Subsequent Frames (no orientation filter)
     # -------------------------------------------------------------------------
     def register_green_points_to_model_subsequent_frames(green_pts_np, model_pcd_o3d, prev_transform):
         """
-        If you want to skip RANSAC and just do ICP from prev_transform,
-        you can do that easily by calling `icp_threshold_updown_force_one` 
-        directly with `prev_transform`.
-        In the current implementation, we do exactly that.
+        For subsequent frames, we skip orientation filter. We can also skip RANSAC
+        in the original code, but let's keep the same logic if desired.
+        Right now, we just do 'ICP from prev_transform' (which can be updown or multiscale).
         """
         if len(green_pts_np) < 10:
             return np.eye(4)
 
         green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
-        largest_cluster = cluster_and_keep_largest(
-            green_pcd, eps=dbscan_eps, min_points=dbscan_min_points
-        )
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
         if len(largest_cluster.points) < 10:
             return np.eye(4)
 
@@ -368,10 +414,15 @@ def get_poses_from_pointclouds(
         if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
             return np.eye(4)
 
-        # For now, we just do ICP from prev_transform
-        final_transform = icp_threshold_updown_force_one(
-            green_o3d_clean, model_o3d_clean, init_transform=prev_transform
-        )
+        if icp_method == "updown":
+            final_transform = icp_threshold_updown_force_one(
+                green_o3d_clean, model_o3d_clean, init_transform=prev_transform, verbose=verbose
+            )
+        else:  # "multiscale"
+            final_transform = icp_multiscale_standard(
+                green_o3d_clean, model_o3d_clean, init_transform=prev_transform, verbose=verbose
+            )
+
         return final_transform
 
     # -------------------------------------------------------------------------
@@ -399,12 +450,12 @@ def get_poses_from_pointclouds(
             continue
 
         if i == 0:
-            # First frame => orientation filter + ICP
+            # First frame => orientation filter + chosen ICP
             transform_green_to_model = register_green_points_to_model_first_frame(
                 green_pts, object_model_o3d
             )
         else:
-            # Subsequent frames => ICP from prev_transform
+            # Subsequent frames => chosen ICP from previous transform
             transform_green_to_model = register_green_points_to_model_subsequent_frames(
                 green_pts,
                 object_model_o3d,
