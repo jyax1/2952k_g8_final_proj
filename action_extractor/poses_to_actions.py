@@ -95,7 +95,9 @@ def poses_to_absolute_actions(
     poses, 
     gripper_actions,
     env,
-    smooth=True
+    smooth=True,
+    control_freq=30,
+    policy_freq=10
 ):
     """
     We smooth out the translation portion by looking ahead for a future
@@ -109,54 +111,61 @@ def poses_to_absolute_actions(
 
     Steps in detail:
     1) SMOOTH POSITIONS:
-        - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
-        - Starting from i=0, if jump i->i+1 is small, keep it.
-        If jump is big, search forward for j with a small jump from i.
-        If found, linearly interpolate from i..j.
-        If not found (end), extrapolate or hold constant.
+       - We'll create a 'smoothed_positions' array of shape (len(poses), 3).
+       - Starting from i=0, if jump i->i+1 is small, keep it.
+         If jump is big, search forward for j with a small jump from i.
+         If found, linearly interpolate from i..j.
+         If not found (end), extrapolate or hold constant.
     2) ORIENTATION:
-        - For each i in [0 .. num_samples-2],
-        compute delta quaternion from poses[i]-> poses[i+1].
-        Accumulate into `current_orientation`.
-        Convert to axis-angle (with sign unification).
+       - For each i in [0 .. num_samples-2],
+         compute delta quaternion from poses[i]->poses[i+1].
+         Accumulate into `current_orientation`.
+         Convert to axis-angle (with sign unification).
     3) BUILD ACTIONS:
-        - For each i in [0 .. num_samples-2], the final action 
-        uses `smoothed_positions[i+1]` as [px,py,pz] 
-        and the just-computed orientation as [rx,ry,rz].
-        - Set gripper=1.0 or your logic.
-
+       - For each i in [0 .. num_samples-2], the final action 
+         uses `smoothed_positions[i+1]` as [px,py,pz] 
+         and the just-computed orientation as [rx,ry,rz].
+       - Set gripper=1.0 or your logic.
+    4) REPEAT:
+       - Each computed action is repeated steps_per_policy times so that if
+         steps_per_policy = 2, a₀, a₁, a₂, … becomes a₀, a₀, a₁, a₁, a₂, a₂, ….
+       
     Returns:
-    all_actions of shape (num_samples-1, 7).
+       all_actions of shape ((num_samples-1)*steps_per_policy, 7).
     """
+    import numpy as np
 
     num_samples = len(poses)
     if num_samples < 2:
         return np.zeros((0, 7), dtype=np.float32)
 
-    # 1) Compute a smoothed set of positions
+    # 1) Compute a smoothed set of positions.
     if smooth:
         smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
     else:
         smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
 
-    # 2) Start from environment's known initial eef quaternion 
+    # 2) Start from environment's known initial eef quaternion and position.
     current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
     current_position = env.env.env._eef_xpos.astype(np.float32)
 
-    # We'll have num_actions = num_samples - 1
-    num_actions = num_samples - 1
-    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+    # Compute steps_per_policy and preallocate the final action array.
+    steps_per_policy = control_freq // policy_freq
+    num_actions = num_samples - 1  # one action per pose transition.
+    total_control_steps = num_actions * steps_per_policy
+    all_actions = np.zeros((total_control_steps, 7), dtype=np.float32)
 
-    prev_rvec = None
+    # Compute a position offset (if needed) so that the first pose aligns with the initial eef position.
     position_offset = smoothed_positions[0] - current_position
 
+    # Loop over each policy step and compute one absolute action.
     for i in range(num_actions):
-        # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
-        # --- Position from the precomputed 'smoothed_positions' ---
-            
+        # --- Compute target position from the precomputed smoothed positions ---
         px, py, pz = smoothed_positions[i+1]
-        
+        position = np.array([px, py, pz]) - position_offset
+
+        # --- Compute orientation: poses[i] -> poses[i+1] ---
         R_i  = poses[i][:3, :3]
         R_i1 = poses[i+1][:3, :3]
 
@@ -167,30 +176,31 @@ def poses_to_absolute_actions(
         q_i1  = quat_normalize(q_i1)
         q_inv = quat_inv(q_i)
 
+        # Compute the rotation delta (make sure the order matches your intended convention)
         q_delta = quat_multiply(q_inv, q_i1)
         q_delta = quat_normalize(q_delta)
 
-        # Accumulate orientation
+        # Accumulate the orientation to get the absolute orientation.
         current_orientation = quat_multiply(current_orientation, q_delta)
         current_orientation = quat_normalize(current_orientation)
 
-        # Convert to axis-angle, unify sign
+        # Convert quaternion to axis-angle representation.
         rvec = quat2axisangle(current_orientation)
-        # if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
-        #     rvec = -rvec
-        # prev_rvec = rvec
-        
-        # pz -= z_offset
 
-        # Build the 7D action
-        all_actions[i, :3]  = [px - position_offset[0], py - position_offset[1], pz - position_offset[2]]
-        all_actions[i, 3:6] = rvec
-        all_actions[i][-1] = gripper_actions[i]
+        # Get the gripper action corresponding to this policy step.
+        gripper = gripper_actions[i]
 
-    # Add 10 buffer absolute actions that are copies of the last action
-    for i in range(10):
-        all_actions[num_actions+i] = all_actions[num_actions-1]
-        
+        # Build the 7D action vector for this policy step.
+        action = np.zeros(7, dtype=np.float32)
+        action[:3] = position
+        action[3:6] = rvec
+        action[6] = gripper
+
+        # Determine the indices in the final all_actions array where this action is repeated.
+        start_idx = i * steps_per_policy
+        end_idx = start_idx + steps_per_policy
+        all_actions[start_idx:end_idx, :] = np.tile(action, (steps_per_policy, 1))
+
     return all_actions
 
 

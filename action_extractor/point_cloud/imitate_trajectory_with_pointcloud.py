@@ -521,7 +521,7 @@ def imitate_trajectory_with_action_identifier(
 
     # Create a rendering environment (we'll use it to obtain image dimensions and camera parameters).
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
-    env_camera0.env.control_freq = 10
+    # env_camera0.env.control_freq = 10
     example_image = roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
@@ -615,7 +615,7 @@ def imitate_trajectory_with_action_identifier(
             else:
                 all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
                                                             #base_orientation_quat=, 
-                                                            verbose=True)
+                                                            verbose=False)
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -626,6 +626,8 @@ def imitate_trajectory_with_action_identifier(
                     poses=all_hand_poses,
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                     env=env_camera0,  # using camera0 environment to get initial orientation
+                    control_freq = env_camera0.env.env.control_freq,
+                    policy_freq = 10,
                     smooth=False
                 )
             else:
@@ -719,5 +721,5 @@ if __name__ == "__main__":
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=False,
+        ground_truth=True,
     )
