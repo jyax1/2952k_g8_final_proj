@@ -478,6 +478,7 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+        demos = [list(root_z["data"].keys())[0]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -517,15 +518,15 @@ def imitate_trajectory_with_action_identifier(
                    
             all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
                                                         #base_orientation_quat=, 
-                                                        verbose=False)
+                                                        verbose=True)
             
-            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
+            # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
             if absolute_actions:
                 actions_for_demo = poses_to_absolute_actions(
-                    poses=all_hand_poses[1:],
+                    poses=all_hand_poses,
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                     env=env_camera0,  # using camera0 environment to get initial orientation
                     smooth=False
@@ -534,7 +535,7 @@ def imitate_trajectory_with_action_identifier(
                 actions_for_demo = poses_to_delta_actions(
                     poses=all_hand_poses,
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                    smooth=True
+                    smooth=False
                 )
 
             # 13) Execute actions and record videos.
@@ -609,8 +610,8 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_squared0_100",
-        num_demos=4,
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_absolute_squared0_100",
+        num_demos=100,
         save_webp=False,
-        absolute_actions=False,
+        absolute_actions=True,
     )

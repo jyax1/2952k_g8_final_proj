@@ -150,12 +150,11 @@ def poses_to_absolute_actions(
 
     prev_rvec = None
     z_offset = None
+    position_offset = smoothed_positions[0] - current_position
 
     for i in range(num_actions):
         # --- Orientation from poses[i] -> poses[i+1] (the "real" rotation) ---
         # --- Position from the precomputed 'smoothed_positions' ---
-        if z_offset is None:
-            z_offset = smoothed_positions[i][2] - current_position[2]
             
         px, py, pz = smoothed_positions[i+1]
         
@@ -182,11 +181,10 @@ def poses_to_absolute_actions(
             rvec = -rvec
         prev_rvec = rvec
         
-        pz -= z_offset
+        # pz -= z_offset
 
         # Build the 7D action
-        current_position = np.array([px, py, pz], dtype=np.float32)
-        all_actions[i, :3]  = [px, py, pz]
+        all_actions[i, :3]  = [px - position_offset[0], py - position_offset[1], pz - position_offset[2]]
         all_actions[i, 3:6] = rvec
         all_actions[i][-1] = gripper_actions[i]
 
@@ -277,7 +275,7 @@ def poses_to_delta_actions(
         
         # For some reason this is needed to get the right direction
         
-        rvec *= 9
+        rvec *= 9.5
 
         # Build the 7D delta action
         all_actions[i, :3]  = [dx, dy, dz]
