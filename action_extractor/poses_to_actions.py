@@ -200,6 +200,7 @@ def poses_to_absolute_actions(
 def poses_to_delta_actions(
     poses, 
     gripper_actions,
+    translation_scaling=80.0,
     smooth=True
 ):
     """
@@ -263,19 +264,24 @@ def poses_to_delta_actions(
 
         q_i   = quat_normalize(q_i)
         q_i1  = quat_normalize(q_i1)
-
         q_inv = quat_inv(q_i)
-        q_delta = quat_multiply(q_inv, q_i1)
+        
+        q_delta = quat_multiply(q_i1, q_inv)
         q_delta = quat_normalize(q_delta)
 
         # Convert to axis-angle, unify sign with previous
         rvec = quat2axisangle(q_delta)
-        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
-            rvec = -rvec
-        prev_rvec = rvec
+        # if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+        #     rvec = -rvec
+        # prev_rvec = rvec
+        
+        # For some reason this is needed to get the right direction
+        
+        rvec *= 9
 
         # Build the 7D delta action
         all_actions[i, :3]  = [dx, dy, dz]
+        all_actions[i, :3]  *= translation_scaling
         all_actions[i, 3:6] = rvec
         all_actions[i, 6]   = gripper_actions[i]
         

@@ -409,8 +409,9 @@ def imitate_trajectory_with_action_identifier(
 
         # Attempt to get environment metadata again
         env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs_parent[0])
-    env_meta['env_kwargs']['controller_configs']['control_delta'] = False
-    env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
+    if absolute_actions:
+        env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+        env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
 
     # Extract base camera names from the observation strings.
     # For example, "frontview_image" becomes "frontview".
@@ -513,12 +514,12 @@ def imitate_trajectory_with_action_identifier(
             initial_state = root_z["data"][demo]["states"][0]
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
-            
-            print(env_camera0.env.env._eef_xquat.astype(np.float32))
                    
             all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
                                                         #base_orientation_quat=, 
                                                         verbose=False)
+            
+            save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
@@ -611,5 +612,5 @@ if __name__ == "__main__":
         output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_squared0_100",
         num_demos=4,
         save_webp=False,
-        absolute_actions=True,
+        absolute_actions=False,
     )
