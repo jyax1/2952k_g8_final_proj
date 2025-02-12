@@ -226,6 +226,48 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     return all_actions
 
+def load_ground_truth_poses(obs_group):
+    """
+    Given an HDF5 group with 'robot0_eef_pos' and 'robot0_eef_quat', 
+    returns a list of 4x4 poses in SE(3).
+    
+    'robot0_eef_pos' is expected to have shape (N, 3)
+    'robot0_eef_quat' is expected to have shape (N, 4) in the order [qx, qy, qz, qw].
+    """
+    
+    # 1) Load arrays from the HDF5 group
+    pos_array = obs_group["robot0_eef_pos"][:]    # shape (N, 3)
+    quat_array = obs_group["robot0_eef_quat"][:]  # shape (N, 4) => [qx, qy, qz, qw]
+
+    # 2) Helper to convert quaternion (qx, qy, qz, qw) to 3x3 rotation matrix
+    def quaternion_to_rotation_matrix(qx, qy, qz, qw):
+        # We assume the quaternion is normalized. If not, you can normalize first.
+        x2, y2, z2 = 2.0 * qx, 2.0 * qy, 2.0 * qz
+        xx, yy, zz = qx * x2, qy * y2, qz * z2
+        xy, xz, yz = qx * y2, qx * z2, qy * z2
+        wx, wy, wz = qw * x2, qw * y2, qw * z2
+
+        # Construct rotation matrix
+        R = np.array([
+            [1.0 - (yy + zz), xy - wz,        xz + wy       ],
+            [xy + wz,         1.0 - (xx + zz), yz - wx       ],
+            [xz - wy,         yz + wx,         1.0 - (xx + yy)]
+        ], dtype=np.float64)
+        return R
+
+    # 3) Build 4x4 transforms
+    all_poses = []
+    for (px, py, pz), (qx, qy, qz, qw) in zip(pos_array, quat_array):
+        # Convert quaternion to rotation
+        R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
+        # Create 4x4 pose
+        T = np.eye(4, dtype=np.float64)
+        T[:3, :3] = R
+        T[:3, 3] = [px, py, pz]
+        all_poses.append(T)
+
+    return all_poses
+
 def save_pointclouds_with_bbox_as_ply(point_clouds_points,
                                       point_clouds_colors,
                                       poses,
@@ -355,7 +397,8 @@ def imitate_trajectory_with_action_identifier(
     num_demos=100,
     save_webp=False,
     cameras: list[str] = ["squared0view_image", "sidetableview_image"],
-    absolute_actions=True
+    absolute_actions=True,
+    ground_truth=False
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -516,9 +559,12 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
                    
-            all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
-                                                        #base_orientation_quat=, 
-                                                        verbose=True)
+            if ground_truth:
+                all_hand_poses = load_ground_truth_poses(obs_group)
+            else:
+                all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
+                                                            #base_orientation_quat=, 
+                                                            verbose=True)
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -613,5 +659,6 @@ if __name__ == "__main__":
         output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
-        absolute_actions=True,
+        absolute_actions=False,
+        ground_truth=True,
     )

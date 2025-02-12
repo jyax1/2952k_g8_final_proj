@@ -149,7 +149,6 @@ def poses_to_absolute_actions(
     all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
 
     prev_rvec = None
-    z_offset = None
     position_offset = smoothed_positions[0] - current_position
 
     for i in range(num_actions):
@@ -177,9 +176,9 @@ def poses_to_absolute_actions(
 
         # Convert to axis-angle, unify sign
         rvec = quat2axisangle(current_orientation)
-        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
-            rvec = -rvec
-        prev_rvec = rvec
+        # if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+        #     rvec = -rvec
+        # prev_rvec = rvec
         
         # pz -= z_offset
 
@@ -246,9 +245,6 @@ def poses_to_delta_actions(
     num_actions = num_samples - 1
     all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
 
-    # Keep track of the previous axis-angle to unify sign
-    prev_rvec = None
-
     for i in range(num_actions):
         # --- Position delta ---
         dx, dy, dz = smoothed_positions[i+1] - smoothed_positions[i]
@@ -269,13 +265,8 @@ def poses_to_delta_actions(
 
         # Convert to axis-angle, unify sign with previous
         rvec = quat2axisangle(q_delta)
-        # if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
-        #     rvec = -rvec
-        # prev_rvec = rvec
         
-        # For some reason this is needed to get the right direction
-        
-        rvec *= 9.5
+        rvec *= 9
 
         # Build the 7D delta action
         all_actions[i, :3]  = [dx, dy, dz]
