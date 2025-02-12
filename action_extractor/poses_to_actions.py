@@ -197,7 +197,8 @@ def poses_to_absolute_actions(
 def poses_to_delta_actions(
     poses, 
     gripper_actions,
-    translation_scaling=80.0,
+    translation_scaling=75.0,
+    rotation_scaling=9.0,
     smooth=True
 ):
     """
@@ -243,7 +244,7 @@ def poses_to_delta_actions(
 
     # We'll have num_actions = num_samples - 1
     num_actions = num_samples - 1
-    all_actions = np.zeros((num_actions + 10, 7), dtype=np.float32)
+    all_actions = np.zeros((num_actions, 7), dtype=np.float32)
 
     for i in range(num_actions):
         # --- Position delta ---
@@ -266,7 +267,7 @@ def poses_to_delta_actions(
         # Convert to axis-angle, unify sign with previous
         rvec = quat2axisangle(q_delta)
         
-        rvec *= 9
+        rvec *= rotation_scaling
 
         # Build the 7D delta action
         all_actions[i, :3]  = [dx, dy, dz]
@@ -275,3 +276,93 @@ def poses_to_delta_actions(
         all_actions[i, 6]   = gripper_actions[i]
         
     return all_actions
+
+
+def poses_to_delta_actions_lr(
+    poses, 
+    gripper_actions,
+    smooth=True,
+    mapping_coef_file="reg_coef.npy",
+    mapping_intercept_file="reg_intercept.npy"
+):
+    """
+    Convert a sequence of 4x4 pose matrices into delta actions (position + orientation),
+    then map these computed actions to the true actions using a linear regression mapping.
+    The mapping is defined as: true_action = computed_action @ coef.T + intercept
+
+    Steps:
+    1) SMOOTH POSITIONS (optional):
+       - Either smooth the positions using a user-defined `smooth_positions` function
+         or directly take the translation part of each pose.
+    2) ORIENTATION DIFFERENCE:
+       - For each consecutive pair of rotation matrices R_i -> R_i+1,
+         compute the quaternion difference (q_delta = inv(q_i) * q_i+1) and convert to axis-angle.
+    3) BUILD DELTA ACTIONS:
+       - Compute delta translation: smoothed_positions[i+1] - smoothed_positions[i]
+       - Compute delta rotation: axis-angle representation of q_delta.
+       - Set gripper action: from gripper_actions[i]
+    4) MAP TO TRUE ACTIONS:
+       - Load the regression parameters from .npy files and transform the computed actions.
+    5) BUFFER AT THE END:
+       - Append 10 copies of the last action.
+       
+    Args:
+        poses (list of ndarray): Each element is a 4x4 transformation matrix.
+        gripper_actions (array-like): 1D array of gripper values (length must match len(poses)).
+        smooth (bool): If True, uses a smoothing function on positions.
+        mapping_coef_file (str): Path to the .npy file containing the regression coefficients.
+        mapping_intercept_file (str): Path to the .npy file containing the regression intercept.
+    
+    Returns:
+        all_actions (ndarray): shape (num_samples - 1 + 10, 7)
+                               Each row = [dx, dy, dz, rx, ry, rz, gripper]
+    """
+    import numpy as np
+
+    num_samples = len(poses)
+    if num_samples < 2:
+        return np.zeros((0, 7), dtype=np.float32)
+
+    # 1) Compute smoothed positions if needed.
+    if smooth:
+        smoothed_positions = smooth_positions(poses, dist_threshold=0.15)
+    else:
+        smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
+
+    num_actions = num_samples - 1
+    computed_actions = np.zeros((num_actions, 7), dtype=np.float32)
+
+    for i in range(num_actions):
+        # --- Position delta ---
+        dx, dy, dz = smoothed_positions[i+1] - smoothed_positions[i]
+
+        # --- Orientation delta: poses[i] -> poses[i+1] ---
+        R_i  = poses[i][:3, :3]
+        R_i1 = poses[i+1][:3, :3]
+
+        q_i  = rotation_matrix_to_quaternion(R_i)
+        q_i1 = rotation_matrix_to_quaternion(R_i1)
+
+        q_i   = quat_normalize(q_i)
+        q_i1  = quat_normalize(q_i1)
+        q_inv = quat_inv(q_i)
+        
+        # Note: the order here should match what you used during regression.
+        q_delta = quat_multiply(q_i1, q_inv)
+        q_delta = quat_normalize(q_delta)
+
+        # Convert to axis-angle.
+        rvec = quat2axisangle(q_delta)
+
+        # Build the 7D computed action (without hand-tuned scaling).
+        computed_actions[i, :3]  = [dx, dy, dz]
+        computed_actions[i, 3:6] = rvec
+        computed_actions[i, 6]   = gripper_actions[i]
+
+    # 4) Load regression parameters and apply mapping:
+    coef = np.load(mapping_coef_file)
+    intercept = np.load(mapping_intercept_file)
+    # Apply the mapping: for each computed action x, we compute y = x @ coef.T + intercept
+    mapped_actions = computed_actions @ coef.T + intercept
+    
+    return mapped_actions

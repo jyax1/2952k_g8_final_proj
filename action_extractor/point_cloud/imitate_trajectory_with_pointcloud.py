@@ -28,10 +28,7 @@ from action_extractor.utils.dataset_utils import (
 
 from action_extractor.utils.angles import *
 
-from action_extractor.poses_to_actions import (
-    poses_to_absolute_actions,
-    poses_to_delta_actions,
-)
+from action_extractor.poses_to_actions import *
 
 from action_extractor.point_cloud.action_identifier_point_cloud import (
     get_poses_from_pointclouds,
@@ -268,6 +265,59 @@ def load_ground_truth_poses(obs_group):
 
     return all_poses
 
+
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+
+def analyze_delta_action_mapping(demo_group, computed_actions):
+    """
+    Loads dataset actions from the demo_group, fits a linear regression mapping
+    computed_actions (from ground truth delta poses) to dataset actions, and prints
+    out the regression coefficients, intercept, mean squared error, and R^2 score.
+
+    Args:
+        demo_group: An open HDF5 group or similar object with a key "actions"
+                    containing the dataset actions (assumed shape: [N, 7]).
+        computed_actions (ndarray): The computed actions from ground truth poses 
+                                    (assumed shape: [N, 7]). This is typically obtained
+                                    by your poses_to_delta_actions function.
+
+    Returns:
+        reg (LinearRegression): The fitted linear regression model.
+    """
+
+    # Load dataset actions (for example, from an HDF5 file)
+    dataset_actions = demo_group["actions"][:-1]  # shape should be [N, 7]
+
+    # Check that the shapes match
+    if computed_actions.shape[0] != dataset_actions.shape[0]:
+        raise ValueError(f"Shape mismatch: computed_actions has {computed_actions.shape[0]} rows, "
+                         f"but dataset_actions has {dataset_actions.shape[0]} rows.")
+
+    # Create and fit the linear regression model:
+    reg = LinearRegression()
+    reg.fit(computed_actions, dataset_actions)
+
+    # Predict using the model on the computed actions
+    predicted_actions = reg.predict(computed_actions)
+
+    # Compute the mean squared error and R^2 score
+    mse = mean_squared_error(dataset_actions, predicted_actions)
+    r2 = reg.score(computed_actions, dataset_actions)
+
+    # Print the results:
+    print("Linear Regression Results (mapping computed actions -> dataset actions):")
+    print("--------------------------------------------------------")
+    print("Coefficients:")
+    print(reg.coef_)
+    print("\nIntercept:")
+    print(reg.intercept_)
+    print("\nMean Squared Error (MSE): {:.5f}".format(mse))
+    print("R^2 Score: {:.5f}".format(r2))
+    print("--------------------------------------------------------")
+
+    return reg
+
 def save_pointclouds_with_bbox_as_ply(point_clouds_points,
                                       point_clouds_colors,
                                       poses,
@@ -471,6 +521,7 @@ def imitate_trajectory_with_action_identifier(
 
     # Create a rendering environment (we'll use it to obtain image dimensions and camera parameters).
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
+    env_camera0.env.control_freq = 10
     example_image = roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
@@ -578,11 +629,19 @@ def imitate_trajectory_with_action_identifier(
                     smooth=False
                 )
             else:
-                actions_for_demo = poses_to_delta_actions(
+                actions_for_demo = poses_to_delta_actions_lr(
                     poses=all_hand_poses,
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                    smooth=False
+                    smooth=False,
+                    # translation_scaling=1.0,
+                    # rotation_scaling=1.0,
                 )
+                
+            # reg = analyze_delta_action_mapping(root_z["data"][demo], actions_for_demo)
+            # np.save("reg_coef.npy", reg.coef_)
+            # np.save("reg_intercept.npy", reg.intercept_)
+            
+            # exit()
 
             # 13) Execute actions and record videos.
             # For simplicity, we use env_camera0 and env_camera1 for two views;
@@ -659,6 +718,6 @@ if __name__ == "__main__":
         output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
-        absolute_actions=False,
-        ground_truth=True,
+        absolute_actions=True,
+        ground_truth=False,
     )
