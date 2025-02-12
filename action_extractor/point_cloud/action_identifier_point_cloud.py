@@ -480,20 +480,26 @@ def get_poses_from_pointclouds(
 
         # Save debug .ply if desired
         if verbose:
-            green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
-            green_pcd.colors = o3d.utility.Vector3dVector(
-                np.tile([0,1,0], (len(green_pcd.points),1))
-            )
+            # Instead of using only the green points, create a point cloud from all original points.
+            orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+            # Use the original colors (or modify as desired)
+            orig_pcd.colors = o3d.utility.Vector3dVector(cols)
+            
+            # Make a copy of the model and transform it.
             model_copy = copy.deepcopy(object_model_o3d)
             model_copy.transform(T_model_in_cloud)
             if len(model_copy.points) > 0:
+                # Optionally set the model's color to red.
                 model_copy.colors = o3d.utility.Vector3dVector(
-                    np.tile([1,0,0], (len(model_copy.points),1))
+                    np.tile([1, 0, 0], (len(model_copy.points), 1))
                 )
-            out_pcd = model_copy + green_pcd
+            
+            # Combine the original point cloud with the model.
+            out_pcd = model_copy + orig_pcd
             out_path = os.path.join(debug_dir, f"frame_{i:04d}.ply")
             o3d.io.write_point_cloud(out_path, out_pcd)
             print(f"  Saved debug PLY: {out_path}")
+
 
     return poses
 

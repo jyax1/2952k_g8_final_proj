@@ -448,7 +448,9 @@ def imitate_trajectory_with_action_identifier(
     save_webp=False,
     cameras: list[str] = ["squared0view_image", "sidetableview_image"],
     absolute_actions=True,
-    ground_truth=False
+    ground_truth=False,
+    policy_freq=10,
+    smooth=True
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -549,7 +551,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=camera_names[0],
+        camera_name='fronttableview',
     )
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
@@ -615,7 +617,7 @@ def imitate_trajectory_with_action_identifier(
             else:
                 all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
                                                             #base_orientation_quat=, 
-                                                            verbose=False)
+                                                            verbose=True)
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -627,16 +629,16 @@ def imitate_trajectory_with_action_identifier(
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                     env=env_camera0,  # using camera0 environment to get initial orientation
                     control_freq = env_camera0.env.env.control_freq,
-                    policy_freq = 10,
-                    smooth=False
+                    policy_freq = policy_freq,
+                    smooth=smooth
                 )
             else:
-                actions_for_demo = poses_to_delta_actions_lr(
+                actions_for_demo = poses_to_delta_actions(
                     poses=all_hand_poses,
                     gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
                     smooth=False,
-                    # translation_scaling=1.0,
-                    # rotation_scaling=1.0,
+                    translation_scaling=80.0,
+                    rotation_scaling=9.0,
                 )
                 
             # reg = analyze_delta_action_mapping(root_z["data"][demo], actions_for_demo)
@@ -717,9 +719,11 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf10_smooth_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=True,
+        ground_truth=False,
+        policy_freq=10,
+        smooth=True
     )
