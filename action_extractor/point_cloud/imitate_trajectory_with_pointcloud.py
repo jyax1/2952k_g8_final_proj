@@ -6,6 +6,7 @@ import shutil
 from glob import glob
 from tqdm import tqdm
 from pathlib import Path
+import copy
 from zarr import DirectoryStore, ZipStore
 
 import robomimic.utils.obs_utils as ObsUtils
@@ -32,6 +33,7 @@ from action_extractor.poses_to_actions import *
 
 from action_extractor.point_cloud.action_identifier_point_cloud import (
     get_poses_from_pointclouds,
+    load_model_as_pointcloud
 )
 
 from action_extractor.poses_to_actions import *
@@ -439,6 +441,56 @@ def save_hand_poses(all_hand_poses, filename="all_hand_poses.npy"):
     """
     np.save(filename, all_hand_poses)
     print(f"Saved poses to {filename}")
+    
+def render_model_on_pointclouds(point_clouds_points, point_clouds_colors, poses, model, 
+                                output_dir="debug/rendered_frames", verbose=True):
+    """
+    Given lists of point clouds (points and colors) and pose estimations,
+    renders the model (transformed by each pose) on top of the point cloud and saves
+    the combined result into .ply files.
+
+    Args:
+        point_clouds_points (list of ndarray): Each element is an (N,3) array of points.
+        point_clouds_colors (list of ndarray): Each element is an (N,3) array of colors.
+        poses (list of ndarray): Each element is a 4x4 transformation matrix.
+            (Assumed to be the transform that maps the model into the point cloud frame.)
+        model (o3d.geometry.PointCloud): The model as an Open3D point cloud.
+        output_dir (str): Directory to save the rendered .ply files.
+        verbose (bool): If True, print debug messages.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    for i, (pts, cols, pose) in enumerate(zip(point_clouds_points, point_clouds_colors, poses)):
+        if verbose:
+            print(f"Rendering frame {i}...")
+
+        # Create the original point cloud from pts.
+        orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+        
+        # Normalize colors: if max value > 1, assume colors are in 0-255 range.
+        if np.max(cols) > 1.0:
+            norm_cols = cols.astype(np.float32) / 255.0
+        else:
+            norm_cols = cols.astype(np.float32)
+        norm_cols = np.clip(norm_cols, 0.0, 1.0)
+        orig_pcd.colors = o3d.utility.Vector3dVector(norm_cols)
+        
+        # Make a copy of the model and apply the corresponding pose.
+        model_copy = copy.deepcopy(model)
+        model_copy.transform(pose)
+        if len(model_copy.points) > 0:
+            # Set the model's color to red.
+            red_colors = np.tile([1.0, 0.0, 0.0], (len(model_copy.points), 1))
+            model_copy.colors = o3d.utility.Vector3dVector(red_colors)
+        
+        # Combine the transformed model with the original point cloud.
+        combined_pcd = model_copy + orig_pcd
+        
+        # Save the combined point cloud as a PLY file.
+        out_path = os.path.join(output_dir, f"frame_{i:04d}.ply")
+        o3d.io.write_point_cloud(out_path, combined_pcd)
+        if verbose:
+            print(f"Saved rendered frame to {out_path}")
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -611,13 +663,43 @@ def imitate_trajectory_with_action_identifier(
             initial_state = root_z["data"][demo]["states"][0]
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
-                   
+
+            POSES_FILE = "hand_poses.npy"
+            
             if ground_truth:
                 all_hand_poses = load_ground_truth_poses(obs_group)
+                render_model_on_pointclouds(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    [pose + np.array([[0, 0, 0, -0.02164373],
+                                     [0, 0, 0, 0.00053658],
+                                     [0, 0, 0, 0.09631133],
+                                     [0, 0, 0, 0]]) for pose in all_hand_poses],
+                    model=load_model_as_pointcloud(hand_mesh,
+                                                model_in_mm=True),
+                    output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                    verbose=True
+                )
             else:
-                all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
-                                                            #base_orientation_quat=, 
-                                                            verbose=True)
+                # all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
+                #                                             #base_orientation_quat=, 
+                #                                             verbose=True)
+                
+                if os.path.exists(POSES_FILE):
+                    print(f"Loading hand poses from {POSES_FILE}...")
+                    all_hand_poses = np.load(POSES_FILE)
+                else:
+                    print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
+                    all_hand_poses = get_poses_from_pointclouds(
+                        point_clouds_points,
+                        point_clouds_colors,
+                        hand_mesh,
+                        verbose=True
+                        # You can optionally add other parameters like base_orientation_quat if needed.
+                    )
+                    # Save the computed poses for future use.
+                    np.save(POSES_FILE, all_hand_poses)
+                    print(f"Hand poses saved to {POSES_FILE}")
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -719,11 +801,11 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf10_smooth_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_gt_pf5_smooth_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=False,
-        policy_freq=10,
-        smooth=True
+        ground_truth=True,
+        policy_freq=5,
+        smooth=False
     )

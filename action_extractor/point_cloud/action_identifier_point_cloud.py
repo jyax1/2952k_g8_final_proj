@@ -482,17 +482,25 @@ def get_poses_from_pointclouds(
         if verbose:
             # Instead of using only the green points, create a point cloud from all original points.
             orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
-            # Use the original colors (or modify as desired)
-            orig_pcd.colors = o3d.utility.Vector3dVector(cols)
+            
+            # Normalize the original colors:
+            # If the maximum color value is greater than 1, assume colors are in 0-255 and convert them.
+            if np.max(cols) > 1.0:
+                norm_cols = cols.astype(np.float32) / 255.0
+            else:
+                norm_cols = cols.astype(np.float32)
+            # Ensure all color values are in [0,1].
+            norm_cols = np.clip(norm_cols, 0.0, 1.0)
+            
+            orig_pcd.colors = o3d.utility.Vector3dVector(norm_cols)
             
             # Make a copy of the model and transform it.
             model_copy = copy.deepcopy(object_model_o3d)
             model_copy.transform(T_model_in_cloud)
             if len(model_copy.points) > 0:
                 # Optionally set the model's color to red.
-                model_copy.colors = o3d.utility.Vector3dVector(
-                    np.tile([1, 0, 0], (len(model_copy.points), 1))
-                )
+                red_colors = np.tile([1.0, 0.0, 0.0], (len(model_copy.points), 1))
+                model_copy.colors = o3d.utility.Vector3dVector(red_colors)
             
             # Combine the original point cloud with the model.
             out_pcd = model_copy + orig_pcd

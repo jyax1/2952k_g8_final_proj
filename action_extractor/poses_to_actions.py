@@ -148,6 +148,7 @@ def poses_to_absolute_actions(
     # 2) Start from environment's known initial eef quaternion and position.
     current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
+    current_orientation_angle = quat2axisangle(current_orientation)
     current_position = env.env.env._eef_xpos.astype(np.float32)
 
     # Compute steps_per_policy and preallocate the final action array.
@@ -194,6 +195,7 @@ def poses_to_absolute_actions(
         action = np.zeros(7, dtype=np.float32)
         action[:3] = position
         action[3:6] = rvec
+        # action[3:6] = current_orientation_angle
         action[6] = gripper
 
         # Determine the indices in the final all_actions array where this action is repeated.
