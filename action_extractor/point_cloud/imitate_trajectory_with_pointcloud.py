@@ -31,10 +31,7 @@ from action_extractor.utils.angles import *
 
 from action_extractor.poses_to_actions import *
 
-from action_extractor.point_cloud.action_identifier_point_cloud import (
-    get_poses_from_pointclouds,
-    load_model_as_pointcloud
-)
+from action_extractor.point_cloud.action_identifier_point_cloud import *
 
 from action_extractor.poses_to_actions import *
 
@@ -491,6 +488,159 @@ def render_model_on_pointclouds(point_clouds_points, point_clouds_colors, poses,
         o3d.io.write_point_cloud(out_path, combined_pcd)
         if verbose:
             print(f"Saved rendered frame to {out_path}")
+            
+def render_model_on_pointclouds_two_colors(
+    point_clouds_points,
+    point_clouds_colors,
+    poses_red,
+    poses_blue,
+    model,
+    output_dir="debug/rendered_frames",
+    verbose=True
+):
+    """
+    Given lists of point clouds (points and colors) and TWO sets of pose estimations,
+    renders the model (transformed by poses_red in red, and by poses_blue in blue)
+    on top of the point cloud and saves the combined result into .ply files.
+
+    Args:
+        point_clouds_points (list of ndarray): Each element is an (N,3) array of points.
+        point_clouds_colors (list of ndarray): Each element is an (N,3) array of colors.
+        poses_red (list of ndarray): Each element is a 4x4 transformation matrix
+            for the red model. Must be the same length as point_clouds_points.
+        poses_blue (list of ndarray): Each element is a 4x4 transformation matrix
+            for the blue model. Must be the same length as point_clouds_points.
+        model (o3d.geometry.PointCloud): The model as an Open3D point cloud.
+        output_dir (str): Directory to save the rendered .ply files.
+        verbose (bool): If True, print debug messages.
+    """
+    if len(poses_red) != len(point_clouds_points) or len(poses_blue) != len(point_clouds_points):
+        raise ValueError("All input lists (point clouds, poses_red, poses_blue) must have the same length.")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for i, (pts, cols, pose_r, pose_b) in enumerate(zip(point_clouds_points, point_clouds_colors, poses_red, poses_blue)):
+        if verbose:
+            print(f"Rendering frame {i}...")
+
+        # Create the original point cloud from pts.
+        orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+
+        # Normalize colors: if max value > 1, assume colors are in 0-255 range.
+        if np.max(cols) > 1.0:
+            norm_cols = cols.astype(np.float32) / 255.0
+        else:
+            norm_cols = cols.astype(np.float32)
+        norm_cols = np.clip(norm_cols, 0.0, 1.0)
+        orig_pcd.colors = o3d.utility.Vector3dVector(norm_cols)
+
+        # Copy the model for the red pose.
+        model_copy_red = copy.deepcopy(model)
+        model_copy_red.transform(pose_r)
+        if len(model_copy_red.points) > 0:
+            red_colors = np.tile([1.0, 0.0, 0.0], (len(model_copy_red.points), 1))
+            model_copy_red.colors = o3d.utility.Vector3dVector(red_colors)
+
+        # Copy the model for the blue pose.
+        model_copy_blue = copy.deepcopy(model)
+        model_copy_blue.transform(pose_b)
+        if len(model_copy_blue.points) > 0:
+            blue_colors = np.tile([0.0, 0.0, 1.0], (len(model_copy_blue.points), 1))
+            model_copy_blue.colors = o3d.utility.Vector3dVector(blue_colors)
+
+        # Combine everything: original cloud + red model + blue model
+        combined_pcd = orig_pcd + model_copy_red + model_copy_blue
+
+        # Save the combined point cloud as a PLY file.
+        out_path = os.path.join(output_dir, f"frame_{i:04d}.ply")
+        o3d.io.write_point_cloud(out_path, combined_pcd)
+        if verbose:
+            print(f"Saved rendered frame to {out_path}")
+            
+def render_positions_on_pointclouds_two_colors(
+    point_clouds_points,
+    point_clouds_colors,
+    poses_red,
+    poses_blue,
+    output_dir="debug/rendered_frames",
+    verbose=True
+):
+    """
+    Given lists of point clouds (points and colors) and TWO sets of pose estimations,
+    instead of rendering the model, we render two small clusters of points:
+    one in red (transformed by poses_red) and one in blue (transformed by poses_blue).
+    This helps debug the correctness of the pose coordinates.
+
+    Args:
+        point_clouds_points (list of ndarray): Each element is an (N,3) array of scene points.
+        point_clouds_colors (list of ndarray): Each element is an (N,3) array of colors.
+        poses_red (list of ndarray): Each element is a 4x4 transform for the "red" cluster.
+        poses_blue (list of ndarray): Each element is a 4x4 transform for the "blue" cluster.
+        output_dir (str): Directory to save the rendered .ply files.
+        verbose (bool): If True, prints debug messages.
+    """
+    if len(poses_red) != len(point_clouds_points) or len(poses_blue) != len(point_clouds_points):
+        raise ValueError("All input lists (point clouds, poses_red, poses_blue) must have the same length.")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define a small local cluster around the origin to visualize each pose.
+    # For instance, a little "cross" of 7 points with radius = 0.01.
+    radius = 0.01
+    cluster_local = np.array([
+        [0.0, 0.0, 0.0],
+        [ radius, 0.0,   0.0],
+        [-radius, 0.0,   0.0],
+        [0.0,  radius, 0.0],
+        [0.0, -radius, 0.0],
+        [0.0, 0.0,  radius],
+        [0.0, 0.0, -radius],
+    ], dtype=np.float32)
+
+    for i, (pts, cols, pose_r, pose_b) in enumerate(zip(point_clouds_points, point_clouds_colors, poses_red, poses_blue)):
+        if verbose:
+            print(f"Rendering frame {i}...")
+
+        # 1) Create the original scene point cloud from pts.
+        orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+
+        # Normalize colors: if max value > 1, assume 0-255 range.
+        if np.max(cols) > 1.0:
+            norm_cols = cols.astype(np.float32) / 255.0
+        else:
+            norm_cols = cols.astype(np.float32)
+        norm_cols = np.clip(norm_cols, 0.0, 1.0)
+        orig_pcd.colors = o3d.utility.Vector3dVector(norm_cols)
+
+        # 2) Transform the local cluster by poses_red and poses_blue.
+        #    This shows us exactly where each pose is in the scene.
+        cluster_red_world = (pose_r @ np.hstack([cluster_local, np.ones((len(cluster_local), 1))]).T).T
+        cluster_blue_world = (pose_b @ np.hstack([cluster_local, np.ones((len(cluster_local), 1))]).T).T
+
+        # Convert to Nx3 (dropping homogeneous component).
+        cluster_red_world_xyz = cluster_red_world[:, :3]
+        cluster_blue_world_xyz = cluster_blue_world[:, :3]
+
+        # 3) Create small point clouds for the red cluster and the blue cluster.
+        cluster_red_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(cluster_red_world_xyz))
+        cluster_blue_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(cluster_blue_world_xyz))
+
+        if len(cluster_red_pcd.points) > 0:
+            red_colors = np.tile([1.0, 0.0, 0.0], (len(cluster_red_pcd.points), 1))
+            cluster_red_pcd.colors = o3d.utility.Vector3dVector(red_colors)
+        if len(cluster_blue_pcd.points) > 0:
+            blue_colors = np.tile([0.0, 0.0, 1.0], (len(cluster_blue_pcd.points), 1))
+            cluster_blue_pcd.colors = o3d.utility.Vector3dVector(blue_colors)
+
+        # 4) Combine everything: original scene + red cluster + blue cluster.
+        combined_pcd = orig_pcd + cluster_red_pcd + cluster_blue_pcd
+
+        # 5) Save to .ply
+        out_path = os.path.join(output_dir, f"frame_{i:04d}.ply")
+        o3d.io.write_point_cloud(out_path, combined_pcd)
+
+        if verbose:
+            print(f"Saved rendered frame {i} with red/blue clusters to {out_path}")
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -664,17 +814,18 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
 
-            POSES_FILE = "hand_poses.npy"
+            POSES_FILE = "hand_poses_offset.npy"
             
             if ground_truth:
                 all_hand_poses = load_ground_truth_poses(obs_group)
                 render_model_on_pointclouds(
                     point_clouds_points,
                     point_clouds_colors,
-                    [pose + np.array([[0, 0, 0, -0.02164373],
-                                     [0, 0, 0, 0.00053658],
-                                     [0, 0, 0, 0.09631133],
-                                     [0, 0, 0, 0]]) for pose in all_hand_poses],
+                    # [pose + np.array([[0, 0, 0, -0.02164373],
+                    #                  [0, 0, 0, 0.00053658],
+                    #                  [0, 0, 0, 0.09631133],
+                    #                  [0, 0, 0, 0]]) for pose in all_hand_poses][1:],
+                    all_hand_poses,
                     model=load_model_as_pointcloud(hand_mesh,
                                                 model_in_mm=True),
                     output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
@@ -690,16 +841,28 @@ def imitate_trajectory_with_action_identifier(
                     all_hand_poses = np.load(POSES_FILE)
                 else:
                     print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
-                    all_hand_poses = get_poses_from_pointclouds(
+                    all_hand_poses = get_poses_from_pointclouds_offset(
                         point_clouds_points,
                         point_clouds_colors,
                         hand_mesh,
-                        verbose=True
+                        verbose=True,
+                        bottom_offset=0.01
                         # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
                     np.save(POSES_FILE, all_hand_poses)
                     print(f"Hand poses saved to {POSES_FILE}")
+                    
+                all_hand_poses_gt = load_ground_truth_poses(obs_group)
+                    
+                render_positions_on_pointclouds_two_colors(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    all_hand_poses,
+                    all_hand_poses_gt,
+                    output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                    verbose=True
+                )
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -805,7 +968,7 @@ if __name__ == "__main__":
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=True,
+        ground_truth=False,
         policy_freq=5,
         smooth=False
     )

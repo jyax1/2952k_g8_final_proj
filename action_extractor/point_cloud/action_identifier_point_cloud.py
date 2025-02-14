@@ -16,6 +16,30 @@ def load_model_as_pointcloud(model_path, num_points=30000, model_in_mm=True):
     pcd = mesh.sample_points_uniformly(number_of_points=num_points)
     return pcd
 
+def load_model_as_mesh(model_path, model_in_mm=True):
+    """
+    Loads a mesh from the given path, optionally converting from mm to m.
+
+    Args:
+        model_path (str): Path to the 3D mesh file (e.g. .obj, .ply, .stl, etc.).
+        model_in_mm (bool): Whether the mesh is in millimeters. If True, we'll
+                            scale it by 0.001 to convert to meters.
+
+    Returns:
+        mesh (o3d.geometry.TriangleMesh): The loaded Open3D mesh in meters (if model_in_mm=True).
+    """
+    # Read mesh
+    mesh = o3d.io.read_triangle_mesh(model_path)
+    if mesh.is_empty():
+        raise ValueError(f"Could not load mesh from: {model_path}")
+
+    # Convert from mm to m if desired
+    if model_in_mm:
+        mesh.scale(0.001, center=(0, 0, 0))
+
+    return mesh
+
+
 def cluster_and_keep_largest(pcd_o3d, eps=0.02, min_points=20):
     if len(pcd_o3d.points) == 0:
         return pcd_o3d
@@ -509,6 +533,520 @@ def get_poses_from_pointclouds(
             print(f"  Saved debug PLY: {out_path}")
 
 
+    return poses
+
+def get_poses_from_pointclouds_offset(
+    point_clouds_points,
+    point_clouds_colors,
+    model_path,
+    green_threshold=0.9,
+    non_green_max=0.7,
+    voxel_size=0.002,
+    mesh_num_points=20000,
+    debug_dir="debug/pointclouds_with_model",
+    model_in_mm=True,
+    dbscan_eps=0.02,
+    dbscan_min_points=20,
+    base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
+    max_orientation_angle=np.pi/2,
+    verbose=True,
+    icp_method="multiscale",
+    # New parameter: how far below the "lowest" surface we place the final reference point (meters).
+    # Example: 0.01 -> 10 mm below.
+    bottom_offset=0.01
+):
+    """
+    Estimates poses for a Franka Panda gripper in a sequence of green-colored point clouds.
+    For the first frame, it does RANSAC (with orientation filter) + ICP.
+    For subsequent frames, it does RANSAC (no orientation filter) + ICP, or just ICP.
+
+    The returned pose for each frame has its origin placed at the "bottom center" of the
+    mesh (plus an adjustable offset). That way, when orientation changes, the distance
+    between the true jaw center and the returned position remains accurate.
+
+    Args:
+        point_clouds_points, point_clouds_colors: Lists of (N,3) arrays of points and colors
+                                                  for each frame.
+        model_path (str): Path to the gripper mesh file.
+        green_threshold, non_green_max, voxel_size, ...
+            (Various thresholds and parameters for point cloud processing.)
+        mesh_num_points (int): Number of points to sample if you are also using a model
+                               point cloud. (Used by load_model_as_pointcloud, though we
+                               also load the full mesh for accuracy.)
+        bottom_offset (float): How far below the mesh's lowest plane (in local Z) we want
+                               the final reported pose origin, in meters.
+        ...
+    Returns:
+        poses (list of ndarray): Each element is a 4x4 transform with the orientation from ICP
+                                 but the translation set to the "bottom center" minus bottom_offset.
+    """
+
+    import os
+    import random
+    import copy
+    import numpy as np
+    import open3d as o3d
+
+    os.makedirs(debug_dir, exist_ok=True)
+
+    # -------------------------------------------------------------------------
+    # 1) Load the model as a mesh (for accurate geometry)
+    # -------------------------------------------------------------------------
+    # (We assume you have a helper function that loads the mesh in consistent units, e.g. meters.)
+    model_mesh_o3d = load_model_as_mesh(model_path, model_in_mm=model_in_mm)
+    # Also load a point cloud representation for ICP (like before).
+    object_model_o3d = load_model_as_pointcloud(model_path,
+                                                num_points=mesh_num_points,
+                                                model_in_mm=model_in_mm)
+
+    # -------------------------------------------------------------------------
+    # 1a) Find the "bottom center" of the mesh in local coordinates
+    # -------------------------------------------------------------------------
+    def get_bottom_center_in_local(mesh_o3d, z_eps=1e-4, offset=0.01):
+        """
+        Finds the bottom center of the mesh (lowest Z in local coords).
+        Then shifts that point further down by 'offset' meters along local Z.
+        Returns a homogeneous coordinate (4D) [x, y, z, 1].
+        """
+        # Extract the mesh vertices.
+        verts = np.asarray(mesh_o3d.vertices)
+        if len(verts) == 0:
+            return np.array([0, 0, 0, 1], dtype=np.float32)
+
+        min_z = np.min(verts[:, 2])
+        # Gather points within z_eps of min_z
+        mask = (np.abs(verts[:, 2] - min_z) <= z_eps)
+        bottom_pts = verts[mask]
+        if len(bottom_pts) == 0:
+            # fallback if threshold found none
+            bottom_pts = verts[np.argmin(verts[:, 2])][None, ...]
+
+        mean_x = np.mean(bottom_pts[:, 0])
+        mean_y = np.mean(bottom_pts[:, 1])
+        # Use min_z for the "lowest" Z
+        # Then shift further down by 'offset'
+        final_z = min_z - offset
+
+        return np.array([mean_x, mean_y, final_z, 1.0], dtype=np.float32)
+
+    # Precompute the local bottom center (4x1 homogeneous)
+    bottom_center_local = get_bottom_center_in_local(
+        mesh_o3d=model_mesh_o3d,
+        z_eps=1e-4,
+        offset=bottom_offset
+    )
+
+    # -------------------------------------------------------------------------
+    # 2) Helper function for clustering / voxel downsampling
+    # -------------------------------------------------------------------------
+    def preprocess_pcd(pcd, voxel):
+        if voxel > 0:
+            pcd_down = pcd.voxel_down_sample(voxel)
+        else:
+            pcd_down = pcd
+        pcd_down.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                radius=2.0 * voxel if voxel > 0 else 0.01,
+                max_nn=30
+            )
+        )
+        return pcd_down
+
+    # ... ICP functions remain unchanged ...
+    # (icp_threshold_updown_force_one, icp_multiscale_standard, compute_fpfh, global_registration, etc.)
+
+    def icp_threshold_updown_force_one(
+        source,
+        target,
+        init_transform,
+        total_iterations=2_000_000,
+        verbose=True
+    ):
+        """
+        Custom "up-down" ICP procedure:
+          - Dynamically adjusts the threshold up/down based on fitness.
+          - Has a total iteration budget.
+        """
+        times_visited = {}
+        total_iterations_used = 0
+
+        def get_iteration_count(threshold):
+            t_key = float(threshold)
+            vcount = times_visited.get(t_key, 0)
+            # Example formula
+            it_count = 10000 * (voxel_size / threshold) * 8 * (1 + 0.1 * vcount)
+            return min(109875, max(1, int(it_count))) # <-- capping at 100k, so that icp call doesn't get stuck
+
+        def run_icp(threshold_val, init_pose):
+            nonlocal total_iterations_used
+
+            t_key = float(threshold_val)
+            old_visits = times_visited.get(t_key, 0)
+            times_visited[t_key] = old_visits + 1
+
+            it_count = get_iteration_count(threshold_val)
+
+            if total_iterations_used + it_count > total_iterations:
+                it_count = total_iterations - total_iterations_used
+
+            if it_count <= 0:
+                return 0.0, 999999.0, init_pose, 0
+
+            crit = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=it_count,
+                relative_fitness=1e-6,
+                relative_rmse=1e-6
+            )
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                threshold_val,
+                init_pose,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=crit
+            )
+
+            total_iterations_used += it_count
+            return (result_icp.fitness,
+                    result_icp.inlier_rmse,
+                    result_icp.transformation,
+                    it_count)
+
+        current_transform = init_transform.copy()
+        best_transform = current_transform.copy()
+        best_fitness = 0.0
+        threshold = 8.0 * voxel_size
+        best_threshold = threshold
+        best_rmse = 1.0
+
+        # Loop until we exhaust total_iterations
+        while True:
+            fitness, rmse, new_transform, used_iters = run_icp(threshold, current_transform)
+
+            if verbose:
+                print(f"[UpDownICP] thr={threshold:.4f}, used_iters={used_iters}, "
+                      f"fitness={fitness:.4f}, rmse={rmse:.5f}, total_used={total_iterations_used}/{total_iterations}")
+
+            if used_iters <= 0:
+                if verbose:
+                    print("No iteration budget left or 0 used => break.")
+                break
+
+            if fitness >= 0.99:
+                threshold *= 0.5
+                current_transform = new_transform
+                if threshold < best_threshold:
+                    best_transform = current_transform.copy()
+                    best_threshold = threshold
+                    best_fitness = fitness
+                    best_rmse = rmse
+            else:
+                threshold *= 1.5
+                # current_transform = new_transform
+
+            if total_iterations_used >= total_iterations:
+                break
+
+        if verbose:
+            print(f"[UpDownICP] total_iterations_used={total_iterations_used}, "
+                  f"best_threshold={best_threshold:.4f}, fitness={best_fitness:.4f}, rmse={best_rmse:.5f}")
+
+        return best_transform
+    
+    def icp_multiscale_standard(
+        source,
+        target,
+        init_transform,
+        verbose=True,
+    ):
+        """
+        A classic multi-scale ICP pipeline:
+          1. We define multiple voxel sizes (coarse to fine).
+          2. Downsample source & target at each scale.
+          3. Run ICP with some max iteration at each scale.
+          4. Pass the result as initialization to the next scale.
+        """
+
+        # Example multi-scale parameters (tune as needed).
+        voxel_sizes = [5.0 * voxel_size, 2.5 * voxel_size, 1.0 * voxel_size]
+        max_iters = [50, 30, 14]  # number of iterations per scale
+
+        current_transform = init_transform.copy()
+
+        for scale_idx, vsize in enumerate(voxel_sizes):
+            # Downsample
+            source_down = source.voxel_down_sample(vsize)
+            target_down = target.voxel_down_sample(vsize)
+
+            # Re-estimate normals for each downsample
+            source_down.estimate_normals(
+                search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                    radius=vsize * 2.0, max_nn=30
+                )
+            )
+            target_down.estimate_normals(
+                search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                    radius=vsize * 2.0, max_nn=30
+                )
+            )
+
+            # ICP threshold can be e.g. ~1-2x the voxel size
+            icp_dist_thresh = 1.5 * vsize
+
+            if verbose:
+                print(f"[Multi-Scale ICP] scale={scale_idx}, voxel={vsize}, max_iter={max_iters[scale_idx]}")
+
+            # Setup criteria
+            crit = o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=max_iters[scale_idx],
+                relative_fitness=1e-6,
+                relative_rmse=1e-6
+            )
+
+            # Run point-to-plane ICP
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source_down,
+                target_down,
+                icp_dist_thresh,
+                current_transform,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=crit
+            )
+
+            current_transform = result_icp.transformation
+
+            if verbose:
+                print(f"   => fitness={result_icp.fitness:.4f}, rmse={result_icp.inlier_rmse:.5f}")
+
+        return current_transform
+    
+    def compute_fpfh(pcd, voxel):
+        pcd.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                radius=2.0 * voxel if voxel > 0 else 0.01,
+                max_nn=30
+            )
+        )
+        radius_feature = 5.0 * voxel if voxel > 0 else 0.05
+        return o3d.pipelines.registration.compute_fpfh_feature(
+            pcd,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
+        )
+
+    def global_registration(source, target, source_fpfh, target_fpfh, seed):
+        o3d.utility.random.seed(seed)
+        dist_thresh = max(voxel_size * 1.5, 0.04)
+        result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+            source,
+            target,
+            source_fpfh,
+            target_fpfh,
+            mutual_filter=False,
+            max_correspondence_distance=dist_thresh,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+            ransac_n=4,
+            checkers=[
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(dist_thresh)
+            ],
+            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(
+                max_iteration=100000, confidence=0.99
+            )
+        )
+        return result
+    
+    # -------------------------------------------------------------------------
+    # 3) Registration for first frame
+    # -------------------------------------------------------------------------
+    def register_green_points_to_model_first_frame(green_pts_np, model_pcd_o3d):
+        # (Unchanged, except for referencing your existing code.)
+        if len(green_pts_np) < 10:
+            if verbose:
+                print("    Not enough green points (<10). Identity.")
+            return np.eye(4)
+
+        green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
+        if len(largest_cluster.points) < 10:
+            if verbose:
+                print("    Largest cluster <10 points, identity.")
+            return np.eye(4)
+
+        green_o3d_clean = preprocess_pcd(largest_cluster, voxel_size)
+        model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
+        if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
+            if verbose:
+                print("    After cleaning, too few points. Identity.")
+            return np.eye(4)
+
+        src_fpfh = compute_fpfh(green_o3d_clean, voxel_size)
+        tgt_fpfh = compute_fpfh(model_o3d_clean, voxel_size)
+
+        found_good_ransac = False
+        best_transform = None
+        attempt = 0
+
+        while True:
+            seed = random.randint(0, 2**31 - 1)
+            result_ransac = global_registration(green_o3d_clean, model_o3d_clean, src_fpfh, tgt_fpfh, seed=seed)
+            attempt += 1
+
+            if verbose:
+                print(f"[Try #{attempt}] RANSAC seed={seed} -> fitness={result_ransac.fitness:.4f}, "
+                      f"rmse={result_ransac.inlier_rmse:.5f}")
+
+            R_est = result_ransac.transformation[:3, :3]
+            angle_diff = orientation_angle_diff(R_est, base_orientation_quat)
+
+            if angle_diff <= max_orientation_angle:
+                # Found a transform with orientation near base.
+                if result_ransac.fitness >= 1.0 - 1e-12:
+                    found_good_ransac = True
+                    best_transform = result_ransac.transformation
+                    if verbose:
+                        print("Found a valid transform with ~1.0 fitness. Done.")
+                    break
+                else:
+                    if verbose:
+                        print("Orientation valid but fitness < 1.0. Trying another seed.")
+            else:
+                if verbose:
+                    print("Orientation not valid, trying another seed.")
+
+            # Possibly cap attempts if needed
+            # if attempt > 200: break
+
+        if found_good_ransac:
+            # Refine with ICP
+            if icp_method == "updown":
+                final_transform = icp_threshold_updown_force_one(
+                    green_o3d_clean, model_o3d_clean, best_transform, verbose=verbose
+                )
+            else:  # "multiscale"
+                final_transform = icp_multiscale_standard(
+                    green_o3d_clean, model_o3d_clean, best_transform, verbose=verbose
+                )
+            return final_transform
+
+        if verbose:
+            print("    All attempts failed to find orientation near base. Fallback identity.")
+        return np.eye(4)
+
+    # -------------------------------------------------------------------------
+    # 4) Registration for subsequent frames
+    # -------------------------------------------------------------------------
+    def register_green_points_to_model_subsequent_frames(green_pts_np, model_pcd_o3d, prev_transform):
+        if len(green_pts_np) < 10:
+            return np.eye(4)
+
+        green_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts_np))
+        largest_cluster = cluster_and_keep_largest(green_pcd, eps=dbscan_eps, min_points=dbscan_min_points)
+        if len(largest_cluster.points) < 10:
+            return np.eye(4)
+
+        green_o3d_clean = preprocess_pcd(largest_cluster, voxel_size)
+        model_o3d_clean = preprocess_pcd(model_pcd_o3d, voxel_size)
+        if len(green_o3d_clean.points) < 10 or len(model_o3d_clean.points) < 10:
+            return np.eye(4)
+
+        if icp_method == "updown":
+            final_transform = icp_threshold_updown_force_one(
+                green_o3d_clean, model_o3d_clean, init_transform=prev_transform, verbose=verbose
+            )
+        else:  # "multiscale"
+            final_transform = icp_multiscale_standard(
+                green_o3d_clean, model_pcd_o3d, init_transform=prev_transform, verbose=verbose
+            )
+        return final_transform
+
+    # -------------------------------------------------------------------------
+    # 5) Main Loop
+    # -------------------------------------------------------------------------
+    poses = []
+    prev_transform_green_to_model = None
+
+    for i, (pts, cols) in enumerate(zip(point_clouds_points, point_clouds_colors)):
+        if verbose:
+            print(f"\n=== Frame {i} ===")
+
+        # Identify green points
+        mask = (
+            (cols[:,1] >= green_threshold) &
+            (cols[:,0] <= non_green_max) &
+            (cols[:,2] <= non_green_max)
+        )
+        green_pts = pts[mask]
+        if verbose:
+            print(f"  #points={len(pts)}, #green={len(green_pts)}")
+
+        # Debug: Save first frame's green points
+        if i == 0:
+            debug_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
+            debug_pcd.colors = o3d.utility.Vector3dVector(np.tile([0,1,0], (len(green_pts),1)))
+            debug_out_path = os.path.join(debug_dir, "first_frame_green_points.ply")
+            o3d.io.write_point_cloud(debug_out_path, debug_pcd)
+            if verbose:
+                print(f"  Saved first frame green points to {debug_out_path}")
+
+        # If no green points, fallback
+        if len(green_pts) < 10:
+            if verbose:
+                print("  No green points, identity.")
+            poses.append(np.eye(4))
+            continue
+
+        # Register
+        if i == 0:
+            transform_green_to_model = register_green_points_to_model_first_frame(
+                green_pts, object_model_o3d
+            )
+        else:
+            transform_green_to_model = register_green_points_to_model_subsequent_frames(
+                green_pts, object_model_o3d, prev_transform=prev_transform_green_to_model
+            )
+
+        # Invert to get T_model_in_cloud
+        T_model_in_cloud = np.linalg.inv(transform_green_to_model)
+
+        # ---------------------------------------------------------------------
+        # 6) Adjust the final transform to place the "lowered bottom center"
+        #    at the transform's origin.
+        # ---------------------------------------------------------------------
+        # local point in model coords
+        local_pt_4 = bottom_center_local  # [x, y, z, 1]
+        world_pt_4 = T_model_in_cloud @ local_pt_4  # shape (4,)
+
+        # Now set T_model_in_cloud's translation to that point:
+        T_model_in_cloud[0:3, 3] = world_pt_4[0:3]
+
+        # That's our final pose for this frame
+        poses.append(T_model_in_cloud)
+        prev_transform_green_to_model = transform_green_to_model.copy()
+
+        # Debug: save combined PLY
+        if verbose:
+            orig_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+            # Normalize colors
+            if np.max(cols) > 1.0:
+                norm_cols = cols.astype(np.float32) / 255.0
+            else:
+                norm_cols = cols.astype(np.float32)
+            norm_cols = np.clip(norm_cols, 0.0, 1.0)
+            orig_pcd.colors = o3d.utility.Vector3dVector(norm_cols)
+
+            # Make a copy of the model pcd and transform
+            model_copy = copy.deepcopy(object_model_o3d)
+            model_copy.transform(T_model_in_cloud)
+            if len(model_copy.points) > 0:
+                red_colors = np.tile([1.0, 0.0, 0.0], (len(model_copy.points), 1))
+                model_copy.colors = o3d.utility.Vector3dVector(red_colors)
+
+            out_pcd = model_copy + orig_pcd
+            out_path = os.path.join(debug_dir, f"frame_{i:04d}.ply")
+            o3d.io.write_point_cloud(out_path, out_pcd)
+            print(f"  Saved debug PLY: {out_path}")
+
+    # Return the final poses list
     return poses
 
 
