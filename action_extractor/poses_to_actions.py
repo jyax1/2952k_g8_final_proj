@@ -158,6 +158,7 @@ def poses_to_absolute_actions(
     all_actions = np.zeros((total_control_steps, 7), dtype=np.float32)
 
     # Compute a position offset (if needed) so that the first pose aligns with the initial eef position.
+    prev_rvec = None
     position_offset = smoothed_positions[0] - current_position
 
     # Loop over each policy step and compute one absolute action.
@@ -187,6 +188,9 @@ def poses_to_absolute_actions(
 
         # Convert quaternion to axis-angle representation.
         rvec = quat2axisangle(current_orientation)
+        if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
+            rvec = -rvec
+        prev_rvec = rvec
 
         # Get the gripper action corresponding to this policy step.
         gripper = gripper_actions[i]

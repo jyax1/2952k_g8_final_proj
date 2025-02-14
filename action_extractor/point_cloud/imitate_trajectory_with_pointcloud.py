@@ -776,6 +776,7 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+        demos = [list(root_z["data"].keys())[1]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -813,13 +814,66 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.reset()
             env_camera0.reset_to({"states": initial_state})
 
-            all_hand_poses = get_poses_from_pointclouds_offset(
-                                point_clouds_points,
-                                point_clouds_colors,
-                                hand_mesh,
-                                verbose=False,
-                                # You can optionally add other parameters like base_orientation_quat if needed.
-                            )
+            POSES_FILE = "hand_poses_offset.npy"
+            
+            if ground_truth:
+                all_hand_poses = load_ground_truth_poses(obs_group)
+                render_model_on_pointclouds(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    # [pose + np.array([[0, 0, 0, -0.02164373],
+                    #                  [0, 0, 0, 0.00053658],
+                    #                  [0, 0, 0, 0.09631133],
+                    #                  [0, 0, 0, 0]]) for pose in all_hand_poses][1:],
+                    all_hand_poses,
+                    model=load_model_as_pointcloud(hand_mesh,
+                                                model_in_mm=True),
+                    output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                    verbose=True
+                )
+            else:
+                # all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
+                #                                             #base_orientation_quat=, 
+                #                                             verbose=True)
+                
+                if os.path.exists(POSES_FILE):
+                    print(f"Loading hand poses from {POSES_FILE}...")
+                    all_hand_poses = np.load(POSES_FILE)
+                else:
+                    print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
+                    all_hand_poses = get_poses_from_pointclouds_offset(
+                        point_clouds_points,
+                        point_clouds_colors,
+                        hand_mesh,
+                        verbose=True,
+                        # You can optionally add other parameters like base_orientation_quat if needed.
+                    )
+                    # Save the computed poses for future use.
+                    # np.save(POSES_FILE, all_hand_poses)
+                    # print(f"Hand poses saved to {POSES_FILE}")
+                    
+                all_hand_poses_gt = load_ground_truth_poses(obs_group)
+                    
+                render_positions_on_pointclouds_two_colors(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    all_hand_poses,
+                    all_hand_poses_gt,
+                    output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
+                    verbose=True
+                )
+                
+                render_model_on_pointclouds_two_colors(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    all_hand_poses,
+                    all_hand_poses_gt,
+                    model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                    output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                    verbose=True
+                )
+            
+            # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
             # 12) Build absolute actions.
             # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
@@ -840,6 +894,12 @@ def imitate_trajectory_with_action_identifier(
                     translation_scaling=80.0,
                     rotation_scaling=9.0,
                 )
+                
+            # reg = analyze_delta_action_mapping(root_z["data"][demo], actions_for_demo)
+            # np.save("reg_coef.npy", reg.coef_)
+            # np.save("reg_intercept.npy", reg.intercept_)
+            
+            # exit()
 
             # 13) Execute actions and record videos.
             # For simplicity, we use env_camera0 and env_camera1 for two views;
@@ -913,11 +973,11 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf10_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_gt_pf10_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
-        policy_freq=10,
+        policy_freq=5,
         smooth=False
     )
