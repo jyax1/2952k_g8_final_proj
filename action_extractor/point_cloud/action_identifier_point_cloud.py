@@ -535,6 +535,96 @@ def get_poses_from_pointclouds(
 
     return poses
 
+def merge_meshes(mesh1, mesh2):
+    """
+    Merge two triangle meshes (mesh1 + mesh2) into a single mesh.
+    This is useful when mesh2 is a small "marker" shape placed at a specific coordinate.
+    
+    The resulting mesh will contain all of mesh1's vertices / faces plus all of mesh2's.
+    Vertex colors will also be combined if present; if mesh1 or mesh2 doesn't have colors,
+    we assign defaults.
+    """
+    merged = o3d.geometry.TriangleMesh()
+
+    # 1. Convert geometry to numpy arrays
+    verts1 = np.asarray(mesh1.vertices)
+    tris1  = np.asarray(mesh1.triangles)
+
+    verts2 = np.asarray(mesh2.vertices)
+    tris2  = np.asarray(mesh2.triangles)
+
+    # 2. Offset mesh2's triangle indices so they come after mesh1
+    tris2_offset = tris2 + len(verts1)
+
+    # 3. Combine vertices and triangles
+    merged_verts = np.vstack([verts1, verts2])
+    merged_tris  = np.vstack([tris1, tris2_offset])
+
+    merged.vertices  = o3d.utility.Vector3dVector(merged_verts)
+    merged.triangles = o3d.utility.Vector3iVector(merged_tris)
+
+    # 4. Combine colors. If the original meshes have no vertex colors,
+    #    we assign default greys for mesh1 and keep the assigned color for mesh2.
+    if mesh1.has_vertex_colors():
+        colors1 = np.asarray(mesh1.vertex_colors)
+    else:
+        # default e.g. gray for each vertex
+        colors1 = np.tile([0.6, 0.6, 0.6], (len(verts1), 1))
+    
+    if mesh2.has_vertex_colors():
+        colors2 = np.asarray(mesh2.vertex_colors)
+    else:
+        # default e.g. bright red for each vertex
+        colors2 = np.tile([1.0, 0.0, 0.0], (len(verts2), 1))
+
+    merged_colors = np.vstack([colors1, colors2])
+    merged.vertex_colors = o3d.utility.Vector3dVector(merged_colors)
+
+    # Optional: If you care about vertex normals, do the same for normals
+    # or let Open3D recompute them later.
+
+    return merged
+
+def create_marker_sphere(radius=0.005, color=(1.0, 0.0, 0.0)):
+    """
+    Creates a small sphere TriangleMesh of the given radius,
+    paints it uniformly 'color' (r,g,b) in [0,1], 
+    and returns it as a TriangleMesh.
+    """
+    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius, resolution=12)
+    sphere.paint_uniform_color(color)
+    return sphere
+
+def visualize_mesh_with_bottom_marker(mesh_o3d, bottom_center_local, marker_radius=0.005, save_path="local_mesh_with_marker.ply"):
+    """
+    Merges the given mesh with a small 'marker' sphere placed at bottom_center_local (x,y,z)
+    in the mesh's local coordinate frame. Writes to save_path as a single .ply TriangleMesh.
+
+    Args:
+        mesh_o3d (o3d.geometry.TriangleMesh): your main model
+        bottom_center_local (array-like): [x, y, z, 1] homogeneous or [x, y, z], local coords
+        marker_radius (float): how big of a sphere to place
+        save_path (str): where to write the merged .ply
+    """
+    # 1) Create the small sphere marker in local coordinates (at origin).
+    marker = create_marker_sphere(radius=marker_radius, color=(1.0, 0.0, 0.0))
+
+    # 2) Build a 4x4 transform that puts the marker at bottom_center_local
+    if len(bottom_center_local) == 4:
+        bottom_center_local = bottom_center_local[:3]  # discard the homogeneous '1'
+    marker_transform = np.eye(4)
+    marker_transform[0:3, 3] = bottom_center_local  # place sphere center at [x, y, z]
+
+    # 3) Transform the sphere
+    marker.transform(marker_transform)
+
+    # 4) Merge the original mesh + marker into a single TriangleMesh
+    combined_mesh = merge_meshes(mesh_o3d, marker)
+
+    # 5) Save as .ply
+    o3d.io.write_triangle_mesh(save_path, combined_mesh)
+    print(f"Saved local mesh + marker sphere as: {save_path}")
+
 def get_poses_from_pointclouds_offset(
     point_clouds_points,
     point_clouds_colors,
@@ -553,7 +643,7 @@ def get_poses_from_pointclouds_offset(
     icp_method="multiscale",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).
     # Example: 0.01 -> 10 mm below.
-    bottom_offset=0.01
+    offset=[0.0, 0.002, 0.078]
 ):
     """
     Estimates poses for a Franka Panda gripper in a sequence of green-colored point clouds.
@@ -602,39 +692,65 @@ def get_poses_from_pointclouds_offset(
     # -------------------------------------------------------------------------
     # 1a) Find the "bottom center" of the mesh in local coordinates
     # -------------------------------------------------------------------------
-    def get_bottom_center_in_local(mesh_o3d, z_eps=1e-4, offset=0.01):
+    def get_center_of_bounding_box_in_local(mesh_o3d, offset):
         """
-        Finds the bottom center of the mesh (lowest Z in local coords).
-        Then shifts that point further down by 'offset' meters along local Z.
-        Returns a homogeneous coordinate (4D) [x, y, z, 1].
+        Computes the axis-aligned bounding box (AABB) of the mesh, 
+        and returns the coordinate of its center in local space. 
+        Optionally shifts the Z coordinate by 'offset' meters (e.g., move center "down" or "up").
+
+        Returns:
+            np.array of shape (4,): [cx, cy, cz, 1.0]
         """
-        # Extract the mesh vertices.
-        verts = np.asarray(mesh_o3d.vertices)
-        if len(verts) == 0:
-            return np.array([0, 0, 0, 1], dtype=np.float32)
 
-        min_z = np.min(verts[:, 2])
-        # Gather points within z_eps of min_z
-        mask = (np.abs(verts[:, 2] - min_z) <= z_eps)
-        bottom_pts = verts[mask]
-        if len(bottom_pts) == 0:
-            # fallback if threshold found none
-            bottom_pts = verts[np.argmin(verts[:, 2])][None, ...]
+        # 1) If mesh is empty, fallback
 
-        mean_x = np.mean(bottom_pts[:, 0])
-        mean_y = np.mean(bottom_pts[:, 1])
-        # Use min_z for the "lowest" Z
-        # Then shift further down by 'offset'
-        final_z = min_z - offset
+        # 2) Obtain the axis-aligned bounding box
+        aabb = mesh_o3d.get_axis_aligned_bounding_box()
+        # 3) Get the center of that bounding box
+        center = aabb.get_center()  # 3D coords (x, y, z)
 
-        return np.array([mean_x, mean_y, final_z, 1.0], dtype=np.float32)
+        # 4) Optionally apply an offset to z
+        center += offset
+
+        # 5) Return as homogeneous [cx, cy, cz, 1]
+        return np.array([center[0], center[1], center[2], 1.0], dtype=np.float32)
+
 
     # Precompute the local bottom center (4x1 homogeneous)
-    bottom_center_local = get_bottom_center_in_local(
+    bottom_center_local = get_center_of_bounding_box_in_local(
         mesh_o3d=model_mesh_o3d,
-        z_eps=1e-4,
-        offset=bottom_offset
+        offset=offset
     )
+    
+    if verbose:
+        from copy import deepcopy
+        # 1) Assign a uniform color to the mesh
+        #    We can do this if your mesh lacks built-in per-vertex colors
+        model_mesh_copy = deepcopy(model_mesh_o3d)  # don't overwrite original
+        model_mesh_copy.paint_uniform_color([0.2, 0.7, 0.2])  # pale green
+
+        # 2) Create a small "marker" sphere in local coords at origin,
+        #    then transform it to the bottom_center_local
+        marker_radius = 0.005
+        marker = create_marker_sphere(radius=marker_radius, color=(1.0, 0.0, 0.0))
+
+        # We assume bottom_center_local is a 4D [x, y, z, 1]. Extract the first 3 dims:
+        base_pt = bottom_center_local[:3]
+
+        # Build a transform that moves the marker to [x, y, z]
+        marker_transform = np.eye(4)
+        marker_transform[0:3, 3] = base_pt
+
+        # Apply the transform to the marker
+        marker.transform(marker_transform)
+
+        # 3) Merge the painted mesh + the marker sphere into one mesh
+        combined_local_debug = merge_meshes(model_mesh_copy, marker)
+
+        # 4) Save exactly one .ply in local coords
+        local_debug_path = os.path.join(debug_dir, "local_model_with_bottom_cluster.ply")
+        o3d.io.write_triangle_mesh(local_debug_path, combined_local_debug)
+        print(f"Saved local debug mesh with bottom sphere at:\n  {local_debug_path}")
 
     # -------------------------------------------------------------------------
     # 2) Helper function for clustering / voxel downsampling
@@ -980,13 +1096,12 @@ def get_poses_from_pointclouds_offset(
             print(f"  #points={len(pts)}, #green={len(green_pts)}")
 
         # Debug: Save first frame's green points
-        if i == 0:
+        if i == 0 and verbose:
             debug_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(green_pts))
             debug_pcd.colors = o3d.utility.Vector3dVector(np.tile([0,1,0], (len(green_pts),1)))
             debug_out_path = os.path.join(debug_dir, "first_frame_green_points.ply")
             o3d.io.write_point_cloud(debug_out_path, debug_pcd)
-            if verbose:
-                print(f"  Saved first frame green points to {debug_out_path}")
+            print(f"  Saved first frame green points to {debug_out_path}")
 
         # If no green points, fallback
         if len(green_pts) < 10:

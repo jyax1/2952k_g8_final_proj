@@ -846,7 +846,6 @@ def imitate_trajectory_with_action_identifier(
                         point_clouds_colors,
                         hand_mesh,
                         verbose=True,
-                        bottom_offset=0.01
                         # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
@@ -860,7 +859,17 @@ def imitate_trajectory_with_action_identifier(
                     point_clouds_colors,
                     all_hand_poses,
                     all_hand_poses_gt,
-                    output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                    output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
+                    verbose=True
+                )
+                
+                render_model_on_pointclouds_two_colors(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    all_hand_poses,
+                    all_hand_poses_gt,
+                    model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                    output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
                     verbose=True
                 )
             
