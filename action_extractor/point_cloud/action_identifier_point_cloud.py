@@ -643,7 +643,7 @@ def get_poses_from_pointclouds_offset(
     icp_method="multiscale",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).
     # Example: 0.01 -> 10 mm below.
-    offset=[0.0, 0.002, 0.078]
+    offset=[0.0, 0.002, 0.078] 
 ):
     """
     Estimates poses for a Franka Panda gripper in a sequence of green-colored point clouds.
