@@ -640,7 +640,7 @@ def get_poses_from_pointclouds_offset(
     base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
     max_orientation_angle=np.pi/2,
     verbose=True,
-    icp_method="multiscale",
+    icp_method="updown",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).
     # Example: 0.01 -> 10 mm below.
     offset=[0.0, 0.002, 0.078] 
@@ -1132,6 +1132,7 @@ def get_poses_from_pointclouds_offset(
         world_pt_4 = T_model_in_cloud @ local_pt_4  # shape (4,)
 
         # Now set T_model_in_cloud's translation to that point:
+        T_model_in_cloud_no_offset = T_model_in_cloud.copy()
         T_model_in_cloud[0:3, 3] = world_pt_4[0:3]
 
         # That's our final pose for this frame
@@ -1151,7 +1152,7 @@ def get_poses_from_pointclouds_offset(
 
             # Make a copy of the model pcd and transform
             model_copy = copy.deepcopy(object_model_o3d)
-            model_copy.transform(T_model_in_cloud)
+            model_copy.transform(T_model_in_cloud_no_offset)
             if len(model_copy.points) > 0:
                 red_colors = np.tile([1.0, 0.0, 0.0], (len(model_copy.points), 1))
                 model_copy.colors = o3d.utility.Vector3dVector(red_colors)

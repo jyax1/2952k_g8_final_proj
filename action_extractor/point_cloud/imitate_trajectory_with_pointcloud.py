@@ -222,6 +222,42 @@ def load_ground_truth_poses_as_actions(obs_group, env_camera0):
 
     return all_actions
 
+def quaternion_to_rotation_matrix(qx, qy, qz, qw):
+    # We assume the quaternion is normalized. If not, you can normalize first.
+    x2, y2, z2 = 2.0 * qx, 2.0 * qy, 2.0 * qz
+    xx, yy, zz = qx * x2, qy * y2, qz * z2
+    xy, xz, yz = qx * y2, qx * z2, qy * z2
+    wx, wy, wz = qw * x2, qw * y2, qw * z2
+
+    # Construct rotation matrix
+    R = np.array([
+        [1.0 - (yy + zz), xy - wz,        xz + wy       ],
+        [xy + wz,         1.0 - (xx + zz), yz - wx       ],
+        [xz - wy,         yz + wx,         1.0 - (xx + yy)]
+    ], dtype=np.float64)
+    return R
+
+def get_4x4_poses(pos_array, quat_array):
+    """
+    Given arrays of positions and quaternions, returns a list of 4x4 poses in SE(3).
+    
+    'pos_array' is expected to have shape (N, 3)
+    'quat_array' is expected to have shape (N, 4) in the order [qx, qy, qz, qw].
+    """
+    
+    # 3) Build 4x4 transforms
+    all_poses = []
+    for (px, py, pz), (qx, qy, qz, qw) in zip(pos_array, quat_array):
+        # Convert quaternion to rotation
+        R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
+        # Create 4x4 pose
+        T = np.eye(4, dtype=np.float64)
+        T[:3, :3] = R
+        T[:3, 3] = [px, py, pz]
+        all_poses.append(T)
+
+    return all_poses
+
 def load_ground_truth_poses(obs_group):
     """
     Given an HDF5 group with 'robot0_eef_pos' and 'robot0_eef_quat', 
@@ -235,34 +271,7 @@ def load_ground_truth_poses(obs_group):
     pos_array = obs_group["robot0_eef_pos"][:]    # shape (N, 3)
     quat_array = obs_group["robot0_eef_quat"][:]  # shape (N, 4) => [qx, qy, qz, qw]
 
-    # 2) Helper to convert quaternion (qx, qy, qz, qw) to 3x3 rotation matrix
-    def quaternion_to_rotation_matrix(qx, qy, qz, qw):
-        # We assume the quaternion is normalized. If not, you can normalize first.
-        x2, y2, z2 = 2.0 * qx, 2.0 * qy, 2.0 * qz
-        xx, yy, zz = qx * x2, qy * y2, qz * z2
-        xy, xz, yz = qx * y2, qx * z2, qy * z2
-        wx, wy, wz = qw * x2, qw * y2, qw * z2
-
-        # Construct rotation matrix
-        R = np.array([
-            [1.0 - (yy + zz), xy - wz,        xz + wy       ],
-            [xy + wz,         1.0 - (xx + zz), yz - wx       ],
-            [xz - wy,         yz + wx,         1.0 - (xx + yy)]
-        ], dtype=np.float64)
-        return R
-
-    # 3) Build 4x4 transforms
-    all_poses = []
-    for (px, py, pz), (qx, qy, qz, qw) in zip(pos_array, quat_array):
-        # Convert quaternion to rotation
-        R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
-        # Create 4x4 pose
-        T = np.eye(4, dtype=np.float64)
-        T[:3, :3] = R
-        T[:3, 3] = [px, py, pz]
-        all_poses.append(T)
-
-    return all_poses
+    return get_4x4_poses(pos_array, quat_array)
 
 
 from sklearn.linear_model import LinearRegression
@@ -652,7 +661,9 @@ def imitate_trajectory_with_action_identifier(
     absolute_actions=True,
     ground_truth=False,
     policy_freq=10,
-    smooth=True
+    smooth=True,
+    verbose=True,
+    offset=[0,0,0]
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -818,19 +829,19 @@ def imitate_trajectory_with_action_identifier(
             
             if ground_truth:
                 all_hand_poses = load_ground_truth_poses(obs_group)
-                render_model_on_pointclouds(
-                    point_clouds_points,
-                    point_clouds_colors,
-                    # [pose + np.array([[0, 0, 0, -0.02164373],
-                    #                  [0, 0, 0, 0.00053658],
-                    #                  [0, 0, 0, 0.09631133],
-                    #                  [0, 0, 0, 0]]) for pose in all_hand_poses][1:],
-                    all_hand_poses,
-                    model=load_model_as_pointcloud(hand_mesh,
-                                                model_in_mm=True),
-                    output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
-                    verbose=True
-                )
+                # render_model_on_pointclouds(
+                #     point_clouds_points,
+                #     point_clouds_colors,
+                #     # [pose + np.array([[0, 0, 0, -0.02164373],
+                #     #                  [0, 0, 0, 0.00053658],
+                #     #                  [0, 0, 0, 0.09631133],
+                #     #                  [0, 0, 0, 0]]) for pose in all_hand_poses][1:],
+                #     all_hand_poses,
+                #     model=load_model_as_pointcloud(hand_mesh,
+                #                                 model_in_mm=True),
+                #     output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                #     verbose=verbose
+                # )
             else:
                 # all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
                 #                                             #base_orientation_quat=, 
@@ -845,7 +856,9 @@ def imitate_trajectory_with_action_identifier(
                         point_clouds_points,
                         point_clouds_colors,
                         hand_mesh,
-                        verbose=True,
+                        verbose=verbose,
+                        offset=offset,
+                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}")
                         # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
@@ -860,7 +873,7 @@ def imitate_trajectory_with_action_identifier(
                     all_hand_poses,
                     all_hand_poses_gt,
                     output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
-                    verbose=True
+                    verbose=verbose
                 )
                 
                 render_model_on_pointclouds_two_colors(
@@ -870,7 +883,7 @@ def imitate_trajectory_with_action_identifier(
                     all_hand_poses_gt,
                     model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
                     output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                    verbose=True
+                    verbose=verbose
                 )
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
@@ -905,12 +918,30 @@ def imitate_trajectory_with_action_identifier(
             # For simplicity, we use env_camera0 and env_camera1 for two views;
             # you can later extend this to record from all cameras.
             # Top-right video from camera0 environment:
+            pos_array, quat_array = [], []             
             env_camera0.file_path = upper_right_video_path
             env_camera0.step_count = 0
-            for action in actions_for_demo:
+            pos_array.append(env_camera0.env.env._eef_xpos.astype(np.float32))
+            quat_array.append(env_camera0.env.env._eef_xquat.astype(np.float32))
+            for (i, action) in enumerate(actions_for_demo):
                 env_camera0.step(action)
+                if i % (env_camera0.env.env.control_freq // policy_freq) == 0:
+                    pos_array.append(env_camera0.env.env._eef_xpos.astype(np.float32))
+                    quat_array.append(env_camera0.env.env._eef_xquat.astype(np.float32))
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
+            
+            effect_poses = get_4x4_poses(pos_array, quat_array)
+            
+            render_model_on_pointclouds_two_colors(
+                point_clouds_points,
+                point_clouds_colors,
+                all_hand_poses,
+                effect_poses,
+                model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                verbose=verbose
+            )
 
             # Bottom-right video from camera1 environment:
             env_camera1.reset()
@@ -973,11 +1004,13 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_gt_pf10_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_debug_no_offset_pf10_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=False,
-        policy_freq=5,
-        smooth=False
+        ground_truth=True,
+        policy_freq=1,
+        smooth=False,
+        verbose=False,
+        offset=[0.0, 0.002, 0.078] 
     )

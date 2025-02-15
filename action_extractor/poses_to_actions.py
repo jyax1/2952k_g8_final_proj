@@ -148,7 +148,6 @@ def poses_to_absolute_actions(
     # 2) Start from environment's known initial eef quaternion and position.
     current_orientation = env.env.env._eef_xquat.astype(np.float32)
     current_orientation = quat_normalize(current_orientation)
-    current_orientation_angle = quat2axisangle(current_orientation)
     current_position = env.env.env._eef_xpos.astype(np.float32)
 
     # Compute steps_per_policy and preallocate the final action array.
