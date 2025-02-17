@@ -19,11 +19,11 @@ def load_model_as_pointcloud(model_path, num_points=30000, model_in_mm=True):
         mesh.scale(0.001, center=(0,0,0))
 
     # =========================
-    # Swap x,y axes: (x,y,z) -> (y,x,z)
+    # Swap x,y axes: (x,y,z) -> (y,-x,z)
     # =========================
     swap_xy = np.array([
-        [0.0, 1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0]
     ])
@@ -47,11 +47,11 @@ def load_model_as_mesh(model_path, model_in_mm=True):
         mesh.scale(0.001, center=(0, 0, 0))
 
     # =========================
-    # Swap x,y axes: (x,y,z) -> (y,x,z)
+    # Swap x,y axes: (x,y,z) -> (y,-x,z)
     # =========================
     swap_xy = np.array([
-        [0.0, 1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0]
     ])
@@ -89,6 +89,7 @@ def matrix_to_quat(R_mat):
 # and a base quaternion q_base (x,y,z,w).
 def orientation_angle_diff(R_mat, q_base):
     q_curr = matrix_to_quat(R_mat)
+    print(f'R_est: {q_curr}')
     # Dot product of unit quaternions => cos(half the angle)
     dot = np.abs(np.dot(q_curr, q_base))
     dot = np.clip(dot, -1.0, 1.0)
@@ -658,8 +659,15 @@ def get_poses_from_pointclouds_offset(
     dbscan_eps=0.02,
     dbscan_min_points=20,
     # base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
-    base_orientation_quat=np.array([0.70409597, -0.07225323, 0.03125232, 0.70572773]),
-    max_orientation_angle=np.pi/2,
+    # base_orientation_quat=np.array([0.70409597, -0.07225323, 0.03125232, 0.70572773]),
+    base_orientation_quat=np.array([ 0.61854268,  0.78458513,  0.03966061, -0.01606732]),
+    # [ 0.61854268  0.78458513  0.03966061 -0.01606732] for swap_xy = np.array([
+    #     [0.0, -1.0, 0.0, 0.0],
+    #     [-1.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 1.0, 0.0],
+    #     [0.0, 0.0, 0.0, 1.0]
+    # ])
+    max_orientation_angle=np.pi / 2,
     verbose=True,
     icp_method="updown",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).

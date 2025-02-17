@@ -156,3 +156,52 @@ def quat_normalize(q):
     if norm < 1e-12:
         raise ValueError("Cannot normalize near-zero quaternion.")
     return q / norm
+
+def axis_angle_vector_to_rotation_matrix(rvec):
+    """
+    Converts a single 3D axis-angle vector to a 3x3 rotation matrix.
+    The input vector's direction is the rotation axis, and its magnitude
+    is the rotation angle in radians.
+
+    Args:
+        rvec (array-like): length-3 vector [rx, ry, rz]. 
+                           The direction of rvec is the rotation axis.
+                           The magnitude of rvec is the rotation angle (in radians).
+
+    Returns:
+        R (ndarray): A 3x3 rotation matrix.
+    """
+    # Convert input to float NumPy array
+    rvec = np.asarray(rvec, dtype=float)
+
+    # Compute the rotation angle as the vector norm
+    angle = np.linalg.norm(rvec)
+
+    # Handle the near-zero angle case: return the identity matrix
+    if angle < 1e-15:
+        return np.eye(3, dtype=float)
+
+    # Compute the normalized axis
+    axis = rvec / angle
+
+    # Rodrigues' rotation formula:
+    #   R = I + sin(theta)*[K] + (1 - cos(theta))*[K]^2
+    # where [K] is the skew-symmetric cross-product matrix of 'axis'.
+    ux, uy, uz = axis
+    sin_theta = np.sin(angle)
+    cos_theta = np.cos(angle)
+
+    # Skew-symmetric cross-product matrix of the axis
+    K = np.array([
+        [0,    -uz,   uy],
+        [uz,    0,   -ux],
+        [-uy,  ux,    0 ]
+    ], dtype=float)
+
+    # 3x3 identity
+    I = np.eye(3, dtype=float)
+
+    # Compute rotation matrix
+    R = I + sin_theta * K + (1.0 - cos_theta) * (K @ K)
+
+    return R

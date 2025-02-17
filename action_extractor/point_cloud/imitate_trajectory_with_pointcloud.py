@@ -869,14 +869,14 @@ def imitate_trajectory_with_action_identifier(
                     
                 all_hand_poses_gt = load_ground_truth_poses(obs_group)
                     
-                render_positions_on_pointclouds_two_colors(
-                    point_clouds_points,
-                    point_clouds_colors,
-                    all_hand_poses,
-                    all_hand_poses_gt,
-                    output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
-                    verbose=verbose
-                )
+                # render_positions_on_pointclouds_two_colors(
+                #     point_clouds_points,
+                #     point_clouds_colors,
+                #     all_hand_poses,
+                #     all_hand_poses_gt,
+                #     output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
+                #     verbose=verbose
+                # )
                 
                 # render_model_on_pointclouds_two_colors(
                 #     point_clouds_points,
@@ -1014,7 +1014,7 @@ if __name__ == "__main__":
         policy_freq=1,
         smooth=False,
         verbose=True,
-        offset=[0.0, 0.002, 0.078],
+        offset=[0.0, -0.002, 0.078],
         # offset=[-0.002, 0, 0.078],
         icp_method="multiscale"
     )
