@@ -43,8 +43,8 @@ def quaternion_orientation_difference_degrees(q1, q2):
 # Example usage
 if __name__ == "__main__":
     # Suppose we have two quaternions (in w, x, y, z format)
-    q_a = (0.7253942,  0.6844675,  0.05062998, 0.05238412)  # ~ Rotated 45 degrees about X
-    q_b = (0.70793694, 0.70336175, 0.04273286, 0.04776503)       # Identity quaternion
+    q_a = (0.7122174,  0.69890285, 0.04987878, 0.04234895)  # ~ Rotated 45 degrees about X
+    q_b = (0.61854268,  0.78458513,  0.03966061, -0.01606732)      # Identity quaternion
 
     difference_deg = quaternion_orientation_difference_degrees(q_a, q_b)
     print(f"Difference in orientation (degrees): {difference_deg:.2f}")

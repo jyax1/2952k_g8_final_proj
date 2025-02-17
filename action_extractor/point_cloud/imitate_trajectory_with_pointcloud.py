@@ -788,7 +788,6 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-        demos = [list(root_z["data"].keys())[1]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -1007,12 +1006,12 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_debug_no_offset_pf10_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf20_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
-        policy_freq=1,
+        policy_freq=20,
         smooth=False,
         verbose=False,
         # offset=[0.0, -0.002, 0.078],
