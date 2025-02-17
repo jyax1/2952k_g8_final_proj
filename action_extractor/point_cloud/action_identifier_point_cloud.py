@@ -6,29 +6,38 @@ from scipy.spatial.transform import Rotation as R
 import os
 
 def load_model_as_pointcloud(model_path, num_points=30000, model_in_mm=True):
+    """
+    Loads a mesh, optionally scaled from mm->m, then samples into a point cloud.
+    Then swaps the x,y axes.
+    """
     mesh = o3d.io.read_triangle_mesh(model_path)
     if mesh.is_empty():
         raise ValueError(f"Could not load mesh from: {model_path}")
 
+    # Convert from mm to m if desired
     if model_in_mm:
         mesh.scale(0.001, center=(0,0,0))
 
+    # =========================
+    # Swap x,y axes: (x,y,z) -> (y,x,z)
+    # =========================
+    swap_xy = np.array([
+        [0.0, 1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    mesh.transform(swap_xy)
+
+    # Now sample
     pcd = mesh.sample_points_uniformly(number_of_points=num_points)
     return pcd
 
 def load_model_as_mesh(model_path, model_in_mm=True):
     """
-    Loads a mesh from the given path, optionally converting from mm to m.
-
-    Args:
-        model_path (str): Path to the 3D mesh file (e.g. .obj, .ply, .stl, etc.).
-        model_in_mm (bool): Whether the mesh is in millimeters. If True, we'll
-                            scale it by 0.001 to convert to meters.
-
-    Returns:
-        mesh (o3d.geometry.TriangleMesh): The loaded Open3D mesh in meters (if model_in_mm=True).
+    Loads a mesh from the given path, optionally converting from mm to m,
+    then swaps the x,y axes.
     """
-    # Read mesh
     mesh = o3d.io.read_triangle_mesh(model_path)
     if mesh.is_empty():
         raise ValueError(f"Could not load mesh from: {model_path}")
@@ -36,6 +45,17 @@ def load_model_as_mesh(model_path, model_in_mm=True):
     # Convert from mm to m if desired
     if model_in_mm:
         mesh.scale(0.001, center=(0, 0, 0))
+
+    # =========================
+    # Swap x,y axes: (x,y,z) -> (y,x,z)
+    # =========================
+    swap_xy = np.array([
+        [0.0, 1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    mesh.transform(swap_xy)
 
     return mesh
 
@@ -637,13 +657,15 @@ def get_poses_from_pointclouds_offset(
     model_in_mm=True,
     dbscan_eps=0.02,
     dbscan_min_points=20,
-    base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
+    # base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
+    base_orientation_quat=np.array([0.70409597, -0.07225323, 0.03125232, 0.70572773]),
     max_orientation_angle=np.pi/2,
     verbose=True,
     icp_method="updown",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).
     # Example: 0.01 -> 10 mm below.
-    offset=[0.0, 0.002, 0.078]
+    offset=[0.0, 0.002, 0.078],
+    # offset=[-0.002, 0, 0.078]
 ):
     """
     Estimates poses for a Franka Panda gripper in a sequence of green-colored point clouds.
@@ -670,12 +692,6 @@ def get_poses_from_pointclouds_offset(
         poses (list of ndarray): Each element is a 4x4 transform with the orientation from ICP
                                  but the translation set to the "bottom center" minus bottom_offset.
     """
-
-    import os
-    import random
-    import copy
-    import numpy as np
-    import open3d as o3d
 
     os.makedirs(debug_dir, exist_ok=True)
 

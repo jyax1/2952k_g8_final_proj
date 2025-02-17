@@ -663,7 +663,8 @@ def imitate_trajectory_with_action_identifier(
     policy_freq=10,
     smooth=True,
     verbose=True,
-    offset=[0,0,0]
+    offset=[0,0,0],
+    icp_method="multiscale"
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -858,7 +859,8 @@ def imitate_trajectory_with_action_identifier(
                         hand_mesh,
                         verbose=verbose,
                         offset=offset,
-                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}")
+                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
+                        icp_method=icp_method
                         # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
@@ -876,15 +878,15 @@ def imitate_trajectory_with_action_identifier(
                     verbose=verbose
                 )
                 
-                render_model_on_pointclouds_two_colors(
-                    point_clouds_points,
-                    point_clouds_colors,
-                    all_hand_poses,
-                    all_hand_poses_gt,
-                    model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
-                    output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                    verbose=verbose
-                )
+                # render_model_on_pointclouds_two_colors(
+                #     point_clouds_points,
+                #     point_clouds_colors,
+                #     all_hand_poses,
+                #     all_hand_poses_gt,
+                #     model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                #     output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                #     verbose=verbose
+                # )
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -936,8 +938,8 @@ def imitate_trajectory_with_action_identifier(
             render_model_on_pointclouds_two_colors(
                 point_clouds_points,
                 point_clouds_colors,
-                all_hand_poses,
-                effect_poses,
+                all_hand_poses, # Red
+                effect_poses,   # Blue
                 model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
                 output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
                 verbose=verbose
@@ -1008,9 +1010,11 @@ if __name__ == "__main__":
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
-        ground_truth=True,
+        ground_truth=False,
         policy_freq=1,
         smooth=False,
-        verbose=False,
-        offset=[0.0, 0.002, 0.078] 
+        verbose=True,
+        offset=[0.0, 0.002, 0.078],
+        # offset=[-0.002, 0, 0.078],
+        icp_method="multiscale"
     )
