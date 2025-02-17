@@ -650,6 +650,180 @@ def render_positions_on_pointclouds_two_colors(
 
         if verbose:
             print(f"Saved rendered frame {i} with red/blue clusters to {out_path}")
+            
+def roll_out(env, 
+             actions_for_demo, 
+             file_path, 
+             policy_freq, 
+             verbose=False, 
+             point_clouds_points=None, 
+             point_clouds_colors=None, 
+             hand_mesh=None, 
+             output_dir=None,
+             all_hand_poses=None,
+             demo_id=None):
+    pos_array, quat_array = [], []             
+    env.file_path = file_path
+    env.step_count = 0
+    pos_array.append(env.env.env._eef_xpos.astype(np.float32))
+    quat_array.append(env.env.env._eef_xquat.astype(np.float32))
+    for (i, action) in enumerate(actions_for_demo):
+        env.step(action)
+        if i % (env.env.env.control_freq // policy_freq) == 0:
+            pos_array.append(env.env.env._eef_xpos.astype(np.float32))
+            quat_array.append(env.env.env._eef_xquat.astype(np.float32))
+    env.video_recoder.stop()
+    env.file_path = None
+    
+    if verbose:
+        effect_poses = get_4x4_poses(pos_array, quat_array)
+        render_model_on_pointclouds_two_colors(
+            point_clouds_points,
+            point_clouds_colors,
+            all_hand_poses, # Red
+            effect_poses,   # Blue
+            model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+            output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+            verbose=verbose
+        )
+
+def infer_actions_and_rollout(root_z,
+                              demo,
+                              env_camera0,
+                              env_camera1,
+                              point_clouds_points,
+                              point_clouds_colors,
+                              hand_mesh,
+                              upper_right_video_path,
+                              lower_right_video_path,
+                              output_dir,
+                              demo_id,
+                              policy_freq=10,
+                              smooth=True,
+                              verbose=True,
+                              num_samples=100,
+                              absolute_actions=True,
+                              ground_truth=False,
+                              offset=[0,0,0],
+                              icp_method="multiscale"):
+    initial_state = root_z["data"][demo]["states"][0]
+    obs_group = root_z["data"][demo]["obs"]
+    env_camera0.reset()
+    env_camera0.reset_to({"states": initial_state})
+
+    POSES_FILE = "hand_poses_offset.npy"
+    
+    if ground_truth:
+        all_hand_poses = load_ground_truth_poses(obs_group)
+        if verbose:
+            render_model_on_pointclouds(
+                point_clouds_points,
+                point_clouds_colors,
+                all_hand_poses,
+                model=load_model_as_pointcloud(hand_mesh,
+                                            model_in_mm=True),
+                output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
+                verbose=verbose
+            )
+    else:
+        
+        if os.path.exists(POSES_FILE) and verbose:
+            print(f"Loading hand poses from {POSES_FILE}...")
+            all_hand_poses = np.load(POSES_FILE)
+        elif verbose:
+            print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
+            all_hand_poses = get_poses_from_pointclouds_offset(
+                point_clouds_points,
+                point_clouds_colors,
+                hand_mesh,
+                verbose=verbose,
+                offset=offset,
+                debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
+                icp_method=icp_method
+            )
+            # Save the computed poses for future use.
+            np.save(POSES_FILE, all_hand_poses)
+            print(f"Hand poses saved to {POSES_FILE}")
+        else:
+            all_hand_poses = get_poses_from_pointclouds_offset(
+                point_clouds_points,
+                point_clouds_colors,
+                hand_mesh,
+                verbose=verbose,
+                offset=offset,
+                debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
+                icp_method=icp_method
+            )
+            
+        if verbose:
+            all_hand_poses_gt = load_ground_truth_poses(obs_group)
+                
+            render_positions_on_pointclouds_two_colors(
+                point_clouds_points,
+                point_clouds_colors,
+                all_hand_poses,
+                all_hand_poses_gt,
+                output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
+                verbose=verbose
+            )
+            
+            render_model_on_pointclouds_two_colors(
+                point_clouds_points,
+                point_clouds_colors,
+                all_hand_poses,
+                all_hand_poses_gt,
+                model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                verbose=verbose
+            )
+    
+
+    # 12) Build absolute actions.
+    # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
+    if absolute_actions:
+        actions_for_demo = poses_to_absolute_actions(
+            poses=all_hand_poses,
+            gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+            env=env_camera0,  # using camera0 environment to get initial orientation
+            control_freq = env_camera0.env.env.control_freq,
+            policy_freq = policy_freq,
+            smooth=smooth
+        )
+    else:
+        actions_for_demo = poses_to_delta_actions(
+            poses=all_hand_poses,
+            gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+            smooth=False,
+            translation_scaling=80.0,
+            rotation_scaling=9.0,
+        )
+
+    roll_out(env_camera0, 
+                actions_for_demo, 
+                upper_right_video_path,
+                policy_freq,
+                verbose=verbose, 
+                point_clouds_points=point_clouds_points, 
+                point_clouds_colors=point_clouds_colors, 
+                hand_mesh=hand_mesh,
+                output_dir=output_dir, 
+                all_hand_poses=all_hand_poses, 
+                demo_id=demo_id)
+    
+    env_camera1.reset()
+    env_camera1.reset_to({"states": initial_state})
+    
+    roll_out(env_camera1,
+            actions_for_demo,
+            lower_right_video_path,
+            policy_freq,
+            verbose=verbose,
+            point_clouds_points=point_clouds_points,
+            point_clouds_colors=point_clouds_colors,
+            hand_mesh=hand_mesh,
+            output_dir=output_dir,
+            all_hand_poses=all_hand_poses,
+            demo_id=demo_id)
 
 def imitate_trajectory_with_action_identifier(
     dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
@@ -788,6 +962,7 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+        demos = [list(root_z["data"].keys())[1]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -821,150 +996,41 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
-            initial_state = root_z["data"][demo]["states"][0]
-            env_camera0.reset()
-            env_camera0.reset_to({"states": initial_state})
-
-            POSES_FILE = "hand_poses_offset.npy"
-            
-            if ground_truth:
-                all_hand_poses = load_ground_truth_poses(obs_group)
-                # render_model_on_pointclouds(
-                #     point_clouds_points,
-                #     point_clouds_colors,
-                #     # [pose + np.array([[0, 0, 0, -0.02164373],
-                #     #                  [0, 0, 0, 0.00053658],
-                #     #                  [0, 0, 0, 0.09631133],
-                #     #                  [0, 0, 0, 0]]) for pose in all_hand_poses][1:],
-                #     all_hand_poses,
-                #     model=load_model_as_pointcloud(hand_mesh,
-                #                                 model_in_mm=True),
-                #     output_dir=os.path.join(output_dir, f"rendered_frames_{demo_id}"),
-                #     verbose=verbose
-                # )
-            else:
-                # all_hand_poses = get_poses_from_pointclouds(point_clouds_points, point_clouds_colors, hand_mesh,
-                #                                             #base_orientation_quat=, 
-                #                                             verbose=True)
-                
-                if os.path.exists(POSES_FILE) and verbose:
-                    print(f"Loading hand poses from {POSES_FILE}...")
-                    all_hand_poses = np.load(POSES_FILE)
-                elif verbose:
-                    print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
-                    all_hand_poses = get_poses_from_pointclouds_offset(
-                        point_clouds_points,
-                        point_clouds_colors,
-                        hand_mesh,
-                        verbose=verbose,
-                        offset=offset,
-                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
-                        icp_method=icp_method
-                    )
-                    # Save the computed poses for future use.
-                    np.save(POSES_FILE, all_hand_poses)
-                    print(f"Hand poses saved to {POSES_FILE}")
-                else:
-                    all_hand_poses = get_poses_from_pointclouds_offset(
-                        point_clouds_points,
-                        point_clouds_colors,
-                        hand_mesh,
-                        verbose=verbose,
-                        offset=offset,
-                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
-                        icp_method=icp_method
-                    )
-                    
-                if verbose:
-                    all_hand_poses_gt = load_ground_truth_poses(obs_group)
-                        
-                    render_positions_on_pointclouds_two_colors(
-                        point_clouds_points,
-                        point_clouds_colors,
-                        all_hand_poses,
-                        all_hand_poses_gt,
-                        output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
-                        verbose=verbose
-                    )
-                    
-                    render_model_on_pointclouds_two_colors(
-                        point_clouds_points,
-                        point_clouds_colors,
-                        all_hand_poses,
-                        all_hand_poses_gt,
-                        model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
-                        output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                        verbose=verbose
-                    )
-            
-            # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
-
-            # 12) Build absolute actions.
-            # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
-            if absolute_actions:
-                actions_for_demo = poses_to_absolute_actions(
-                    poses=all_hand_poses,
-                    gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                    env=env_camera0,  # using camera0 environment to get initial orientation
-                    control_freq = env_camera0.env.env.control_freq,
-                    policy_freq = policy_freq,
-                    smooth=smooth
-                )
-            else:
-                actions_for_demo = poses_to_delta_actions(
-                    poses=all_hand_poses,
-                    gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-                    smooth=False,
-                    translation_scaling=80.0,
-                    rotation_scaling=9.0,
-                )
-
-            # 13) Execute actions and record videos.
-            # For simplicity, we use env_camera0 and env_camera1 for two views;
-            # you can later extend this to record from all cameras.
-            # Top-right video from camera0 environment:
-            pos_array, quat_array = [], []             
-            env_camera0.file_path = upper_right_video_path
-            env_camera0.step_count = 0
-            pos_array.append(env_camera0.env.env._eef_xpos.astype(np.float32))
-            quat_array.append(env_camera0.env.env._eef_xquat.astype(np.float32))
-            for (i, action) in enumerate(actions_for_demo):
-                env_camera0.step(action)
-                if i % (env_camera0.env.env.control_freq // policy_freq) == 0:
-                    pos_array.append(env_camera0.env.env._eef_xpos.astype(np.float32))
-                    quat_array.append(env_camera0.env.env._eef_xquat.astype(np.float32))
-            env_camera0.video_recoder.stop()
-            env_camera0.file_path = None
-            
-            if verbose:
-                effect_poses = get_4x4_poses(pos_array, quat_array)
-                render_model_on_pointclouds_two_colors(
+            for i in range(10):
+                infer_actions_and_rollout(
+                    root_z,
+                    demo,
+                    env_camera0,
+                    env_camera1,
                     point_clouds_points,
                     point_clouds_colors,
-                    all_hand_poses, # Red
-                    effect_poses,   # Blue
-                    model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
-                    output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                    verbose=verbose
+                    hand_mesh,
+                    upper_right_video_path,
+                    lower_right_video_path,
+                    output_dir,
+                    demo_id,
+                    policy_freq=policy_freq,
+                    smooth=smooth,
+                    verbose=verbose,
+                    num_samples=num_samples,
+                    absolute_actions=absolute_actions,
+                    ground_truth=ground_truth,
+                    offset=offset,
+                    icp_method=icp_method
                 )
 
-            # Bottom-right video from camera1 environment:
-            env_camera1.reset()
-            env_camera1.reset_to({"states": initial_state})
-            env_camera1.file_path = lower_right_video_path
-            env_camera1.step_count = 0
-            for action in actions_for_demo:
-                env_camera1.step(action)
-            env_camera1.video_recoder.stop()
-            env_camera1.file_path = None
-
-            # Success check
-            success = env_camera0.is_success()["task"]
-            if success:
-                n_success += 1
+                # Success check
+                success = env_camera0.is_success()["task"]
+                if success:
+                    n_success += 1
+                    break
+                else:
+                    icp_method = "updown" if icp_method == "multiscale" else "multiscale"
+                    print(f"Retrying with ICP method: {icp_method}")
+            
             total_n += 1
             
-            result_str = f"demo_{demo_id}: {'success' if success else 'fail'}"
+            result_str = f"demo_{demo_id}: {f'success after {i+1} trials' if success else f'fail after {i+1} trials'}"
             print(result_str)
 
             # Immediately append to the results file in "a" (append) mode
@@ -1009,7 +1075,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf10_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_multi_trial_pf10_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
