@@ -864,29 +864,30 @@ def imitate_trajectory_with_action_identifier(
                         # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
-                    # np.save(POSES_FILE, all_hand_poses)
-                    # print(f"Hand poses saved to {POSES_FILE}")
+                    np.save(POSES_FILE, all_hand_poses)
+                    print(f"Hand poses saved to {POSES_FILE}")
                     
-                all_hand_poses_gt = load_ground_truth_poses(obs_group)
+                if verbose:
+                    all_hand_poses_gt = load_ground_truth_poses(obs_group)
+                        
+                    render_positions_on_pointclouds_two_colors(
+                        point_clouds_points,
+                        point_clouds_colors,
+                        all_hand_poses,
+                        all_hand_poses_gt,
+                        output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
+                        verbose=verbose
+                    )
                     
-                # render_positions_on_pointclouds_two_colors(
-                #     point_clouds_points,
-                #     point_clouds_colors,
-                #     all_hand_poses,
-                #     all_hand_poses_gt,
-                #     output_dir=os.path.join(output_dir, f"rendered_positions_{demo_id}"),
-                #     verbose=verbose
-                # )
-                
-                # render_model_on_pointclouds_two_colors(
-                #     point_clouds_points,
-                #     point_clouds_colors,
-                #     all_hand_poses,
-                #     all_hand_poses_gt,
-                #     model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
-                #     output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                #     verbose=verbose
-                # )
+                    render_model_on_pointclouds_two_colors(
+                        point_clouds_points,
+                        point_clouds_colors,
+                        all_hand_poses,
+                        all_hand_poses_gt,
+                        model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                        output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                        verbose=verbose
+                    )
             
             # save_hand_poses(all_hand_poses, filename=os.path.join(output_dir, f"all_hand_poses_{demo_id}_2.npy"))
 
@@ -933,17 +934,17 @@ def imitate_trajectory_with_action_identifier(
             env_camera0.video_recoder.stop()
             env_camera0.file_path = None
             
-            effect_poses = get_4x4_poses(pos_array, quat_array)
-            
-            render_model_on_pointclouds_two_colors(
-                point_clouds_points,
-                point_clouds_colors,
-                all_hand_poses, # Red
-                effect_poses,   # Blue
-                model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
-                output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
-                verbose=verbose
-            )
+            if verbose:
+                effect_poses = get_4x4_poses(pos_array, quat_array)
+                render_model_on_pointclouds_two_colors(
+                    point_clouds_points,
+                    point_clouds_colors,
+                    all_hand_poses, # Red
+                    effect_poses,   # Blue
+                    model=load_model_as_pointcloud(hand_mesh, model_in_mm=True),
+                    output_dir=os.path.join(output_dir, f"rendered_models_{demo_id}"),
+                    verbose=verbose
+                )
 
             # Bottom-right video from camera1 environment:
             env_camera1.reset()
@@ -1013,8 +1014,8 @@ if __name__ == "__main__":
         ground_truth=False,
         policy_freq=1,
         smooth=False,
-        verbose=True,
-        offset=[0.0, -0.002, 0.078],
-        # offset=[-0.002, 0, 0.078],
+        verbose=False,
+        # offset=[0.0, -0.002, 0.078],
+        offset=[-0.002, 0, 0.078],
         icp_method="multiscale"
     )

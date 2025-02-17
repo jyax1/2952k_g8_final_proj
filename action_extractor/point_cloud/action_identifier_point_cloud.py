@@ -89,7 +89,7 @@ def matrix_to_quat(R_mat):
 # and a base quaternion q_base (x,y,z,w).
 def orientation_angle_diff(R_mat, q_base):
     q_curr = matrix_to_quat(R_mat)
-    print(f'R_est: {q_curr}')
+    # print(f'R_est: {q_curr}') # For providing correct base_orientation
     # Dot product of unit quaternions => cos(half the angle)
     dot = np.abs(np.dot(q_curr, q_base))
     dot = np.clip(dot, -1.0, 1.0)
@@ -667,13 +667,13 @@ def get_poses_from_pointclouds_offset(
     #     [0.0, 0.0, 1.0, 0.0],
     #     [0.0, 0.0, 0.0, 1.0]
     # ])
-    max_orientation_angle=np.pi / 2,
+    max_orientation_angle=np.pi / 8,
     verbose=True,
     icp_method="updown",
     # New parameter: how far below the "lowest" surface we place the final reference point (meters).
     # Example: 0.01 -> 10 mm below.
-    offset=[0.0, 0.002, 0.078],
-    # offset=[-0.002, 0, 0.078]
+    # offset=[0.0, 0.002, 0.078],
+    offset=[-0.002, 0, 0.078]
 ):
     """
     Estimates poses for a Franka Panda gripper in a sequence of green-colored point clouds.
