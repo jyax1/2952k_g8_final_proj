@@ -847,10 +847,10 @@ def imitate_trajectory_with_action_identifier(
                 #                                             #base_orientation_quat=, 
                 #                                             verbose=True)
                 
-                if os.path.exists(POSES_FILE):
+                if os.path.exists(POSES_FILE) and verbose:
                     print(f"Loading hand poses from {POSES_FILE}...")
                     all_hand_poses = np.load(POSES_FILE)
-                else:
+                elif verbose:
                     print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
                     all_hand_poses = get_poses_from_pointclouds_offset(
                         point_clouds_points,
@@ -860,11 +860,20 @@ def imitate_trajectory_with_action_identifier(
                         offset=offset,
                         debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
                         icp_method=icp_method
-                        # You can optionally add other parameters like base_orientation_quat if needed.
                     )
                     # Save the computed poses for future use.
                     np.save(POSES_FILE, all_hand_poses)
                     print(f"Hand poses saved to {POSES_FILE}")
+                else:
+                    all_hand_poses = get_poses_from_pointclouds_offset(
+                        point_clouds_points,
+                        point_clouds_colors,
+                        hand_mesh,
+                        verbose=verbose,
+                        offset=offset,
+                        debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
+                        icp_method=icp_method
+                    )
                     
                 if verbose:
                     all_hand_poses_gt = load_ground_truth_poses(obs_group)
@@ -909,12 +918,6 @@ def imitate_trajectory_with_action_identifier(
                     translation_scaling=80.0,
                     rotation_scaling=9.0,
                 )
-                
-            # reg = analyze_delta_action_mapping(root_z["data"][demo], actions_for_demo)
-            # np.save("reg_coef.npy", reg.coef_)
-            # np.save("reg_intercept.npy", reg.intercept_)
-            
-            # exit()
 
             # 13) Execute actions and record videos.
             # For simplicity, we use env_camera0 and env_camera1 for two views;
@@ -1006,12 +1009,12 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf20_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf10_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
-        policy_freq=20,
+        policy_freq=10,
         smooth=False,
         verbose=False,
         # offset=[0.0, -0.002, 0.078],

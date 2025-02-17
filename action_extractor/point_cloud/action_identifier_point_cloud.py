@@ -701,7 +701,8 @@ def get_poses_from_pointclouds_offset(
                                  but the translation set to the "bottom center" minus bottom_offset.
     """
 
-    os.makedirs(debug_dir, exist_ok=True)
+    if verbose:
+        os.makedirs(debug_dir, exist_ok=True)
 
     # -------------------------------------------------------------------------
     # 1) Load the model as a mesh (for accurate geometry)
