@@ -838,7 +838,8 @@ def imitate_trajectory_with_action_identifier(
     smooth=True,
     verbose=True,
     offset=[0,0,0],
-    icp_method="multiscale"
+    icp_method="multiscale",
+    num_trials=10
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -962,7 +963,6 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-        demos = [list(root_z["data"].keys())[1]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -996,7 +996,7 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
-            for i in range(10):
+            for i in range(num_trials):
                 infer_actions_and_rollout(
                     root_z,
                     demo,
@@ -1075,15 +1075,16 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_multi_trial_pf10_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf5_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
-        policy_freq=10,
+        policy_freq=5,
         smooth=False,
         verbose=False,
         # offset=[0.0, -0.002, 0.078],
         offset=[-0.002, 0, 0.078],
-        icp_method="multiscale"
+        icp_method="multiscale",
+        num_trials=1
     )
