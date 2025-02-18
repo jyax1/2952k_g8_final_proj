@@ -849,7 +849,7 @@ def imitate_trajectory_with_action_identifier(
     verbose=True,
     offset=[0,0,0],
     icp_method="multiscale",
-    num_trials=10
+    max_num_trials=10
 ):
     """
     General version where 'cameras' is a list of camera observation strings,
@@ -1006,7 +1006,10 @@ def imitate_trajectory_with_action_identifier(
             point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
-            for i in range(num_trials):
+            success = False
+            i = 0
+            
+            while not success and i < max_num_trials:
                 infer_actions_and_rollout(
                     root_z,
                     demo,
@@ -1033,11 +1036,11 @@ def imitate_trajectory_with_action_identifier(
                 success = env_camera0.is_success()["task"]
                 if success:
                     n_success += 1
-                    break
                 else:
-                    # icp_method = "updown" if icp_method == "multiscale" else "multiscale"
                     policy_freq = change_policy_freq(policy_freq)
                     print(f"Retrying with policy_freq: {policy_freq}")
+                    
+                i += 1
             
             total_n += 1
             
@@ -1096,5 +1099,5 @@ if __name__ == "__main__":
         verbose=False,
         offset=[-0.002, 0, 0.078],
         icp_method="multiscale",
-        num_trials=10
+        max_num_trials=10
     )
