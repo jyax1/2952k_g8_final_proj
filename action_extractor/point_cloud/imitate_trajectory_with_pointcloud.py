@@ -46,6 +46,8 @@ import open3d as o3d
 
 POLICY_FREQS = [5, 10, 20]
 
+POSITIONAL_OFFSET = [-0.002, 0, 0.078]
+
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, 
                              bottom_left_video_path, bottom_right_video_path, 
@@ -1044,7 +1046,7 @@ def imitate_trajectory_with_action_identifier(
             
             total_n += 1
             
-            result_str = f"demo_{demo_id}: {f'success after {i+1} trials' if success else f'fail after {i+1} trials'}"
+            result_str = f"demo_{demo_id}: {f'success after {i} trials' if success else f'fail after {i} trials'}"
             print(result_str)
 
             # Immediately append to the results file in "a" (append) mode
@@ -1097,7 +1099,7 @@ if __name__ == "__main__":
         policy_freq=20,
         smooth=False,
         verbose=False,
-        offset=[-0.002, 0, 0.078],
+        offset=POSITIONAL_OFFSET,
         icp_method="multiscale",
         max_num_trials=10
     )
