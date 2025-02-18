@@ -43,7 +43,8 @@ from robosuite.utils.camera_utils import ( # type: ignore
 from transforms3d.euler import quat2euler, euler2quat
 
 import open3d as o3d
-from sklearn.decomposition import PCA
+
+POLICY_FREQS = [5, 10, 20]
 
 
 def combine_videos_quadrants(top_left_video_path, top_right_video_path, 
@@ -651,6 +652,15 @@ def render_positions_on_pointclouds_two_colors(
         if verbose:
             print(f"Saved rendered frame {i} with red/blue clusters to {out_path}")
             
+def change_policy_freq(policy_freq):
+    current_policy_freq = policy_freq
+
+    # Filter out the old policy_freq
+    valid_options = [opt for opt in POLICY_FREQS if opt != current_policy_freq]
+
+    # Randomly pick a new policy_freq
+    return random.choice(valid_options)
+            
 def roll_out(env, 
              actions_for_demo, 
              file_path, 
@@ -1025,8 +1035,9 @@ def imitate_trajectory_with_action_identifier(
                     n_success += 1
                     break
                 else:
-                    icp_method = "updown" if icp_method == "multiscale" else "multiscale"
-                    print(f"Retrying with ICP method: {icp_method}")
+                    # icp_method = "updown" if icp_method == "multiscale" else "multiscale"
+                    policy_freq = change_policy_freq(policy_freq)
+                    print(f"Retrying with policy_freq: {policy_freq}")
             
             total_n += 1
             
@@ -1083,8 +1094,7 @@ if __name__ == "__main__":
         policy_freq=5,
         smooth=False,
         verbose=False,
-        # offset=[0.0, -0.002, 0.078],
         offset=[-0.002, 0, 0.078],
         icp_method="multiscale",
-        num_trials=1
+        num_trials=10
     )
