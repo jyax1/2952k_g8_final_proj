@@ -2,33 +2,8 @@ import numpy as np
 import open3d as o3d
 
 from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
-
-def depth2fgpcd(depth, mask, cam_param):
-    """
-    Unprojects depth to 3D points in camera coords.
-    'cam_param' is [fx, fy, cx, cy].
-    'mask' is a boolean array (same size as depth) indicating valid pixels.
-    """
-    fx, fy, cx, cy = cam_param
-    h, w = depth.shape
-    ys, xs = np.indices((h, w))
-    xs = xs[mask]
-    ys = ys[mask]
-    zs = depth[mask]
-
-    X = (xs - cx) / fx * zs
-    Y = (ys - cy) / fy * zs
-    Z = zs
-    return np.stack([X, Y, Z], axis=-1)
-
-def np2o3d(points_xyz, colors_rgb):
-    """
-    Converts Nx3 numpy arrays (points_xyz, colors_rgb [0..1]) to an Open3D PointCloud.
-    """
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points_xyz)
-    pcd.colors = o3d.utility.Vector3dVector(colors_rgb)
-    return pcd
+from robomimic.utils.obs_utils import undiscretize_depth
+from robomimic.envs.env_robosuite import depth2fgpcd, np2o3d
 
 # -----------------------------------------------------------
 # Main function to reconstruct point clouds from obs_group
@@ -80,7 +55,7 @@ def reconstruct_pointclouds_from_obs_group(
     ])
 
     # We determine how many timesteps are in the dataset from the first camera's image
-    first_cam = env.camera_names[0]
+    first_cam = camera_names[0]
     # e.g. if the key is "<camera>_image"
     num_samples = obs_group[f"{first_cam}_image"].shape[0]
     if verbose:
@@ -106,12 +81,8 @@ def reconstruct_pointclouds_from_obs_group(
             color = obs_group[f"{camera_name}_image"][i]
             depth = obs_group[f"{camera_name}_depth"][i]  # shape (H,W) or (H,W,1)
 
-            # Flip vertically, as your code does: [::-1]
-            color = color[::-1]
-            depth = depth[::-1]
-
             # Possibly compute real-depth map
-            depth = get_real_depth_map(env.sim, depth)
+            depth = undiscretize_depth(depth, f"{camera_name}_depth")
             # If depth is shape (H,W,1), flatten to (H,W)
             if depth.ndim == 3 and depth.shape[2] == 1:
                 depth = depth[..., 0]
@@ -137,12 +108,12 @@ def reconstruct_pointclouds_from_obs_group(
                 (trans_pcd[:,1] > workspace[1,0]) & (trans_pcd[:,1] < workspace[1,1]) &
                 (trans_pcd[:,2] > workspace[2,0]) & (trans_pcd[:,2] < workspace[2,1])
             )
-            trans_pcd = trans_pcd[mask_ws]
+            # trans_pcd = trans_pcd[mask_ws]
 
             # Extract color for these points
             color_flat = color.reshape(-1, 3)[mask.flatten()]
-            color_flat = color_flat[mask_ws]
-            # scale to [0,1]
+            # color_flat = color_flat[mask_ws]
+            # scale color to [0,1]
             color_float = color_flat.astype(np.float64) / 255.0
 
             # Build partial pcd

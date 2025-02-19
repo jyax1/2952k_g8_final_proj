@@ -331,6 +331,45 @@ def analyze_delta_action_mapping(demo_group, computed_actions):
 
     return reg
 
+def save_point_clouds_as_ply(
+    point_clouds_points,
+    point_clouds_colors,
+    output_dir="output_dir/point_clouds"
+):
+    """
+    Saves each point cloud (points + colors) as a separate .ply file
+    in the specified output directory.
+
+    Args:
+        point_clouds_points (list of (N,3) arrays): 
+            Each entry is an (N,3) float32 array of point coordinates.
+        point_clouds_colors (list of (N,3) arrays):
+            Each entry is an (N,3) uint8 array of point colors.
+        output_dir (str): Directory to save .ply files.
+    """
+    # Ensure the output folder exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Iterate over each point cloud
+    for i, (pts, cols) in enumerate(zip(point_clouds_points, point_clouds_colors)):
+        # Create an Open3D point cloud object
+        pcd = o3d.geometry.PointCloud()
+
+        # Convert points to double precision if needed
+        pcd.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
+
+        # Convert colors from uint8 [0..255] to float [0..1]
+        colors_float = cols.astype(np.float32) / 255.0
+        pcd.colors = o3d.utility.Vector3dVector(colors_float)
+
+        # Construct a filename for each timestep
+        filename = os.path.join(output_dir, f"cloud_{i:04d}.ply")
+
+        # Write the point cloud to disk
+        o3d.io.write_point_cloud(filename, pcd)
+        print(f"Saved {filename}")
+
+
 def save_pointclouds_with_bbox_as_ply(point_clouds_points,
                                       point_clouds_colors,
                                       poses,
@@ -848,10 +887,10 @@ def imitate_trajectory_with_action_identifier(
     cameras: list[str] = ['squared0view_image',
                           'squared0view2_image', 
                           'squared0view3_image', 
-                          'squared0view4_image', 
-                          'frontview_image', 
-                          'birdview_image', 
-                          'backview_image'],
+                          'squared0view4_image', ],
+                        #   'frontview_image', 
+                        #   'birdview_image', ],
+                        #   'backview_image'],
     absolute_actions=True,
     ground_truth=False,
     policy_freq=10,
@@ -1017,7 +1056,15 @@ def imitate_trajectory_with_action_identifier(
             # point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             # point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
-            point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, env_camera0.env.env.sim, camera_names, camera_height, camera_width, verbose=verbose)
+            point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, 
+                                                                                              env_camera0.env.env, 
+                                                                                              camera_names, 
+                                                                                              camera_height, 
+                                                                                              camera_width, 
+                                                                                              verbose=verbose)
+            
+            if verbose:
+                save_point_clouds_as_ply(point_clouds_points, point_clouds_colors)
             
             success = False
             i = 0
@@ -1102,14 +1149,14 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_debug_pf_variable_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_4cam_pf_variable_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
         policy_freq=20,
         smooth=False,
-        verbose=True,
+        verbose=False,
         offset=POSITIONAL_OFFSET,
         icp_method="multiscale",
         max_num_trials=10
