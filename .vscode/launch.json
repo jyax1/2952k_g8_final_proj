@@ -328,12 +328,12 @@
             "request": "launch",
             "program": "action_extractor/utility_scripts/dataset_states_to_obs_parallel.py",
             "console": "integratedTerminal",
-            "args": ["--dataset=/home/yilong/Documents/policy_data/square_d0/raw/test/square_d0_first1.hdf5",
+            "args": ["--dataset=/home/yilong/Documents/policy_data/square_d0/raw/square_d0.hdf5",
             "--camera_height=480",
             "--camera_width=640",
             "--output_name=square_d0_first1_test.hdf5",
             "--compress",
-            "--store_point_cloud"
+            "--num_workers=1"
         ]
         },
 

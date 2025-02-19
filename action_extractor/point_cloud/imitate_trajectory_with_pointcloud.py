@@ -35,6 +35,8 @@ from action_extractor.point_cloud.action_identifier_point_cloud import *
 
 from action_extractor.poses_to_actions import *
 
+from action_extractor.point_cloud.generate_point_clouds_from_dataset import *
+
 from robosuite.utils.camera_utils import ( # type: ignore
     get_camera_extrinsic_matrix,
     get_camera_intrinsic_matrix,
@@ -843,7 +845,7 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras: list[str] = ["squared0view_image", "sidetableview_image"],
+    cameras: list[str] = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'birdview', 'backview'],
     absolute_actions=True,
     ground_truth=False,
     policy_freq=10,
@@ -975,6 +977,7 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
+        demos = [list(root_z["data"].keys())[0]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -1005,8 +1008,10 @@ def imitate_trajectory_with_action_identifier(
                 for frame in cameras_frames[camera_names[1]]:
                     writer.append_data(frame)
                     
-            point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
-            point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
+            # point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
+            # point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
+            
+            point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, env_camera0.env.sim, camera_names, camera_height, camera_width)
             
             success = False
             i = 0
@@ -1089,16 +1094,16 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100",
+        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_pf_variable_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_debug_pf_variable_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,
         ground_truth=False,
         policy_freq=20,
         smooth=False,
-        verbose=False,
+        verbose=True,
         offset=POSITIONAL_OFFSET,
         icp_method="multiscale",
         max_num_trials=10
