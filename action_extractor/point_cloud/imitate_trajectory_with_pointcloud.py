@@ -845,7 +845,13 @@ def imitate_trajectory_with_action_identifier(
     output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
     num_demos=100,
     save_webp=False,
-    cameras: list[str] = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'birdview', 'backview'],
+    cameras: list[str] = ['squared0view_image',
+                          'squared0view2_image', 
+                          'squared0view3_image', 
+                          'squared0view4_image', 
+                          'frontview_image', 
+                          'birdview_image', 
+                          'backview_image'],
     absolute_actions=True,
     ground_truth=False,
     policy_freq=10,
@@ -1011,7 +1017,7 @@ def imitate_trajectory_with_action_identifier(
             # point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
             # point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
-            point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, env_camera0.env.sim, camera_names, camera_height, camera_width)
+            point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, env_camera0.env.env.sim, camera_names, camera_height, camera_width, verbose=verbose)
             
             success = False
             i = 0
