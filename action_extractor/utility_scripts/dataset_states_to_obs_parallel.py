@@ -158,8 +158,8 @@ def exclude_cameras_from_obs(traj, camera_names, store_voxel, store_point_cloud)
             del traj['obs'][f"{cam}_image"]
             del traj['obs'][f"{cam}_depth"]
             del traj['obs'][f"{cam}_rgbd"]
-    if not store_voxel:
-        del traj['obs']['voxels']
+    # if not store_voxel:
+    #     del traj['obs']['voxels']
     # if not store_point_cloud:
     #     del traj['obs']['pointcloud_points']
     #     del traj['obs']['pointcloud_colors']
@@ -345,8 +345,8 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'birdview', 'backview']
-    additional_camera_for_voxel = ['squared0view2', 'sidetableview', 'squared0view3', 'squared0view4', 'fronttableview', 'birdview', 'sideview2', 'backview'] if store_voxel or store_point_cloud else []
+    camera_names = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'fronttableview']
+    additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
 
     env = EnvUtils.create_env_for_data_processing(

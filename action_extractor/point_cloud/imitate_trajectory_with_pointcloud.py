@@ -1022,7 +1022,7 @@ def imitate_trajectory_with_action_identifier(
     # 9) Loop over demos.
     for root_z in roots:
         demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-        demos = [list(root_z["data"].keys())[0]]
+        # demos = [list(root_z["data"].keys())[0]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
