@@ -1098,6 +1098,9 @@ def imitate_trajectory_with_action_identifier(
                 success = env_camera0.is_success()["task"]
                 if success:
                     n_success += 1
+                else:
+                    policy_freq = change_policy_freq(policy_freq)
+                    print(f"Retrying with policy frequency {policy_freq} Hz...")
                     
                 i += 1
             
@@ -1148,7 +1151,7 @@ if __name__ == "__main__":
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams",
         hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_4cam_pf_variable_absolute_squared0_100",
+        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,

@@ -108,11 +108,11 @@ def reconstruct_pointclouds_from_obs_group(
                 (trans_pcd[:,1] > workspace[1,0]) & (trans_pcd[:,1] < workspace[1,1]) &
                 (trans_pcd[:,2] > workspace[2,0]) & (trans_pcd[:,2] < workspace[2,1])
             )
-            # trans_pcd = trans_pcd[mask_ws]
+            trans_pcd = trans_pcd[mask_ws]
 
             # Extract color for these points
             color_flat = color.reshape(-1, 3)[mask.flatten()]
-            # color_flat = color_flat[mask_ws]
+            color_flat = color_flat[mask_ws]
             # scale color to [0,1]
             color_float = color_flat.astype(np.float64) / 255.0
 
