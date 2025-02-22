@@ -5,8 +5,6 @@ import zarr
 import shutil
 from glob import glob
 from tqdm import tqdm
-from pathlib import Path
-import copy
 from zarr import DirectoryStore, ZipStore
 
 import robomimic.utils.obs_utils as ObsUtils
@@ -15,14 +13,7 @@ from robomimic.utils.env_utils import create_env_from_metadata
 
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 
-# Megapose
-from megapose.utils.load_model import NAMED_MODELS, load_named_model
-from megapose.utils.logging import get_logger
-logger = get_logger(__name__)
-
-# Our local imports
 from action_extractor.utils.dataset_utils import (
-    hdf5_to_zarr_parallel_with_progress,
     directorystore_to_zarr_zip,
     copy_hdf5_to_zarr_chunked
 )
