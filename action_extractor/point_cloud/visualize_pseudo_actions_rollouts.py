@@ -44,14 +44,18 @@ from robosuite.utils.camera_utils import ( # type: ignore
 def roll_out(env, 
              actions_for_demo, 
              file_path, 
-             policy_freq, 
+             policy_freq,
              verbose=False, 
+             # for verbose usage:
              point_clouds_points=None, 
              point_clouds_colors=None, 
              hand_mesh=None, 
              output_dir=None,
              all_hand_poses=None,
              demo_id=None):
+    '''
+    Given a list of actions, an environment, and a policy frequency, roll out the actions in the environment and save the video.
+    '''
     pos_array, quat_array = [], []             
     env.file_path = file_path
     env.step_count = 0
@@ -88,14 +92,17 @@ def infer_actions_and_rollout(root_z,
                               lower_right_video_path,
                               output_dir,
                               demo_id,
-                              policy_freq=10,
-                              smooth=True,
+                              policy_freq=20,
+                              smooth=False,
                               verbose=True,
                               num_samples=100,
                               absolute_actions=True,
                               ground_truth=False,
                               offset=[0,0,0],
                               icp_method="multiscale"):
+    '''
+    infer actions from poses and roll out the actions in the environment
+    '''
     initial_state = root_z["data"][demo]["states"][0]
     obs_group = root_z["data"][demo]["obs"]
     env_camera0.reset()
@@ -216,24 +223,16 @@ def infer_actions_and_rollout(root_z,
             demo_id=demo_id)
 
 def imitate_trajectory_with_action_identifier(
-    dataset_path="/home/yilong/Documents/policy_data/lift/lift_smaller_2000",
-    hand_mesh="",
-    output_dir="/home/yilong/Documents/action_extractor/debug/megapose_lift_smaller_2000",
+    dataset_path=None,
+    hand_mesh=None,
+    output_dir=None,
     num_demos=100,
     save_webp=False,
-    cameras: list[str] = ['squared0view_image',
-                          'squared0view2_image', 
-                          'squared0view3_image', 
-                          'squared0view4_image', 
-                          'frontview_image', 
-                          'fronttableview_image', 
-                          'sidetableview_image', 
-                          'sideview2_image', 
-                          'backview_image'],
+    cameras: list[str] = ['squared0view_image'],
     absolute_actions=True,
     ground_truth=False,
     policy_freq=10,
-    smooth=True,
+    smooth=False,
     verbose=True,
     offset=[0,0,0],
     icp_method="multiscale",
@@ -499,6 +498,12 @@ if __name__ == "__main__":
     parser.add_argument( '--verbose', action='store_true', help='Print debug information and save debug visualizations')
     parser.add_argument( '--icp_method', type=str, default='multiscale', choices=['multiscale', 'updown'], help='ICP method used for pose estimation')
     parser.add_argument( '--max_num_trials', type=int, default=10, help='Maximum number of trials to attempt for each demo')
+    parser.add_argument( '--cameras', type=str, nargs='+', default='''squared0view_image squared0view2_image 
+                                                                        squared0view3_image squared0view4_image 
+                                                                        frontview_image fronttableview_image 
+                                                                        sidetableview_image sideview2_image 
+                                                                        backview_image''', 
+                        help='Space separated list of cameras for pointcloud reconstruction. All must be available in the dataset.')
     
     args = parser.parse_args()
     
@@ -518,5 +523,6 @@ if __name__ == "__main__":
         verbose =          args.verbose,
         offset =           POSITIONAL_OFFSET,
         icp_method =       args.icp_method,
-        max_num_trials =   args.max_num_trials
+        max_num_trials =   args.max_num_trials,
+        cameras =          args.cameras.split()
     )

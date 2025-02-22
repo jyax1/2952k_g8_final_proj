@@ -2,8 +2,8 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from action_extractor.architectures.direct_resnet_mlp import ResNetMLP, ActionExtractionResNet
-from action_extractor.architectures.direct_variational_resnet import (
+from action_extractor.nn.architectures.direct_resnet_mlp import ResNetMLP, ActionExtractionResNet
+from action_extractor.nn.architectures.direct_variational_resnet import (
     ActionExtractionVariationalResNet,
     ActionExtractionHypersphericalResNet,
     ActionExtractionSLAResNet
@@ -332,8 +332,8 @@ def load_action_identifier(
     whether loading from checkpoint or partial param paths. This ensures we call
     'decode(...)' -> un-standardization in ActionIdentifier.forward().
     """
-    from action_extractor.architectures.direct_resnet_mlp import ActionExtractionResNet
-    from action_extractor.architectures.direct_variational_resnet import (
+    from action_extractor.nn.architectures.direct_resnet_mlp import ActionExtractionResNet
+    from action_extractor.nn.architectures.direct_variational_resnet import (
         ActionExtractionVariationalResNet,
         ActionExtractionHypersphericalResNet,
         ActionExtractionSLAResNet

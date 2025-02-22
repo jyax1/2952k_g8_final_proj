@@ -1,11 +1,11 @@
-from action_extractor.datasets import *
-from action_extractor.architectures.direct_cnn_mlp import ActionExtractionCNN, PoseExtractionCNN3D
-from action_extractor.architectures.direct_cnn_vit import ActionExtractionViT
-from action_extractor.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
-from action_extractor.architectures.direct_resnet_mlp import *
-from action_extractor.architectures.direct_variational_resnet import *
-from action_extractor.architectures.latent_decoders import *
-from action_extractor.architectures.resnet import *
+from action_extractor.nn.datasets import *
+from action_extractor.nn.architectures.direct_cnn_mlp import ActionExtractionCNN, PoseExtractionCNN3D
+from action_extractor.nn.architectures.direct_cnn_vit import ActionExtractionViT
+from action_extractor.nn.architectures.latent_encoders import LatentEncoderPretrainCNNUNet, LatentEncoderPretrainResNetUNet
+from action_extractor.nn.architectures.direct_resnet_mlp import *
+from action_extractor.nn.architectures.direct_variational_resnet import *
+from action_extractor.nn.architectures.latent_decoders import *
+from action_extractor.nn.architectures.resnet import *
 import re
 from pathlib import Path
 

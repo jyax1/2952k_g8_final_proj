@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .utils import resnet_builder
-from action_extractor.architectures.direct_resnet_mlp import ResNetMLP
+from action_extractor.nn.architectures.direct_resnet_mlp import ResNetMLP
 import numpy as np
 import math
 from scipy.special import iv
