@@ -35,7 +35,7 @@ def label_dataset_with_pseudo_actions(
     hdf5_path,
     hand_mesh,
     cameras,
-    output_path,
+    output_hdf5_path,
     num_demos=None,
     absolute_actions=True,
     ground_truth=False,
@@ -56,7 +56,7 @@ def label_dataset_with_pseudo_actions(
         hdf5_path (str): Path to the input .hdf5 file.
         hand_mesh (str): Path to the hand mesh .ply for ICP alignment.
         cameras (list of str): Camera observation keys (e.g. ["frontview_image"]).
-        output_path (str): Where to save the updated HDF5 file. If the path is
+        output_hdf5_path (str): Where to save the updated HDF5 file. If the path is
                            the same as hdf5_path, we overwrite in-place. If it's
                            different, we copy the file and modify the copy.
         num_demos (int or None): Max number of demos to process (if None, process all).
@@ -71,8 +71,8 @@ def label_dataset_with_pseudo_actions(
     if offset is None:
         offset = [0, 0, 0]
 
-    # 1) Copy or open the file in write mode. If output_path == hdf5_path, we modify in-place.
-    if os.path.abspath(hdf5_path) == os.path.abspath(output_path):
+    # 1) Copy or open the file in write mode. If output_hdf5_path == None, we modify in-place.
+    if output_hdf5_path == None:
         # Overwrite the file in-place
         print(f"Overwriting dataset in-place: {hdf5_path}")
         with h5py.File(hdf5_path, "r+") as root_h:
@@ -90,14 +90,14 @@ def label_dataset_with_pseudo_actions(
                 icp_method
             )
     else:
-        # If output_path differs, copy the file first
+        # If output_hdf5_path differs, copy the file first
         import shutil
-        print(f"Copying {hdf5_path} -> {output_path} ...")
-        shutil.copy2(hdf5_path, output_path)
-        with h5py.File(output_path, "r+") as root_h:
+        print(f"Copying {hdf5_path} -> {output_hdf5_path} ...")
+        shutil.copy2(hdf5_path, output_hdf5_path)
+        with h5py.File(output_hdf5_path, "r+") as root_h:
             _process_file_and_write_actions(
                 root_h,
-                output_path,
+                output_hdf5_path,
                 hand_mesh,
                 cameras,
                 num_demos,
@@ -109,7 +109,7 @@ def label_dataset_with_pseudo_actions(
                 icp_method
             )
 
-    print(f"Done labeling dataset with pseudo-actions.\nSaved to: {output_path}")
+    print(f"Done labeling dataset with pseudo-actions.\nSaved to: {output_hdf5_path}")
 
 
 def _process_file_and_write_actions(
@@ -247,7 +247,7 @@ def main():
 
     parser.add_argument("--hdf5_path", type=str, required=True,
                         help="Path to a single .hdf5 dataset file")
-    parser.add_argument("--output_path", type=str, default=None,
+    parser.add_argument("--output_hdf5_path", type=str, default=None,
                         help="Path to output the updated .hdf5. "
                              "If None, modifies in-place; else copies first.")
     parser.add_argument("--num_demos", type=int, default=None,
@@ -277,17 +277,17 @@ def main():
     args = parser.parse_args()
 
     label_dataset_with_pseudo_actions(
-        hdf5_path=args.hdf5_path,
-        hand_mesh="*/data/meshes/panda_hand_mesh/panda-hand.ply",
-        cameras=args.cameras,
-        output_path=args.output_path,
-        num_demos=args.num_demos,
-        absolute_actions=args.absolute_actions,
-        ground_truth=args.ground_truth,
-        smooth=args.smooth,
-        verbose=args.verbose,
-        offset=POSITIONAL_OFFSET,
-        icp_method=args.icp_method
+        hdf5_path        = args.hdf5_path,
+        hand_mesh        = "*/data/meshes/panda_hand_mesh/panda-hand.ply",
+        cameras          = args.cameras,
+        output_hdf5_path = args.output_hdf5_path,
+        num_demos        = args.num_demos,
+        absolute_actions = args.absolute_actions,
+        ground_truth     = args.ground_truth,
+        smooth           = args.smooth,
+        verbose          = args.verbose,
+        offset           = POSITIONAL_OFFSET,
+        icp_method       = args.icp_method
     )
 
 
