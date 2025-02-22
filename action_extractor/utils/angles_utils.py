@@ -205,3 +205,19 @@ def axis_angle_vector_to_rotation_matrix(rvec):
     R = I + sin_theta * K + (1.0 - cos_theta) * (K @ K)
 
     return R
+
+
+def quaternion_to_rotation_matrix(qx, qy, qz, qw):
+    # We assume the quaternion is normalized. If not, you can normalize first.
+    x2, y2, z2 = 2.0 * qx, 2.0 * qy, 2.0 * qz
+    xx, yy, zz = qx * x2, qy * y2, qz * z2
+    xy, xz, yz = qx * y2, qx * z2, qy * z2
+    wx, wy, wz = qw * x2, qw * y2, qw * z2
+
+    # Construct rotation matrix
+    R = np.array([
+        [1.0 - (yy + zz), xy - wz,        xz + wy       ],
+        [xy + wz,         1.0 - (xx + zz), yz - wx       ],
+        [xz - wy,         yz + wx,         1.0 - (xx + yy)]
+    ], dtype=np.float64)
+    return R

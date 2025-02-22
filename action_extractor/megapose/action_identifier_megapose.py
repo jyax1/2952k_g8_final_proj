@@ -13,7 +13,7 @@ import cv2
 
 from typing import List, Optional
 
-from action_extractor.utils.angles import *
+from action_extractor.utils.angles_utils import *
 
 from megapose.utils.tensor_collection import PandasTensorCollection
 

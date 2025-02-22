@@ -1,5 +1,5 @@
 import numpy as np
-from action_extractor.utils.angles import *
+from action_extractor.utils.angles_utils import *
 
 def smooth_positions(
     poses: list[np.ndarray],

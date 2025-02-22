@@ -1,7 +1,7 @@
 import numpy as np
 import open3d as o3d
 
-from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix
+from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsic_matrix, get_camera_intrinsic_matrix # type: ignore
 from robomimic.utils.obs_utils import undiscretize_depth
 from robomimic.envs.env_robosuite import depth2fgpcd, np2o3d
 

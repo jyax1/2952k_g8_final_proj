@@ -56,7 +56,7 @@ from action_extractor.utils.dataset_utils import (
     directorystore_to_zarr_zip,
 )
 
-from action_extractor.utils.angles import *
+from action_extractor.utils.angles_utils import *
 
 from action_extractor.megapose.action_identifier_megapose import (
     make_object_dataset_from_folder,
