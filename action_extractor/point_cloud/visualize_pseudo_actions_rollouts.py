@@ -294,21 +294,6 @@ def imitate_trajectory_with_action_identifier(
     example_image = hdf5_roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
-    # 6) Compute intrinsics and extrinsics for every camera in the list.
-    camera_Ks = {}
-    camera_Rs = {}
-    for cam in camera_names:
-        camera_Ks[cam] = get_camera_intrinsic_matrix(
-            env_camera0.env.sim,
-            camera_name=cam,
-            camera_height=camera_height,
-            camera_width=camera_width,
-        )
-        camera_Rs[cam] = get_camera_extrinsic_matrix(
-            env_camera0.env.sim,
-            camera_name=cam,
-        )
-
     # 7) Initialize rendering environments for at least two cameras.
     # Use cameras[0] and cameras[1] for video recording.
     env_camera0 = VideoRecordingWrapper(
@@ -328,7 +313,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name=camera_names[1],
+        camera_name='sidetableview',
     )
     
     results_file_path = os.path.join(output_dir, "trajectory_results.txt")
@@ -338,7 +323,6 @@ def imitate_trajectory_with_action_identifier(
     n_success = 0
     total_n = 0
 
-    # 9) Loop over demos.
     for root_h in hdf5_roots:
         demos = list(root_h["data"].keys())[:num_demos] if num_demos else list(root_h["data"].keys())
         # demos = [list(root_h["data"].keys())[0]]
@@ -366,14 +350,11 @@ def imitate_trajectory_with_action_identifier(
                     cameras_depth[base] = None
                     
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in cameras_frames[camera_names[0]]:
+                for frame in cameras_frames['fronttableview_image']:
                     writer.append_data(frame)
             with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in cameras_frames[camera_names[1]]:
+                for frame in cameras_frames['sidetableview_image']:
                     writer.append_data(frame)
-                    
-            # point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
-            # point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
             
             point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, 
                                                                                               env_camera0.env.env, 
