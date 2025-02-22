@@ -478,7 +478,7 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Train action extraction model")
+    parser = argparse.ArgumentParser(description="Obtain pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
     parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
     parser.add_argument('--output_dir', type=str, default='pseudo-action_rollout_visualizations/example_rollout', help='Path to output directory')
@@ -494,18 +494,21 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    dataset_path = "/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams"
+    output_dir = "*/pseudo-action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100"
+    
     imitate_trajectory_with_action_identifier(
-        dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams",
-        hand_mesh="*/data/meshes/panda_hand_mesh/panda-hand.ply",
-        output_dir="*/pseudo-action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100",
-        num_demos=100,
-        save_webp=False,
-        absolute_actions=True,
-        ground_truth=False,
-        policy_freq=20,
-        smooth=False,
-        verbose=False,
-        offset=POSITIONAL_OFFSET,
-        icp_method="multiscale",
-        max_num_trials=10
+        dataset_path=      dataset_path,
+        hand_mesh =        "*/data/meshes/panda_hand_mesh/panda-hand.ply",
+        output_dir =       output_dir,
+        num_demos =        args.num_demos,
+        save_webp =        args.save_webp,
+        absolute_actions = args.absolute_actions,
+        ground_truth =     args.ground_truth,
+        policy_freq =      args.policy_freq,
+        smooth =           args.smooth,
+        verbose =          args.verbose,
+        offset =           POSITIONAL_OFFSET,
+        icp_method =       args.icp_method,
+        max_num_trials =   args.max_num_trials
     )
