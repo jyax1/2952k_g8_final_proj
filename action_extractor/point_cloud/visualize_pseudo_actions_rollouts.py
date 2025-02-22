@@ -235,15 +235,16 @@ def imitate_trajectory_with_action_identifier(
     max_num_trials=10
 ):
     """
-    General version where 'cameras' is a list of camera observation strings,
-    e.g. ["frontview_image", "sideview_image", "birdview_image", ...].
-
-    This code now:
-      - Computes intrinsic and extrinsic parameters for every camera in the list,
-        storing them in dictionaries (camera_Ks and camera_Rs).
-      - Initializes the two rendering environments (env_camera0 and env_camera1) using cameras[0] and cameras[1].
-      - When calling the pose estimator, it now passes dictionaries of frames and depth lists for all cameras.
-      - (Later you can update the pose-to-action conversion function to combine an arbitrary number of cameras.)
+    Main function:
+    1) Load the dataset.
+    2) Initialize rendering environments.
+    3) Estimates gripper poses from point clouds.
+    4) Estimates pseudo actions from gripper poses.
+    5) Roll out pseudo actions in the environment.
+    6) Save the video.
+    7) Repeat for all demos.
+    8) Save the results to a text file.
+    9) Optionally convert videos to webp format.
     """
     
     os.makedirs(output_dir, exist_ok=True)
