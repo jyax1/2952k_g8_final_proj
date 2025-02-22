@@ -103,8 +103,6 @@ def infer_actions_and_rollout(root_h,
     obs_group = root_h["data"][demo]["obs"]
     env_camera0.reset()
     env_camera0.reset_to({"states": initial_state})
-
-    POSES_FILE = "hand_poses_offset.npy"
     
     if ground_truth:
         all_hand_poses = load_ground_truth_poses(obs_group)
@@ -119,38 +117,20 @@ def infer_actions_and_rollout(root_h,
                 verbose=verbose
             )
     else:
-        
-        if os.path.exists(POSES_FILE) and verbose:
-            print(f"Loading hand poses from {POSES_FILE}...")
-            all_hand_poses = np.load(POSES_FILE)
-        elif verbose:
-            print(f"{POSES_FILE} not found. Computing hand poses from point clouds...")
-            all_hand_poses = get_poses_from_pointclouds_offset(
-                point_clouds_points,
-                point_clouds_colors,
-                hand_mesh,
-                verbose=verbose,
-                offset=offset,
-                debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
-                icp_method=icp_method
-            )
-            # Save the computed poses for future use.
-            np.save(POSES_FILE, all_hand_poses)
-            print(f"Hand poses saved to {POSES_FILE}")
-        else:
-            all_hand_poses = get_poses_from_pointclouds_offset(
-                point_clouds_points,
-                point_clouds_colors,
-                hand_mesh,
-                verbose=verbose,
-                offset=offset,
-                debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
-                icp_method=icp_method
-            )
+        all_hand_poses = get_poses_from_pointclouds(
+            point_clouds_points,
+            point_clouds_colors,
+            hand_mesh,
+            verbose=verbose,
+            offset=offset,
+            debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
+            icp_method=icp_method
+        )
             
         if verbose:
+            # Compare estimated poses with ground truth poses for debug/calibration
             all_hand_poses_gt = load_ground_truth_poses(obs_group)
-                
+            
             render_positions_on_pointclouds_two_colors(
                 point_clouds_points,
                 point_clouds_colors,
@@ -170,9 +150,6 @@ def infer_actions_and_rollout(root_h,
                 verbose=verbose
             )
     
-
-    # 12) Build absolute actions.
-    # (Assume you have updated a function to combine poses from an arbitrary number of cameras.)
     if absolute_actions:
         actions_for_demo = poses_to_absolute_actions(
             poses=all_hand_poses,
