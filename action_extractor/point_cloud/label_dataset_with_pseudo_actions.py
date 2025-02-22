@@ -247,9 +247,9 @@ def main():
 
     parser.add_argument("--hdf5_path", type=str, required=True,
                         help="Path to a single .hdf5 dataset file")
-    parser.add_argument("--output_path", type=str, required=True,
+    parser.add_argument("--output_path", type=str, default=None,
                         help="Path to output the updated .hdf5. "
-                             "If same as input, modifies in-place; else copies first.")
+                             "If None, modifies in-place; else copies first.")
     parser.add_argument("--cameras", type=str, nargs="+", default=["frontview_image"],
                         help="List of camera observation keys. All must be available in the dataset.")
     parser.add_argument("--num_demos", type=int, default=None,
@@ -263,9 +263,7 @@ def main():
     parser.add_argument("--verbose", action="store_true",
                         help="If set, print debug information.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
-                        help="Which ICP method to use.")
-    parser.add_argument("--offset", type=float, nargs=3, default=POSITIONAL_OFFSET,
-                        help="Translation offset for ICP-based alignment (default from config.POSITIONAL_OFFSET).")
+                        help="ICP method used for pose estimation.")
 
     args = parser.parse_args()
 
@@ -279,7 +277,7 @@ def main():
         ground_truth=args.ground_truth,
         smooth=args.smooth,
         verbose=args.verbose,
-        offset=args.offset,
+        offset=POSITIONAL_OFFSET,
         icp_method=args.icp_method
     )
 
