@@ -1,3 +1,11 @@
+'''
+Given a dataset of video demonstrations, this script estimates
+pseudo actions from the video demonstrations and rolls out the pseudo actions for visualization.
+
+For a demo, run the script with default arguments:
+python visualize_pseudo_actions_rollouts.py
+'''
+
 import os
 import numpy as np
 import imageio
@@ -478,7 +486,7 @@ def imitate_trajectory_with_action_identifier(
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Obtain pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
+    parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
     parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
     parser.add_argument('--output_dir', type=str, default='pseudo-action_rollout_visualizations/example_rollout', help='Path to output directory')
