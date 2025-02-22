@@ -13,8 +13,6 @@ For each demo in a SINGLE .hdf5 file:
 import os
 import argparse
 import h5py
-import numpy as np
-from glob import glob
 from tqdm import tqdm
 
 import robomimic.utils.obs_utils as ObsUtils
@@ -30,7 +28,7 @@ from action_extractor.utils.poses_to_actions import (
 from action_extractor.point_cloud.action_identifier_point_cloud import (
     get_poses_from_pointclouds
 )
-from action_extractor.point_cloud.config import POLICY_FREQS, POSITIONAL_OFFSET
+from action_extractor.point_cloud.config import POSITIONAL_OFFSET
 
 
 def label_dataset_with_pseudo_actions(
@@ -41,7 +39,6 @@ def label_dataset_with_pseudo_actions(
     num_demos=None,
     absolute_actions=True,
     ground_truth=False,
-    policy_freq=20,
     smooth=False,
     verbose=True,
     offset=None,
@@ -87,7 +84,6 @@ def label_dataset_with_pseudo_actions(
                 num_demos,
                 absolute_actions,
                 ground_truth,
-                policy_freq,
                 smooth,
                 verbose,
                 offset,
@@ -107,7 +103,6 @@ def label_dataset_with_pseudo_actions(
                 num_demos,
                 absolute_actions,
                 ground_truth,
-                policy_freq,
                 smooth,
                 verbose,
                 offset,
@@ -125,7 +120,6 @@ def _process_file_and_write_actions(
     num_demos,
     absolute_actions,
     ground_truth,
-    policy_freq,
     smooth,
     verbose,
     offset,
@@ -145,6 +139,7 @@ def _process_file_and_write_actions(
         env_meta["env_kwargs"]["controller_configs"]["type"] = "OSC_POSE"
     env = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     control_freq = env.env.control_freq  # used for up/downsampling
+    policy_freq = control_freq
 
     # 3) Prepare obs utils
     camera_names = [cam.split("_")[0] for cam in cameras]
@@ -255,18 +250,14 @@ def main():
     parser.add_argument("--output_path", type=str, required=True,
                         help="Path to output the updated .hdf5. "
                              "If same as input, modifies in-place; else copies first.")
-    parser.add_argument("--hand_mesh", type=str, default="panda-hand.ply",
-                        help="Path to the .ply mesh for ICP alignment")
     parser.add_argument("--cameras", type=str, nargs="+", default=["frontview_image"],
-                        help="List of camera observation keys. Must match what's in the dataset.")
+                        help="List of camera observation keys. All must be available in the dataset.")
     parser.add_argument("--num_demos", type=int, default=None,
                         help="Number of demos to process (if None, do all).")
     parser.add_argument("--absolute_actions", action="store_true",
                         help="If set, use poses_to_absolute_actions instead of delta actions.")
     parser.add_argument("--ground_truth", action="store_true",
                         help="If set, use ground-truth poses from the dataset instead of ICP.")
-    parser.add_argument("--policy_freq", type=int, default=20, choices=POLICY_FREQS,
-                        help="Frequency for upsampling actions (e.g. 20 Hz).")
     parser.add_argument("--smooth", action="store_true",
                         help="If set, attempts to smooth the resulting action path.")
     parser.add_argument("--verbose", action="store_true",
@@ -280,13 +271,12 @@ def main():
 
     label_dataset_with_pseudo_actions(
         hdf5_path=args.hdf5_path,
-        hand_mesh=args.hand_mesh,
+        hand_mesh="*/data/meshes/panda_hand_mesh/panda-hand.ply",
         cameras=args.cameras,
         output_path=args.output_path,
         num_demos=args.num_demos,
         absolute_actions=args.absolute_actions,
         ground_truth=args.ground_truth,
-        policy_freq=args.policy_freq,
         smooth=args.smooth,
         verbose=args.verbose,
         offset=args.offset,
