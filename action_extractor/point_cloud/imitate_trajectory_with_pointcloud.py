@@ -477,10 +477,27 @@ def imitate_trajectory_with_action_identifier(
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Train action extraction model")
+    
+    parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
+    parser.add_argument('--output_dir', type=str, default='pseudo-action_rollout_visualizations/example_rollout', help='Path to output directory')
+    parser.add_argument( '--num_demos', type=int, default=1, help='Number of demos to process')
+    parser.add_argument( '--save_webp', action='store_true', help='Store videos in webp format')
+    parser.add_argument( '--absolute_actions', action='store_true', help='Use absolute actions')
+    parser.add_argument( '--ground_truth', action='store_true', help='Use ground truth poses instead of estimated poses')
+    parser.add_argument( '--policy_freq', type=int, default=20, choices=POLICY_FREQS, help='Policy frequency')
+    parser.add_argument( '--smooth', action='store_true', help='Smooth trajectory positions')
+    parser.add_argument( '--verbose', action='store_true', help='Print debug information and save debug visualizations')
+    parser.add_argument( '--icp_method', type=str, default='multiscale', choices=['multiscale', 'updown'], help='ICP method used for pose estimation')
+    parser.add_argument( '--max_num_trials', type=int, default=10, help='Maximum number of trials to attempt for each demo')
+    
+    args = parser.parse_args()
+    
     imitate_trajectory_with_action_identifier(
         dataset_path="/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams",
-        hand_mesh="/home/yilong/Documents/action_extractor/action_extractor/megapose/panda_hand_mesh/panda-hand.ply",
-        output_dir="/home/yilong/Documents/action_extractor/debug/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100",
+        hand_mesh="*/data/meshes/panda_hand_mesh/panda-hand.ply",
+        output_dir="*/pseudo-action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100",
         num_demos=100,
         save_webp=False,
         absolute_actions=True,

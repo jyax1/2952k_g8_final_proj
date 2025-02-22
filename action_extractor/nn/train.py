@@ -1,7 +1,7 @@
 import argparse
 from utils.utils import *
 from trainer import Trainer
-from action_extractor.config import *
+from action_extractor.nn.config import *
 
 '''
 Temporary
