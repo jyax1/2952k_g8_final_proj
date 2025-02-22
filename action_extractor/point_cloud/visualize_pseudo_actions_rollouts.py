@@ -11,22 +11,16 @@ python visualize_pseudo_actions_rollouts.py
 import os
 import numpy as np
 import imageio
-import zarr
 import shutil
 from glob import glob
 from tqdm import tqdm
-from zarr import DirectoryStore, ZipStore
+import h5py
 
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
-
-from action_extractor.utils.dataset_utils import (
-    directorystore_to_zarr_zip,
-    copy_hdf5_to_zarr_chunked
-)
 
 from action_extractor.utils.angles_utils import *
 from action_extractor.utils.poses_to_actions import *
@@ -83,7 +77,7 @@ def roll_out(env,
             verbose=verbose
         )
 
-def infer_actions_and_rollout(root_z,
+def infer_actions_and_rollout(root_h,
                               demo,
                               env_camera0,
                               env_camera1,
@@ -105,8 +99,8 @@ def infer_actions_and_rollout(root_z,
     '''
     infer actions from poses and roll out the actions in the environment
     '''
-    initial_state = root_z["data"][demo]["states"][0]
-    obs_group = root_z["data"][demo]["obs"]
+    initial_state = root_h["data"][demo]["states"][0]
+    obs_group = root_h["data"][demo]["obs"]
     env_camera0.reset()
     env_camera0.reset_to({"states": initial_state})
 
@@ -182,7 +176,7 @@ def infer_actions_and_rollout(root_z,
     if absolute_actions:
         actions_for_demo = poses_to_absolute_actions(
             poses=all_hand_poses,
-            gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+            gripper_actions=[root_h["data"][demo]['actions'][i][-1] for i in range(num_samples)],
             env=env_camera0,  # using camera0 environment to get initial orientation
             control_freq = env_camera0.env.env.control_freq,
             policy_freq = policy_freq,
@@ -191,7 +185,7 @@ def infer_actions_and_rollout(root_z,
     else:
         actions_for_demo = poses_to_delta_actions(
             poses=all_hand_poses,
-            gripper_actions=[root_z["data"][demo]['actions'][i][-1] for i in range(num_samples)],
+            gripper_actions=[root_h["data"][demo]['actions'][i][-1] for i in range(num_samples)],
             smooth=False,
             translation_scaling=80.0,
             rotation_scaling=9.0,
@@ -254,44 +248,28 @@ def imitate_trajectory_with_action_identifier(
     
     os.makedirs(output_dir, exist_ok=True)
 
-    # 3) Preprocess dataset => convert HDF5 to Zarr.
-    sequence_dirs = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
-    for seq_dir in sequence_dirs:
-        ds_dir = seq_dir.replace(".hdf5", ".zarr")
-        zarr_path = seq_dir.replace(".hdf5", ".zarr.zip")
-        if not os.path.exists(zarr_path):
-            copy_hdf5_to_zarr_chunked(seq_dir, chunk_size_mb=1024)
-            store = DirectoryStore(ds_dir)
-            root_z = zarr.group(store, overwrite=False)
-            store.close()
-            directorystore_to_zarr_zip(ds_dir, zarr_path)
-            shutil.rmtree(ds_dir)
+    hdf5_files = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
+    hdf5_roots = [h5py.File(fp, "r") for fp in hdf5_files]
 
-    # 4) Collect Zarr files.
-    zarr_files = glob(f"{dataset_path}/**/*.zarr.zip", recursive=True)
-    stores = [ZipStore(zarr_file, mode="r") for zarr_file in zarr_files]
-    roots = [zarr.group(store) for store in stores]
-
-    # 5) Create environment metadata.
     try:
-        # Try using the first file found in sequence_dirs
-        env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs[0])
+        # Try using the first file found in hdf5_files
+        env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files[0])
     except Exception as e:
-        print(f"Failed to get environment metadata from {sequence_dirs[0]}: {e}")
+        print(f"Failed to get environment metadata from {hdf5_files[0]}: {e}")
 
         # If it fails, switch to the parent directory of dataset_path
         parent_path = os.path.dirname(dataset_path)
         print(f"Using parent directory instead: {parent_path}")
 
         # Now gather .hdf5 files from this parent directory
-        sequence_dirs_parent = glob(f"{parent_path}/**/*.hdf5", recursive=True)
-        if not sequence_dirs_parent:
+        hdf5_files_parent = glob(f"{parent_path}/**/*.hdf5", recursive=True)
+        if not hdf5_files_parent:
             raise RuntimeError(
                 f"No .hdf5 files found in parent directory: {parent_path}"
             )
 
         # Attempt to get environment metadata again
-        env_meta = get_env_metadata_from_dataset(dataset_path=sequence_dirs_parent[0])
+        env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files_parent[0])
     if absolute_actions:
         env_meta['env_kwargs']['controller_configs']['control_delta'] = False
         env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
@@ -312,7 +290,7 @@ def imitate_trajectory_with_action_identifier(
     # Create a rendering environment (we'll use it to obtain image dimensions and camera parameters).
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     # env_camera0.env.control_freq = 10
-    example_image = roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
+    example_image = hdf5_roots[0]["data"]["demo_0"]["obs"][cameras[0]][0]
     camera_height, camera_width = example_image.shape[:2]
 
     # 6) Compute intrinsics and extrinsics for every camera in the list.
@@ -360,9 +338,9 @@ def imitate_trajectory_with_action_identifier(
     total_n = 0
 
     # 9) Loop over demos.
-    for root_z in roots:
-        demos = list(root_z["data"].keys())[:num_demos] if num_demos else list(root_z["data"].keys())
-        # demos = [list(root_z["data"].keys())[0]]
+    for root_h in hdf5_roots:
+        demos = list(root_h["data"].keys())[:num_demos] if num_demos else list(root_h["data"].keys())
+        # demos = [list(root_h["data"].keys())[0]]
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -371,7 +349,7 @@ def imitate_trajectory_with_action_identifier(
             lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
             combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
-            obs_group = root_z["data"][demo]["obs"]
+            obs_group = root_h["data"][demo]["obs"]
             num_samples = obs_group[cameras[0]].shape[0]
 
             # 10) For each camera, extract frames and (if available) depth.
@@ -411,7 +389,7 @@ def imitate_trajectory_with_action_identifier(
             
             while not success and i < max_num_trials:
                 infer_actions_and_rollout(
-                    root_z,
+                    root_h,
                     demo,
                     env_camera0,
                     env_camera1,
