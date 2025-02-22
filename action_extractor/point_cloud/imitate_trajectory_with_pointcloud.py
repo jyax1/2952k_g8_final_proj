@@ -28,7 +28,7 @@ from action_extractor.utils.dataset_utils import (
 )
 
 from action_extractor.utils.angles_utils import *
-from action_extractor.poses_to_actions import *
+from action_extractor.utils.poses_to_actions import *
 from action_extractor.point_cloud.action_identifier_point_cloud import *
 from action_extractor.utils.rollout_video_utils import *
 from action_extractor.utils.poses_utils import *
