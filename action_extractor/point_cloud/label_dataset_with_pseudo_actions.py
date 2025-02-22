@@ -250,8 +250,6 @@ def main():
     parser.add_argument("--output_path", type=str, default=None,
                         help="Path to output the updated .hdf5. "
                              "If None, modifies in-place; else copies first.")
-    parser.add_argument("--cameras", type=str, nargs="+", default=["frontview_image"],
-                        help="List of camera observation keys. All must be available in the dataset.")
     parser.add_argument("--num_demos", type=int, default=None,
                         help="Number of demos to process (if None, do all).")
     parser.add_argument("--absolute_actions", action="store_true",
@@ -264,6 +262,17 @@ def main():
                         help="If set, print debug information.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
                         help="ICP method used for pose estimation.")
+    parser.add_argument('--cameras',
+                        type=str,
+                        nargs='+',
+                        default=[
+                            'squared0view_image', 'squared0view2_image',
+                            'squared0view3_image', 'squared0view4_image',
+                            'frontview_image', 'fronttableview_image',
+                            'sidetableview_image', 'sideview2_image',
+                            'backview_image'
+                        ],
+                        help='Space separated list of cameras for pointcloud reconstruction. All must be available in the dataset.')
 
     args = parser.parse_args()
 

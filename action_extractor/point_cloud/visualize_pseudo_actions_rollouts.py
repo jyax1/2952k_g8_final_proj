@@ -428,20 +428,25 @@ if __name__ == "__main__":
     
     parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
     parser.add_argument('--output_dir', type=str, default='pseudo-action_rollout_visualizations/example_rollout', help='Path to output directory')
-    parser.add_argument( '--num_demos', type=int, default=1, help='Number of demos to process')
-    parser.add_argument( '--save_webp', action='store_true', help='Store videos in webp format')
-    parser.add_argument( '--absolute_actions', action='store_true', help='Use absolute actions')
-    parser.add_argument( '--ground_truth', action='store_true', help='Use ground truth poses instead of estimated poses')
-    parser.add_argument( '--policy_freq', type=int, default=20, choices=POLICY_FREQS, help='Policy frequency')
-    parser.add_argument( '--smooth', action='store_true', help='Smooth trajectory positions')
-    parser.add_argument( '--verbose', action='store_true', help='Print debug information and save debug visualizations')
-    parser.add_argument( '--icp_method', type=str, default='multiscale', choices=['multiscale', 'updown'], help='ICP method used for pose estimation')
-    parser.add_argument( '--max_num_trials', type=int, default=10, help='Maximum number of trials to attempt for each demo')
-    parser.add_argument( '--cameras', type=str, nargs='+', default='''squared0view_image squared0view2_image 
-                                                                        squared0view3_image squared0view4_image 
-                                                                        frontview_image fronttableview_image 
-                                                                        sidetableview_image sideview2_image 
-                                                                        backview_image''', 
+    parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
+    parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
+    parser.add_argument('--absolute_actions', action='store_true', help='Use absolute actions')
+    parser.add_argument('--ground_truth', action='store_true', help='Use ground truth poses instead of estimated poses')
+    parser.add_argument('--policy_freq', type=int, default=20, choices=POLICY_FREQS, help='Policy frequency')
+    parser.add_argument('--smooth', action='store_true', help='Smooth trajectory positions')
+    parser.add_argument('--verbose', action='store_true', help='Print debug information and save debug visualizations')
+    parser.add_argument('--icp_method', type=str, default='multiscale', choices=['multiscale', 'updown'], help='ICP method used for pose estimation')
+    parser.add_argument('--max_num_trials', type=int, default=10, help='Maximum number of trials to attempt for each demo')
+    parser.add_argument('--cameras',
+                        type=str,
+                        nargs='+',
+                        default=[
+                            'squared0view_image', 'squared0view2_image',
+                            'squared0view3_image', 'squared0view4_image',
+                            'frontview_image', 'fronttableview_image',
+                            'sidetableview_image', 'sideview2_image',
+                            'backview_image'
+                        ],
                         help='Space separated list of cameras for pointcloud reconstruction. All must be available in the dataset.')
     
     args = parser.parse_args()
@@ -463,5 +468,5 @@ if __name__ == "__main__":
         offset =           POSITIONAL_OFFSET,
         icp_method =       args.icp_method,
         max_num_trials =   args.max_num_trials,
-        cameras =          args.cameras.split()
+        cameras =          args.cameras
     )
