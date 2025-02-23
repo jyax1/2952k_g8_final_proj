@@ -443,15 +443,14 @@ if __name__ == "__main__":
                             'squared0view_image', 'squared0view2_image',
                             'squared0view3_image', 'squared0view4_image',
                             'frontview_image', 'fronttableview_image',
-                            'sidetableview_image', 'sideview2_image',
-                            'backview_image'
+                            'sidetableview_image'
                         ],
                         help='Space separated list of cameras for pointcloud reconstruction. All must be available in the dataset.')
     
     args = parser.parse_args()
     
     dataset_path = "/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams"
-    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100"
+    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_7cam_workspace_pf_variable_absolute_squared0_100"
     
     imitate_trajectory_with_action_identifier(
         dataset_path     = dataset_path,

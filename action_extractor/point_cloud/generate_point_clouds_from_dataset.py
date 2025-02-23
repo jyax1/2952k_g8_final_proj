@@ -5,6 +5,25 @@ from robosuite.utils.camera_utils import get_real_depth_map, get_camera_extrinsi
 from robomimic.utils.obs_utils import undiscretize_depth
 from robomimic.envs.env_robosuite import depth2fgpcd, np2o3d
 
+import open3d as o3d
+import os
+
+def debug_save_camera_pcd(pcd_o3d, camera_name, timestep, out_dir="/debug"):
+    """
+    Saves the given Open3D point cloud to a .ply file for offline inspection.
+    """
+    # Ensure the debug directory exists
+    os.makedirs(out_dir, exist_ok=True)
+    
+    # Build a filename. Something like: /debug/frontview_t005.ply
+    filename = f"{camera_name}_t{timestep:03d}.ply"
+    filepath = os.path.join(out_dir, filename)
+    
+    # Write
+    o3d.io.write_point_cloud(filepath, pcd_o3d)
+    print(f"[DEBUG] Wrote partial PCD for {camera_name} at timestep={timestep} to {filepath}")
+
+
 # -----------------------------------------------------------
 # Main function to reconstruct point clouds from obs_group
 # -----------------------------------------------------------

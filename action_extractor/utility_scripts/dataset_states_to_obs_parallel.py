@@ -345,7 +345,7 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'fronttableview', 'sidetableview', 'sideview2', 'backview']
+    camera_names = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'fronttableview', 'sidetableview', 'birdview']
     additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
 
