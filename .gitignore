@@ -3,3 +3,4 @@
 **/*.pyc
 /debug
 /results
+/pseudo_action_rollout_visualizations

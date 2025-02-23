@@ -6,7 +6,7 @@ import copy
 def save_point_clouds_as_ply(
     point_clouds_points,
     point_clouds_colors,
-    output_dir="output_dir/point_clouds"
+    output_dir="debug/pointclouds"
 ):
     """
     Saves each point cloud (points + colors) as a separate .ply file

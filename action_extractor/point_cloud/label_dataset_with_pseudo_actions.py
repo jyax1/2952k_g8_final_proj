@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 label_dataset_with_pseudo_actions.py
 

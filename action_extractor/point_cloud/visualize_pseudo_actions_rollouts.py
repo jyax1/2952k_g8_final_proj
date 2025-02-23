@@ -327,10 +327,10 @@ def imitate_trajectory_with_action_identifier(
                     cameras_depth[base] = None
                     
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in cameras_frames['fronttableview_image']:
+                for frame in cameras_frames['fronttableview']:
                     writer.append_data(frame)
             with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in cameras_frames['sidetableview_image']:
+                for frame in cameras_frames['sidetableview']:
                     writer.append_data(frame)
             
             point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, 
@@ -341,7 +341,7 @@ def imitate_trajectory_with_action_identifier(
                                                                                               verbose=verbose)
             
             if verbose:
-                save_point_clouds_as_ply(point_clouds_points, point_clouds_colors)
+                save_point_clouds_as_ply(point_clouds_points, point_clouds_colors, output_dir=os.path.join(output_dir, f"pointclouds_{demo_id}"))
             
             success = False
             i = 0
@@ -382,7 +382,6 @@ def imitate_trajectory_with_action_identifier(
             total_n += 1
             
             result_str = f"demo_{demo_id}: {f'success after {i} trials' if success else f'fail after {i} trials'}"
-            print(result_str)
 
             # Immediately append to the results file in "a" (append) mode
             with open(results_file_path, "a") as f:
@@ -427,7 +426,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
     parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
-    parser.add_argument('--output_dir', type=str, default='pseudo-action_rollout_visualizations/example_rollout', help='Path to output directory')
+    parser.add_argument('--output_dir', type=str, default='pseudo_action_rollout_visualizations/example_rollout', help='Path to output directory')
     parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
     parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
     parser.add_argument('--absolute_actions', action='store_true', help='Use absolute actions')
@@ -452,11 +451,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     dataset_path = "/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams"
-    output_dir   = "*/pseudo-action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100"
+    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_9cam_workspace_pf_variable_absolute_squared0_100"
     
     imitate_trajectory_with_action_identifier(
         dataset_path     = dataset_path,
-        hand_mesh        = "*/data/meshes/panda_hand_mesh/panda-hand.ply",
+        hand_mesh        = "data/meshes/panda_hand_mesh/panda-hand.ply",
         output_dir       = output_dir,
         num_demos        = args.num_demos,
         save_webp        = args.save_webp,

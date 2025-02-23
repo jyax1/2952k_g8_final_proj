@@ -338,34 +338,18 @@
         },
 
         {
+            "name": "visualize_pseudo_actions_rollouts",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "action_extractor/point_cloud/visualize_pseudo_actions_rollouts.py",
+            "console": "integratedTerminal",
+        },
+
+        {
             "name": "Debug imitate_trajectory_with_megapose.py with Xvfb",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/action_extractor/megapose/imitate_trajectory_with_megapose.py",
-            // This calls our script in debug mode with your normal breakpoints.
-            
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            
-            // 1) Tells VS Code to run the "startXvfb" task before debugging
-            "preLaunchTask": "startXvfb",
-            
-            // 2) Exports DISPLAY=:99 so Panda3D / PyOpenGL sees an X server
-            "env": {
-              "DISPLAY": ":99"
-            },
-            
-            // Optional arguments if you want
-            "args": [
-              // e.g. "--some-flag", "value"
-            ]
-        },
-
-        {
-            "name": "Debug imitate_trajectory_with_pointcloud.py with Xvfb",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/action_extractor/point_cloud/imitate_trajectory_with_pointcloud.py",
             // This calls our script in debug mode with your normal breakpoints.
             
             "console": "integratedTerminal",
