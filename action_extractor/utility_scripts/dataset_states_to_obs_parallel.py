@@ -230,15 +230,19 @@ def extract_trajectory(
 
     insert_index = find_index_after_pattern(initial_state['model'], pattern, after_pattern) + 1
 
-    new_cameras_xml =  '''<camera mode="fixed" name="sideview2" pos="-0.05651774593317116 -1.5 1.4879572214102434" quat="-0.009905065491771751 0.006877963156909582 0.5912228352893879 -0.806418094001364" />\n    
+    new_cameras_xml =  '''<camera mode="fixed" name="sideview2" pos="-0.05651774593317116 -1.5 1.4879572214102434" quat="0.7933533 0.6087614 0 0" />\n    
                     <camera mode="fixed" name="backview" pos="-1.5 0 1.45" quat="-0.56 -0.43 0.43 0.56" />\n
                     <camera mode="fixed" name="sideagentview" pos="0 0.5 1.35" quat="0.0 0.0 0.383 0.923"/>\n
                     <camera mode="fixed" name="fronttableview" pos="0.8 0 1.2" quat="0.5608419  0.43064642 0.43064642 0.5608419"/>\n
                     <camera mode="fixed" name="sidetableview" pos="0 0.8 1" quat="0.01071808 0.00552625 0.69142354 0.72234905"/>\n
                     <camera mode="fixed" name="squared0view" pos="0.6 0.6 1" quat="0.28633323 0.26970193 0.63667727 0.6632619"/>\n
+                    <camera mode="fixed" name="squared0viewfar" pos="0.9 0.9 1.0" quat="0.28633323 0.26970193 0.63667727 0.6632619"/>\n
                     <camera mode="fixed" name="squared0view2" pos="0.6 -0.6 1" quat="0.6714651  0.6409069  0.25949073 0.2665288"/>\n
+                    <camera mode="fixed" name="squared0view2far" pos="0.9 -0.9 1" quat="0.6714651  0.6409069  0.25949073 0.2665288"/>\n
                     <camera mode="fixed" name="squared0view3" pos="-0.6 0.6 1" quat="-0.2665288  -0.25949073  0.6409069 0.6714651"/>\n
+                    <camera mode="fixed" name="squared0view3far" pos="-0.9 0.9 1" quat="-0.2665288  -0.25949073  0.6409069 0.6714651"/>\n
                     <camera mode="fixed" name="squared0view4" pos="-0.6 -0.6 1" quat="0.6632619 0.63667727 -0.26970193 -0.28633323"/>\n
+                    <camera mode="fixed" name="squared0view4far" pos="-0.9 -0.9 1" quat="0.6632619 0.63667727 -0.26970193 -0.28633323"/>\n
                     '''
 
     initial_state['model'] = initial_state['model'][:insert_index] + new_cameras_xml + initial_state['model'][insert_index:]
@@ -345,7 +349,7 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['squared0view','squared0view2', 'squared0view3', 'squared0view4', 'frontview', 'fronttableview', 'sidetableview', 'birdview']
+    camera_names = ['squared0viewfar','squared0view2far', 'squared0view3far', 'squared0view4far', 'frontview', 'birdview', 'sideview', 'sideview2']
     additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
 

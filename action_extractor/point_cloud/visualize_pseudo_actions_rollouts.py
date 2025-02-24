@@ -280,7 +280,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name='fronttableview',
+        camera_name='frontview',
     )
     env_camera1 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
     env_camera1 = VideoRecordingWrapper(
@@ -290,7 +290,7 @@ def imitate_trajectory_with_action_identifier(
         width=camera_width,
         height=camera_height,
         mode="rgb_array",
-        camera_name='sidetableview',
+        camera_name='squared0viewfar',
     )
     
     results_file_path = os.path.join(output_dir, "trajectory_results.txt")
@@ -327,10 +327,10 @@ def imitate_trajectory_with_action_identifier(
                     cameras_depth[base] = None
                     
             with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in cameras_frames['fronttableview']:
+                for frame in cameras_frames['frontview']:
                     writer.append_data(frame)
             with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in cameras_frames['sidetableview']:
+                for frame in cameras_frames['squared0viewfar']:
                     writer.append_data(frame)
             
             point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(obs_group, 
@@ -439,18 +439,20 @@ if __name__ == "__main__":
     parser.add_argument('--cameras',
                         type=str,
                         nargs='+',
-                        default=[
-                            'squared0view_image', 'squared0view2_image',
-                            'squared0view3_image', 'squared0view4_image',
-                            'frontview_image', 'fronttableview_image',
-                            'sidetableview_image'
-                        ],
+                        default=['squared0viewfar_image',
+                        'squared0view2far_image', 
+                        'squared0view3far_image', 
+                        'squared0view4far_image', 
+                        'sideview_image', 
+                        'sideview2_image',
+                        'frontview_image', 
+                        'birdview_image'],
                         help='Space separated list of cameras for pointcloud reconstruction. All must be available in the dataset.')
     
     args = parser.parse_args()
     
-    dataset_path = "/home/yilong/Documents/policy_data/square_d0/raw/first100_img_only_9cams"
-    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_7cam_workspace_pf_variable_absolute_squared0_100"
+    dataset_path = "/home/yilong/Documents/policy_data/square_d0/raw/test"
+    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_8cam_workspace_pf_variable_absolute_squared0_100"
     
     imitate_trajectory_with_action_identifier(
         dataset_path     = dataset_path,

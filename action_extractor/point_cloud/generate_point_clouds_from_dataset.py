@@ -137,7 +137,8 @@ def reconstruct_pointclouds_from_obs_group(
 
             # Build partial pcd
             pcd_o3d = np2o3d(trans_pcd, color_float)
-
+            if verbose and i == 135:
+                debug_save_camera_pcd(pcd_o3d, camera_name, i, out_dir="debug")
             all_pcds += pcd_o3d
 
         # After all cameras, convert to np arrays
