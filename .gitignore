@@ -4,3 +4,4 @@
 /debug
 /results
 /pseudo_action_rollout_visualizations
+data/manipulation_demos/square_d0_sample.hdf5
