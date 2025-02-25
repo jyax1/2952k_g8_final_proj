@@ -1,5 +1,5 @@
 '''
-visualize_pseudo_actions_rollouts.py
+action_extractor/point_cloud/robosuite/label_robosuite_dataset_with_pseudo_actions.py
 
 Given a dataset of video demonstrations, this script estimates
 pseudo actions from the video demonstrations and rolls out the pseudo actions for visualization.

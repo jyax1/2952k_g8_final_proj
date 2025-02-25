@@ -1,5 +1,5 @@
 '''
-visualize_pseudo_actions_rollouts.py
+action_extractor/point_cloud/robosuite/visualize_pseudo_actions_rollouts.py
 
 Given a dataset of video demonstrations, this script estimates
 pseudo actions from the video demonstrations and rolls out the pseudo actions for visualization.
@@ -48,7 +48,7 @@ def roll_out(env,
              hand_mesh=None, 
              output_dir=None,
              all_hand_poses=None,
-             demo_id=None):
+             demo_id=None) -> None:
     '''
     Given a list of actions, an environment, and a policy frequency, roll out the actions in the environment and save the video.
     '''
@@ -95,7 +95,7 @@ def infer_actions_and_rollout(root_h,
                               absolute_actions=True,
                               ground_truth=False,
                               offset=[0,0,0],
-                              icp_method="multiscale"):
+                              icp_method="multiscale") -> None:
     '''
     infer actions from poses and roll out the actions in the environment
     '''
@@ -209,7 +209,7 @@ def imitate_trajectory_with_action_identifier(
     offset=[0,0,0],
     icp_method="multiscale",
     max_num_trials=10
-):
+) -> None:
     """
     Main function:
     1) Load the dataset.
