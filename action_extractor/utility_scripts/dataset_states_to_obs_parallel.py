@@ -160,9 +160,9 @@ def exclude_cameras_from_obs(traj, camera_names, store_voxel, store_point_cloud)
             del traj['obs'][f"{cam}_rgbd"]
     # if not store_voxel:
     #     del traj['obs']['voxels']
-    # if not store_point_cloud:
-    #     del traj['obs']['pointcloud_points']
-    #     del traj['obs']['pointcloud_colors']
+    if not store_point_cloud:
+        del traj['obs']['pointcloud_points']
+        del traj['obs']['pointcloud_colors']
 
 
 def visualize_voxel(traj):
@@ -214,7 +214,6 @@ def extract_trajectory(
     done_mode = args.done_mode
     env = EnvUtils.create_env_for_data_processing(
         env_meta=env_meta,
-        # camera_names=['frontview', 'birdview', 'agentview', 'sideview', 'agentview_full', 'robot0_robotview', 'robot0_eye_in_hand'], 
         camera_names=camera_names, 
         camera_height=args.camera_height, 
         camera_width=args.camera_width, 
@@ -230,7 +229,7 @@ def extract_trajectory(
 
     insert_index = find_index_after_pattern(initial_state['model'], pattern, after_pattern) + 1
 
-    new_cameras_xml =  '''<camera mode="fixed" name="sideview2" pos="-0.05651774593317116 -1.5 1.4879572214102434" quat="0.7933533 0.6087614 0 0" />\n    
+    new_cameras_xml =  '''<camera mode="fixed" name="sideview2" pos="0 -1.5 1.4879572214102434" quat="0.7933533 0.6087614 0 0" />\n    
                     <camera mode="fixed" name="backview" pos="-1.5 0 1.45" quat="-0.56 -0.43 0.43 0.56" />\n
                     <camera mode="fixed" name="sideagentview" pos="0 0.5 1.35" quat="0.0 0.0 0.383 0.923"/>\n
                     <camera mode="fixed" name="fronttableview" pos="0.8 0 1.2" quat="0.5608419  0.43064642 0.43064642 0.5608419"/>\n
@@ -349,8 +348,8 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    camera_names = ['squared0viewfar','squared0view2far', 'squared0view3far', 'squared0view4far', 'frontview', 'birdview', 'sideview', 'sideview2']
-    additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
+    camera_names = ['fronttableview', 'sidetableview']
+    additional_camera_for_voxel = ['squared0viewfar','squared0view2far', 'squared0view3far', 'squared0view4far', 'frontview', 'birdview', 'sideview', 'sideview2'] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
 
     env = EnvUtils.create_env_for_data_processing(

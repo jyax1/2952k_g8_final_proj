@@ -229,32 +229,15 @@ def imitate_trajectory_with_action_identifier(
     hdf5_files = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     hdf5_roots = [h5py.File(fp, "r") for fp in hdf5_files]
 
-    try:
-        # Try using the first file found in hdf5_files
-        env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files[0])
-    except Exception as e:
-        print(f"Failed to get environment metadata from {hdf5_files[0]}: {e}")
-
-        # If it fails, switch to the parent directory of dataset_path
-        parent_path = os.path.dirname(dataset_path)
-        print(f"Using parent directory instead: {parent_path}")
-
-        # Now gather .hdf5 files from this parent directory
-        hdf5_files_parent = glob(f"{parent_path}/**/*.hdf5", recursive=True)
-        if not hdf5_files_parent:
-            raise RuntimeError(
-                f"No .hdf5 files found in parent directory: {parent_path}"
-            )
-
-        # Attempt to get environment metadata again
-        env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files_parent[0])
-    if absolute_actions:
-        env_meta['env_kwargs']['controller_configs']['control_delta'] = False
-        env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
-
+    env_meta = get_env_metadata_from_dataset(dataset_path=args.dataset)
+    env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
     # Extract base camera names from the observation strings.
     # For example, "frontview_image" becomes "frontview".
     camera_names = [cam.split("_")[0] for cam in cameras]
+    
+    if absolute_actions:
+        env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+        env_meta['env_kwargs']['controller_configs']['type'] = 'OSC_POSE'
 
     # Setup observation modality specs.
     obs_modality_specs = {

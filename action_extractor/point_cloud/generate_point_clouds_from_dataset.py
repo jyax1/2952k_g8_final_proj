@@ -145,10 +145,6 @@ def reconstruct_pointclouds_from_obs_group(
         points_np = np.asarray(all_pcds.points, dtype=np.float32)
         colors_np = (np.asarray(all_pcds.colors) * 255).astype(np.uint8)
 
-        # Pad/truncate
-        points_np = pad_or_truncate(points_np, max_points)
-        colors_np = pad_or_truncate(colors_np, max_points)
-
         point_clouds_points.append(points_np)
         point_clouds_colors.append(colors_np)
 
