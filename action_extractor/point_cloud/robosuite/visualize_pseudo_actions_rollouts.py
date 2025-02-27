@@ -213,8 +213,8 @@ def imitate_trajectory_with_action_identifier(
     Main function:
     1) Load the dataset.
     2) Initialize rendering environments.
-    3) Estimates gripper poses from point clouds.
-    4) Estimates pseudo actions from gripper poses.
+    3) Estimate gripper poses from point clouds.
+    4) Estimate pseudo actions from gripper poses.
     5) Roll out pseudo actions in the environment.
     6) Save the video.
     7) Repeat for all demos.
@@ -226,9 +226,11 @@ def imitate_trajectory_with_action_identifier(
     
     cameras = ['fronttableview', 'sidetableview']
 
+    # 1) Load the dataset.
     hdf5_files = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
     hdf5_roots = [h5py.File(fp, "r") for fp in hdf5_files]
 
+    # 2) Initialize rendering environments.
     try:
         # Try using the first file found in hdf5_files
         env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files[0])
@@ -295,9 +297,10 @@ def imitate_trajectory_with_action_identifier(
     n_success = 0
     total_n = 0
 
+    # 7) Repeat for all demos.
     for root_h in hdf5_roots:
         demos = list(root_h["data"].keys())[:num_demos] if num_demos else list(root_h["data"].keys())
-        # demos = [list(root_h["data"].keys())[0]]
+
         for demo in tqdm(demos, desc="Processing demos"):
             demo_id = demo.replace("demo_", "")
             upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
@@ -309,7 +312,6 @@ def imitate_trajectory_with_action_identifier(
             obs_group = root_h["data"][demo]["obs"]
             num_samples = obs_group[f"{cameras[0]}_image"].shape[0]
 
-            # 10) For each camera, extract frames and (if available) depth.
             cameras_frames = {}
             for camera in cameras:
                 cameras_frames[camera] = [obs_group[f"{camera}_image"][i] for i in range(num_samples)]
@@ -330,6 +332,9 @@ def imitate_trajectory_with_action_identifier(
             success = False
             i = 0
             
+            # 3) Estimate gripper poses from point clouds.
+            # 4) Estimate pseudo actions from gripper poses.
+            # 5) Roll out pseudo actions in the environment.
             while not success and i < max_num_trials:
                 infer_actions_and_rollout(
                     root_h,
@@ -371,8 +376,8 @@ def imitate_trajectory_with_action_identifier(
             with open(results_file_path, "a") as f:
                 f.write(result_str + "\n")
 
-            # Combine videos from all cameras (if desired).
-            # Here, we assume a function that can combine multiple videos.
+            # 6) Save the video.
+            # Combine videos from all cameras
             combine_videos_quadrants(
                 upper_left_video_path,
                 upper_right_video_path,
@@ -385,12 +390,14 @@ def imitate_trajectory_with_action_identifier(
             os.remove(lower_left_video_path)
             os.remove(lower_right_video_path)
 
+    # 8) Save the results to a text file.
     success_rate = (n_success / total_n)*100 if total_n else 0
     summary_str = f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%"
     print(summary_str)
     with open(results_file_path, "a") as f:
         f.write(summary_str + "\n")
 
+    # 9) Optionally convert videos to webp format.
     if save_webp:
         print("Converting to webp...")
         mp4_files = glob(os.path.join(output_dir, "*.mp4"))
@@ -423,12 +430,10 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    output_dir   = "pseudo_action_rollout_visualizations/pointcloud_reconstructed_8cam_workspace_pf_variable_absolute_squared0_100"
-    
     imitate_trajectory_with_action_identifier(
         dataset_path     = args.dataset_path,
         hand_mesh        = "data/meshes/panda_hand_mesh/panda-hand.ply",
-        output_dir       = output_dir,
+        output_dir       = args.output_dir,
         num_demos        = args.num_demos,
         save_webp        = args.save_webp,
         absolute_actions = not args.delta_actions,
