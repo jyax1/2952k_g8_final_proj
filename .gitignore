@@ -3,5 +3,6 @@
 **/*.pyc
 /debug
 /results
-/visualizations
+/visualizations/dataset_vis/**
+/visualizations/pseudo_action_rollouts/**
 data/manipulation_demos/square_d0_sample.hdf5
