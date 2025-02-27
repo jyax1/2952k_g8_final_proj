@@ -11,7 +11,6 @@ python visualize_pseudo_actions_rollouts.py
 import os
 import numpy as np
 import imageio
-import shutil
 from glob import glob
 from tqdm import tqdm
 import h5py
@@ -31,11 +30,6 @@ from action_extractor.utils.rollout_utils import *
 from action_extractor.utils.rollout_debug_utils import *
 from action_extractor.point_cloud.generate_point_clouds_from_dataset import *
 from action_extractor.point_cloud.config import POLICY_FREQS, POSITIONAL_OFFSET
-
-from robosuite.utils.camera_utils import ( # type: ignore
-    get_camera_extrinsic_matrix,
-    get_camera_intrinsic_matrix,
-)
             
 def roll_out_and_save_video(env, 
              actions_for_demo, 
