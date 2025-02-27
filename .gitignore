@@ -3,5 +3,5 @@
 **/*.pyc
 /debug
 /results
-/pseudo_action_rollout_visualizations
+/visualizations
 data/manipulation_demos/square_d0_sample.hdf5
