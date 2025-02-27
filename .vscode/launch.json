@@ -341,8 +341,21 @@
             "name": "visualize_pseudo_actions_rollouts",
             "type": "debugpy",
             "request": "launch",
-            "program": "action_extractor/point_cloud/visualize_pseudo_actions_rollouts.py",
+            "program": "action_extractor/point_cloud/robosuite/visualize_pseudo_actions_rollouts.py",
             "console": "integratedTerminal",
+        },
+
+        {
+            "name": "label_robosuite_dataset_with_pseudo_actions.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "action_extractor/point_cloud/robosuite/label_robosuite_dataset_with_pseudo_actions.py",
+            "console": "integratedTerminal",
+            "args": ["--hdf5_path=/home/yilong/Documents/policy_data/square_d0/raw/square_d0.hdf5",
+            "--output_hdf5_name=square_d0_pseudo_actions_debug.hdf5",
+            "--num_demos=1",
+            "--num_workers=1"
+            ]
         },
 
         {

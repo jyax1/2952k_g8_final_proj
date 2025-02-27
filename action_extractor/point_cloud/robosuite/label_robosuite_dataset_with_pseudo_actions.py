@@ -20,11 +20,12 @@ from copy import deepcopy
 import multiprocessing
 multiprocessing.set_start_method('spawn', force=True)
 
+from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder # For debugging
+
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.env_utils as EnvUtils
+from robomimic.utils.env_utils import create_env_from_metadata
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
-
-from action_extractor.utils.angles_utils import load_ground_truth_poses
 from action_extractor.point_cloud.generate_point_clouds_from_dataset import reconstruct_pointclouds_from_obs_group
 from action_extractor.utils.poses_to_actions import (
     poses_to_absolute_actions,
@@ -42,6 +43,26 @@ def exclude_cameras_from_obs(traj, camera_names):
             del traj['obs'][f"{cam}_image"]
             del traj['obs'][f"{cam}_depth"]
             del traj['obs'][f"{cam}_rgbd"]
+    del traj['obs']['pointcloud_points']
+    del traj['obs']['pointcloud_colors']
+    
+def roll_out(env, actions_for_demo, verbose=False, file_name = 'roll_out.mp4') -> bool:
+    '''
+    Given a list of actions, an environment, roll out the actions in the environment and return success.
+    '''
+    if verbose:
+        debug_dir = 'debug/label_robosuite_dataset'
+        os.makedirs(debug_dir, exist_ok=True)
+        env.file_path = env.file_path = os.path.join(debug_dir, file_name)
+        env.step_count = 0
+    
+    for action in actions_for_demo:
+        env.step(action)
+        
+    if verbose:
+        env.video_recoder.stop()
+    
+    return env.is_success()["task"]
 
 def extract_trajectory(
     env_meta,
@@ -160,25 +181,12 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
      - Overwrite the existing 'actions' dataset (shape, dtype) with these new actions.
 
     Args:
-        hdf5_path (str): Path to the input .hdf5 file.
-        hand_mesh (str): Path to the hand mesh .ply for ICP alignment.
-        cameras (list of str): Camera observation keys (e.g. ["frontview_image"]).
-        output_hdf5_path (str): Where to save the updated HDF5 file. If the path is
-                           the same as hdf5_path, we overwrite in-place. If it's
-                           different, we copy the file and modify the copy.
-        num_demos (int or None): Max number of demos to process (if None, process all).
-        absolute_actions (bool): If True, use poses_to_absolute_actions; else delta actions.
-        ground_truth (bool): If True, use ground-truth poses from the dataset (no ICP).
-        policy_freq (int): The "policy frequency" used for upsampling actions.
-        smooth (bool): Whether to smooth the end-effector path.
-        verbose (bool): Print debug info, if desired.
-        offset (list or np.ndarray): 3-element translation offset for ICP. Default [0,0,0].
-        icp_method (str): Which ICP method to use. Default = "multiscale".
+        args (argparse.Namespace): parsed arguments
     """
     
     print(f"Retrieving env metadata from: {args.hdf5_path}")
     env_meta = get_env_metadata_from_dataset(args.hdf5_path)
-    if args.absolute_actions:
+    if not args.delta_actions:
         env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
         env_meta["env_kwargs"]["controller_configs"]["type"] = "OSC_POSE"
     env = EnvUtils.create_env_for_data_processing(
@@ -192,6 +200,21 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     policy_freq = control_freq
     
     is_robosuite_env = EnvUtils.is_robosuite_env(env_meta)
+    
+    render_offscreen = True if args.verbose else False
+    
+    env_roll_out = create_env_from_metadata(env_meta=env_meta, render_offscreen=render_offscreen) # Separate env for roll-out
+    
+    if args.verbose:
+        env_roll_out = VideoRecordingWrapper(
+            env_roll_out,
+            video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
+            steps_per_render=1,
+            width=CAMERA_WIDTH,
+            height=CAMERA_HEIGHT,
+            mode="rgb_array",
+            camera_name='frontview',
+        )
 
     # list of all demonstration episodes (sorted in increasing number order)
     f = h5py.File(args.hdf5_path, "r")
@@ -204,7 +227,7 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
         demos = demos[:args.num_demos]
 
     # output file in same directory as input file
-    output_path = os.path.join(os.path.dirname(args.hdf5_path), args.output_hdf5_path)
+    output_path = os.path.join(os.path.dirname(args.hdf5_path), args.output_hdf5_name)
     f_out = h5py.File(output_path, "w")
     data_grp = f_out.create_group("data")
     print("input file: {}".format(args.hdf5_path))
@@ -239,13 +262,54 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
         for j, ind in enumerate(range(i, end)):
             ep = demos[ind]
             traj = trajs[j]
+            
+            pointcloud_points = traj['obs']['pointcloud_points']
+            pointcloud_colors = traj['obs']['pointcloud_colors']
+            
+            success = False
+            k = 0
+            while not success and k < args.max_num_trials:
+            
+                all_hand_poses = get_poses_from_pointclouds(
+                    pointcloud_points,
+                    pointcloud_colors,
+                    model_path = "data/meshes/panda_hand_mesh/panda-hand.ply",
+                    verbose=False, # debug this function with visualize_pseudo_actions_rollouts.py
+                    offset=POSITIONAL_OFFSET,
+                    debug_dir='debug',
+                    icp_method=args.icp_method,
+                )
+                
+                if args.absolute_actions:
+                    actions_for_demo = poses_to_absolute_actions(
+                        poses=all_hand_poses,
+                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
+                        control_freq = control_freq,
+                        policy_freq = policy_freq,
+                        smooth=args.smooth
+                    )
+                else:
+                    actions_for_demo = poses_to_delta_actions(
+                        poses=all_hand_poses,
+                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
+                        smooth=False,
+                        translation_scaling=80.0,
+                        rotation_scaling=9.0,
+                    )
+                
+                env_roll_out.reset()
+                env_roll_out.reset_to(initial_state_list[j])
+                
+                success = roll_out(env_roll_out, actions_for_demo, verbose = args.verbose, file_name = f'{ep}_trial_{k}.mp4')
+                
+                if success:
+                    traj["actions"] = actions_for_demo
+                    break
+                k += 1
+                
+            result_str = f"demo_{ind}: {f'success after {k} trials' if success else f'fail after {k} trials'}"
+            
             exclude_cameras_from_obs(traj, ADDITIONAL_CAMERAS_FOR_POINT_CLOUD)
-            # maybe copy reward or done signal from source file
-            # if args.copy_rewards:
-            #     traj["rewards"] = f["data/{}/rewards".format(ep)][()]
-            # if args.copy_dones:
-            #     traj["dones"] = f["data/{}/dones".format(ep)][()]
-
             # store transitions
 
             # IMPORTANT: keep name of group the same as source file, to make sure that filter keys are
@@ -260,11 +324,6 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
                     ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]), compression="gzip")
                 else:
                     ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
-                if not args.exclude_next_obs:
-                    if args.compress:
-                        ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]), compression="gzip")
-                    else:
-                        ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]))
 
             # episode metadata
             if is_robosuite_env:
@@ -272,6 +331,7 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
             total_samples += traj["actions"].shape[0]
             print("ep {}: wrote {} transitions to group {}".format(ind, ep_data_grp.attrs["num_samples"], ep))
+            print(result_str)
         
         del trajs
 
@@ -287,82 +347,7 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     f.close()
     f_out.close()
 
-    # # 5) Loop over demos and update actions
-    # for demo in tqdm(all_demos, desc="Labeling demos with pseudo-actions"):
-    #     obs_group = root_h["data"][demo]["obs"]
-    #     old_actions_ds = root_h["data"][demo]["actions"]  # existing HDF5 dataset
-    #     num_samples = old_actions_ds.shape[0]
-
-    #     # 5A) Copy original actions to a backup dataset if not already present
-    #     if "pseudo_actions" not in root_h["data"][demo]:
-    #         # Make a copy so we preserve the original data
-    #         root_h["data"][demo].create_dataset(
-    #             "pseudo_actions",
-    #             data=old_actions_ds[:],
-    #             dtype=old_actions_ds.dtype
-    #         )
-    #     else:
-    #         if verbose:
-    #             print(f"Demo {demo} already has an 'pseudo_actions' dataset. Not overwriting it.")
-
-    #     # 6) Build pointcloud from each camera frame, exactly as in the 'visualize' script
-    #     point_clouds_points, point_clouds_colors = reconstruct_pointclouds_from_obs_group(
-    #         obs_group,
-    #         env.env,  # pass the underlying env for camera intrinsics/extrinsics
-    #         camera_names,
-    #         camera_height,
-    #         camera_width,
-    #         verbose=verbose,
-    #     )
-
-    #     # 7) Get poses from ground truth or ICP
-    #     if ground_truth:
-    #         all_hand_poses = load_ground_truth_poses(obs_group)
-    #     else:
-    #         all_hand_poses = get_poses_from_pointclouds(
-    #             point_clouds_points,
-    #             point_clouds_colors,
-    #             hand_mesh,
-    #             verbose=verbose,
-    #             offset=offset,
-    #             debug_dir=None,  # or some debug directory if you want
-    #             icp_method=icp_method,
-    #         )
-
-    #     # 8) Convert poses -> actions
-    #     #    We keep the original "gripper_actions" from old_actions_ds but
-    #     #    update the x,y,z,quat portion from all_hand_poses.
-    #     gripper_actions = [old_actions_ds[i][-1] for i in range(num_samples)]
-    #     if absolute_actions:
-    #         new_actions = poses_to_absolute_actions(
-    #             poses=all_hand_poses,
-    #             gripper_actions=gripper_actions,
-    #             env=env,
-    #             control_freq=control_freq,
-    #             policy_freq=policy_freq,
-    #             smooth=smooth
-    #         )
-    #     else:
-    #         new_actions = poses_to_delta_actions(
-    #             poses=all_hand_poses,
-    #             gripper_actions=gripper_actions,
-    #             smooth=False,
-    #             translation_scaling=80.0,
-    #             rotation_scaling=9.0,
-    #         )
-
-    #     # 9) Ensure shape & dtype match. Then overwrite the original 'actions' dataset.
-    #     if new_actions.shape != old_actions_ds.shape:
-    #         raise ValueError(
-    #             f"New actions shape {new_actions.shape} != original {old_actions_ds.shape} for demo {demo}"
-    #         )
-    #     new_actions = new_actions.astype(old_actions_ds.dtype, copy=False)
-
-    #     # 10) Overwrite the old "actions" data
-    #     old_actions_ds[:] = new_actions
-    
-
-    print(f"Done labeling dataset with pseudo-actions.\nSaved to: {args.output_hdf5_path}")
+    print(f"Done labeling dataset with pseudo-actions.\nSaved to: {args.output_hdf5_name}")
 
 
 def main():
@@ -372,23 +357,27 @@ def main():
 
     parser.add_argument("--hdf5_path", type=str, required=True,
                         help="Path to a single .hdf5 dataset file")
-    parser.add_argument("--output_hdf5_path", type=str, default=None,
-                        help="Path to output the updated .hdf5. "
+    parser.add_argument("--output_hdf5_name", type=str, default=None,
+                        help="Name of the psuedo-labeled .hdf5. file"
                              "If None, modifies in-place; else copies first.")
     parser.add_argument("--num_demos", type=int, default=None,
                         help="Number of demos to process (if None, do all).")
     parser.add_argument("--num_workers", type=int, default=16, # Maximum num_workers suitable for my machine
                         help="Number of workers for parallel saving")
-    parser.add_argument("--absolute_actions", action="store_true",
-                        help="If set, use poses_to_absolute_actions instead of delta actions.")
+    parser.add_argument("--delta_actions", action="store_true",
+                        help="If set, use poses_to_delta_actions instead of absolute actions.")
     parser.add_argument("--ground_truth", action="store_true",
                         help="If set, use ground-truth poses from the dataset instead of ICP.")
     parser.add_argument("--smooth", action="store_true",
                         help="If set, attempts to smooth the resulting action path.")
     parser.add_argument("--verbose", action="store_true",
-                        help="If set, print debug information.")
+                        help="If set, visualize for debugging purposes.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
                         help="ICP method used for pose estimation.")
+    parser.add_argument('--max_num_trials', type=int, default=10, 
+                        help='Maximum number of trials to attempt for each demo')
+    parser.add_argument("--compress", action='store_true',
+                        help="Compress observations with gzip option in hdf5")
 
     args = parser.parse_args()
 

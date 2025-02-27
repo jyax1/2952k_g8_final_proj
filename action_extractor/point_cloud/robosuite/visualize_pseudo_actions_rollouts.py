@@ -37,7 +37,7 @@ from robosuite.utils.camera_utils import ( # type: ignore
     get_camera_intrinsic_matrix,
 )
             
-def roll_out(env, 
+def roll_out_and_save_video(env, 
              actions_for_demo, 
              file_path, 
              policy_freq,
@@ -154,7 +154,6 @@ def infer_actions_and_rollout(root_h,
         actions_for_demo = poses_to_absolute_actions(
             poses=all_hand_poses,
             gripper_actions=[root_h["data"][demo]['actions'][i][-1] for i in range(num_samples)],
-            env=env_camera0,  # using camera0 environment to get initial orientation
             control_freq = env_camera0.env.env.control_freq,
             policy_freq = policy_freq,
             smooth=smooth
@@ -168,7 +167,7 @@ def infer_actions_and_rollout(root_h,
             rotation_scaling=9.0,
         )
 
-    roll_out(env_camera0, 
+    roll_out_and_save_video(env_camera0, 
                 actions_for_demo, 
                 upper_right_video_path,
                 policy_freq,
@@ -183,7 +182,7 @@ def infer_actions_and_rollout(root_h,
     env_camera1.reset()
     env_camera1.reset_to({"states": initial_state})
     
-    roll_out(env_camera1,
+    roll_out_and_save_video(env_camera1,
             actions_for_demo,
             lower_right_video_path,
             policy_freq,

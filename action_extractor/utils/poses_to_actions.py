@@ -94,7 +94,6 @@ def smooth_positions(
 def poses_to_absolute_actions(
     poses, 
     gripper_actions,
-    env,
     smooth=True,
     control_freq=30,
     policy_freq=10
@@ -145,11 +144,6 @@ def poses_to_absolute_actions(
     else:
         smoothed_positions = np.array([pose[:3, 3] for pose in poses], dtype=np.float32)
 
-    # 2) Start from environment's known initial eef quaternion and position.
-    current_orientation = env.env.env._eef_xquat.astype(np.float32)
-    current_orientation = quat_normalize(current_orientation)
-    current_position = env.env.env._eef_xpos.astype(np.float32)
-
     # Compute steps_per_policy and preallocate the final action array.
     steps_per_policy = control_freq // policy_freq
     num_actions = num_samples - 1  # one action per pose transition.
@@ -158,13 +152,12 @@ def poses_to_absolute_actions(
 
     # Compute a position offset (if needed) so that the first pose aligns with the initial eef position.
     prev_rvec = None
-    position_offset = smoothed_positions[0] - current_position
 
     # Loop over each policy step and compute one absolute action.
     for i in range(num_actions):
         # --- Compute target position from the precomputed smoothed positions ---
         px, py, pz = smoothed_positions[i+1]
-        position = np.array([px, py, pz]) - position_offset
+        position = np.array([px, py, pz])
 
         # --- Compute orientation: poses[i] -> poses[i+1] ---
         R_i  = poses[i][:3, :3]
@@ -172,23 +165,6 @@ def poses_to_absolute_actions(
         
         rvec = rotation_matrix_to_angle_axis(R_i1)
 
-        # q_i  = rotation_matrix_to_quaternion(R_i)
-        # q_i1 = rotation_matrix_to_quaternion(R_i1)
-
-        # q_i   = quat_normalize(q_i)
-        # q_i1  = quat_normalize(q_i1)
-        # q_inv = quat_inv(q_i)
-
-        # # Compute the rotation delta (make sure the order matches your intended convention)
-        # q_delta = quat_multiply(q_inv, q_i1)
-        # q_delta = quat_normalize(q_delta)
-
-        # # Accumulate the orientation to get the absolute orientation.
-        # current_orientation = quat_multiply(current_orientation, q_delta)
-        # current_orientation = quat_normalize(current_orientation)
-
-        # # Convert quaternion to axis-angle representation.
-        # rvec = quat2axisangle(current_orientation)
         if prev_rvec is not None and np.dot(rvec, prev_rvec) < 0:
             rvec = -rvec
         prev_rvec = rvec
