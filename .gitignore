@@ -5,4 +5,4 @@
 /results
 /visualizations/dataset_vis/**
 /visualizations/pseudo_action_rollouts/**
-data/manipulation_demos/square_d0_sample.hdf5
+data/manipulation_demos/point_cloud_datasets

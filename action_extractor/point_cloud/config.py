@@ -12,7 +12,7 @@ CAMERA_WIDTH = 640
 
 # [ROBOSUITE] ameras to use for downstream policy and point cloud extraction
 CAMERAS_FOR_POLICY = ['frontview', 'fronttableview', 'robot0_eye_in_hand']
-ADDITIONAL_CAMERAS_FOR_POINT_CLOUD = ['sidetableview',
+ADDITIONAL_CAMERAS_FOR_POINT_CLOUD = [#'sidetableview',
                                     'squared0viewfar','squared0view2far', 
-                                    'squared0view3far', 'squared0view4far', 
-                                    'birdview', 'sideview', 'sideview2']
+                                    'squared0view3far', 'squared0view4far',]
+                                    #'birdview', 'sideview', 'sideview2']
