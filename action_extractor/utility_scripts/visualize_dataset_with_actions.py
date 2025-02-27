@@ -7,7 +7,7 @@ from robomimic.utils.file_utils import get_env_metadata_from_dataset
 from robomimic.utils.env_utils import create_env_from_metadata
 
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
-from action_extractor.utils.rollout_utils import change_policy_freq
+from action_extractor.utils.rollout_utils import *
 
 def visualize_dataset_trajectories_as_videos(args) -> None:
     os.makedirs(args.output_dir, exist_ok=True)
@@ -69,8 +69,28 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
         env_camera0.reset()
         env_camera0.reset_to({"states": initial_state})
         
+        roll_out_and_save_video(
+            env_camera0,
+            obs_group,
+            video_path_cam1,
+            num_samples,
+            verbose=False,
+            output_dir=args.output_dir,
+            demo_id=demo_id
+        )
         
+        env_camera1.reset()
+        env_camera1.reset_to({"states": initial_state})
         
+        roll_out_and_save_video(
+            env_camera1,
+            obs_group,
+            video_path_cam2,
+            num_samples,
+            verbose=False,
+            output_dir=args.output_dir,
+            demo_id=demo_id
+        )
 
 if __name__ == "__main__":
     import argparse

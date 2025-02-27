@@ -194,7 +194,9 @@ def imitate_trajectory_with_action_identifier(
                 if success:
                     n_success += 1
                 else:
-                    policy_freq = change_policy_freq(policy_freq)
+                    policy_freq = change_policy_freq(policy_freq) 
+                    # This is to demonstrate that we can change the policy frequency to obtain trajectory
+                    # that would success in open-loop rollout
                     print(f"Retrying with policy frequency {policy_freq} Hz...")
                     
                 i += 1

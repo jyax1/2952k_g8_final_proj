@@ -6,3 +6,4 @@
 /visualizations/dataset_vis/**
 /visualizations/pseudo_action_rollouts/**
 data/manipulation_demos/point_cloud_datasets
+data/manipulation_demos/pseudo_label_datasets
