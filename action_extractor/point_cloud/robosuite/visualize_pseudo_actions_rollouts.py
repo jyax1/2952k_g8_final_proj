@@ -250,7 +250,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
     parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos/point_cloud_datasets', help='Path to point cloud dataset directory')
-    parser.add_argument('--output_dir', type=str, default='pseudo_action_rollout_visualizations/example_rollout', help='Path to output directory')
+    parser.add_argument('--output_dir', type=str, default='visualizations/pseudo_action_rollouts/example_rollout', help='Path to output directory')
     parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
     parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
     parser.add_argument('--delta_actions', action='store_true', help='Use delta actions')

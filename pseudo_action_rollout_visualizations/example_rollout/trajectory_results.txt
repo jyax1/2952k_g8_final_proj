@@ -1,4 +1,0 @@
-Trajectory results:
-demo_0: success after 1 trials
-
-Final Success Rate: 1/1 => 100.00%

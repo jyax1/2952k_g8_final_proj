@@ -360,7 +360,9 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
             total_samples += traj["actions"].shape[0]
             print("ep {}: wrote {} transitions to group {}".format(ind, ep_data_grp.attrs["num_samples"], ep))
-            print(result_str)
+            
+            if args.max_num_trials > 0: # We don't do rollouts if max_num_trials is 0
+                print(result_str)
         
         del trajs
 

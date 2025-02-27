@@ -63,6 +63,7 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
         video_path_cam2 = os.path.join(args.output_dir, f"{demo_id}_cam2.mp4")
         
         obs_group = hdf5_root["data"][demo]["obs"]
+        actions = hdf5_root["data"][demo]["actions"]
         num_samples = obs_group[f"{cameras[0]}_image"].shape[0]
         initial_state = hdf5_root["data"][demo]["states"][0]
         
@@ -71,12 +72,10 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
         
         roll_out_and_save_video(
             env_camera0,
-            obs_group,
+            actions,
             video_path_cam1,
-            num_samples,
+            env_camera0.env.env.control_freq,
             verbose=False,
-            output_dir=args.output_dir,
-            demo_id=demo_id
         )
         
         env_camera1.reset()
@@ -84,20 +83,19 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
         
         roll_out_and_save_video(
             env_camera1,
-            obs_group,
+            actions,
             video_path_cam2,
-            num_samples,
+            env_camera1.env.env.control_freq,
             verbose=False,
-            output_dir=args.output_dir,
-            demo_id=demo_id
         )
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
-    parser.add_argument('--hdf5_path', type=str, default='data/manipulation_demos', help='Path to video dataset directory')
-    parser.add_argument('--output_dir', type=str, default='visualization/dataset', help='Path to output directory')
+    parser.add_argument('--hdf5_path', type=str, default='data/manipulation_demos/pseudo_label_datasets/square_d0_pseudo_actions_10.hdf5', 
+                        help='Path to video dataset directory')
+    parser.add_argument('--output_dir', type=str, default='visualizations/dataset_vis', help='Path to output directory')
     parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
     parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
     parser.add_argument('--delta_actions', action='store_true', help='Use delta actions')
