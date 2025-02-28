@@ -279,8 +279,8 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             import time
             start = time.time()
             all_hand_poses = get_poses_from_pointclouds(
-                pointcloud_points,
-                pointcloud_colors,
+                [pointcloud_points[i] for i in range(len(pointcloud_points))],
+                [pointcloud_colors[i] for i in range(len(pointcloud_colors))],
                 model_path = "data/meshes/panda_hand_mesh/panda-hand.ply",
                 verbose=args.verbose, # debug this function with visualize_pseudo_actions_rollouts.py
                 offset=POSITIONAL_OFFSET,

@@ -59,12 +59,10 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
     demos = list(hdf5_root["data"].keys())[:args.num_demos]
     for demo in tqdm(demos, desc="Rolling out demos"):
         demo_id = demo.replace("demo_", "")
-        video_path_cam1 = os.path.join(args.output_dir, f"{demo_id}_cam1.mp4")
-        video_path_cam2 = os.path.join(args.output_dir, f"{demo_id}_cam2.mp4")
+        video_path_cam1 = os.path.join(args.output_dir, f"demo_{demo_id}_cam1.mp4")
+        video_path_cam2 = os.path.join(args.output_dir, f"demo_{demo_id}_cam2.mp4")
         
-        obs_group = hdf5_root["data"][demo]["obs"]
         actions = hdf5_root["data"][demo]["actions"]
-        num_samples = obs_group[f"{cameras[0]}_image"].shape[0]
         initial_state = hdf5_root["data"][demo]["states"][0]
         
         env_camera0.reset()
@@ -88,12 +86,14 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
             env_camera1.env.env.control_freq,
             verbose=False,
         )
+        
+        print(f"Saved videos for demo {demo_id} to {video_path_cam1} and {video_path_cam2}")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
-    parser.add_argument('--hdf5_path', type=str, default='data/manipulation_demos/pseudo_label_datasets/square_d0_pseudo_actions_10.hdf5', 
+    parser.add_argument('--hdf5_path', type=str, default='data/manipulation_demos/pseudo_label_datasets/square_d0_pseudo_actions_debug.hdf5', 
                         help='Path to video dataset directory')
     parser.add_argument('--output_dir', type=str, default='visualizations/dataset_vis', help='Path to output directory')
     parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
