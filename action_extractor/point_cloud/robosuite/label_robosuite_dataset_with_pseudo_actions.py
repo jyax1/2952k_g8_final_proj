@@ -36,6 +36,7 @@ from action_extractor.point_cloud.action_identifier_point_cloud import (
 )
 from action_extractor.point_cloud.config import *
 from action_extractor.utils.robosuite_data_processing_utils import *
+from action_extractor.utils.rollout_debug_utils import save_point_clouds_as_ply
 
 def exclude_cameras_from_obs(traj, camera_names):
     if len(camera_names) > 0:
@@ -61,6 +62,7 @@ def roll_out(env, actions_for_demo, verbose=False, file_name = 'roll_out.mp4') -
         
     if verbose:
         env.video_recoder.stop()
+        print(f"Rollout complete. Video saved to {env.file_path}")
     
     return env.is_success()["task"]
 
@@ -200,6 +202,23 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     policy_freq = control_freq
     
     is_robosuite_env = EnvUtils.is_robosuite_env(env_meta)
+    
+    if args.verbose or args.count_rollout_success:
+        env_rollout = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
+        env_rollout = VideoRecordingWrapper(
+            env_rollout,
+            video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
+            steps_per_render=1,
+            width=CAMERA_WIDTH,
+            height=CAMERA_HEIGHT,
+            mode="rgb_array",
+            camera_name='fronttableview',
+        )
+        
+        results_file_path = os.path.join("logs", "labeling_rollouts", "rollouts_success.txt")
+        os.makedirs(os.path.dirname(results_file_path), exist_ok=True)
+        with open(results_file_path, "w") as results_txt:
+            results_txt.write("Trajectory results:\n")
 
     # list of all demonstration episodes (sorted in increasing number order)
     f = h5py.File(args.hdf5_path, "r")
@@ -210,6 +229,9 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     # maybe reduce the number of demonstrations to playback
     if args.num_demos is not None:
         demos = demos[:args.num_demos]
+        
+    if args.debug_demo is not None:
+        demos = [demos[args.debug_demo]]
 
     # output file in same directory as input file
     output_path = os.path.join(os.path.dirname(args.hdf5_path), args.output_hdf5_name)
@@ -219,6 +241,9 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     print("output file: {}".format(output_path))
 
     total_samples = 0
+    
+    n_success = 0
+    total_n = 0
     
     for i in range(0, len(demos), args.num_workers):
         end = min(i + args.num_workers, len(demos))
@@ -260,6 +285,9 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             
             pointcloud_points = traj['obs']['pointcloud_points']
             pointcloud_colors = traj['obs']['pointcloud_colors']
+            
+            if args.verbose:
+                save_point_clouds_as_ply(pointcloud_points, pointcloud_colors, output_dir=os.path.join('debug/label_robosuite_dataset', f"pointclouds_{j}"))
                 
             all_hand_poses = get_poses_from_pointclouds(
                 [pointcloud_points[i] for i in range(len(pointcloud_points))],
@@ -287,6 +315,21 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
                     translation_scaling=80.0,
                     rotation_scaling=9.0,
                 )
+                
+            if args.verbose or args.count_rollout_success:
+                env_rollout.reset()
+                env_rollout.reset_to(initial_state_list[j])
+                success = roll_out(env_rollout, actions_for_demo, verbose=args.verbose or args.save_rollout_videos, file_name=f"roll_out_{ind}.mp4")
+                
+                if success:
+                    n_success += 1
+                total_n += 1
+                
+                result_str = f"demo_{ind}: {f'success' if success else 'failure'}"
+                
+                print(result_str)
+                with open(results_file_path, "a") as results_txt:
+                    results_txt.write(result_str + "\n")
             
             traj["actions"] = actions_for_demo
             
@@ -326,6 +369,13 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
 
     f.close()
     f_out.close()
+    
+    if args.count_rollout_success:
+        success_rate = (n_success / total_n)*100 if total_n else 0
+        summary_str = f"\nFinal Success Rate: {n_success}/{total_n} => {success_rate:.2f}%"
+        print(summary_str)
+        with open(results_file_path, "a") as results_txt:
+            results_txt.write(summary_str + "\n")
 
     print(f"Done labeling dataset with pseudo-actions.\nSaved to: {args.output_hdf5_name}")
 
@@ -346,12 +396,16 @@ def main():
                         help="Number of workers for parallel saving")
     parser.add_argument("--delta_actions", action="store_true",
                         help="If set, use poses_to_delta_actions instead of absolute actions.")
-    parser.add_argument("--ground_truth", action="store_true",
-                        help="If set, use ground-truth poses from the dataset instead of ICP.")
     parser.add_argument("--smooth", action="store_true",
                         help="If set, attempts to smooth the resulting action path.")
     parser.add_argument("--verbose", action="store_true",
                         help="If set, visualize for debugging purposes.")
+    parser.add_argument("--count_rollout_success", action="store_true",
+                        help="If set, count the number of successful rollouts with pseudo actions.")
+    parser.add_argument("--save_rollout_videos", action="store_true",
+                        help="If set, save videos of rollouts with pseudo actions.")
+    parser.add_argument("--debug_demo", type=int, default=None,
+                        help="If not None, process the specified demo for debugging purposes.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
                         help="ICP method used for pose estimation.")
     parser.add_argument("--compress", action='store_true',
