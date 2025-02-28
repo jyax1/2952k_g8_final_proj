@@ -56,7 +56,10 @@ def visualize_dataset_trajectories_as_videos(args) -> None:
         camera_name=cameras[1],
     )
     
-    demos = list(hdf5_root["data"].keys())[:args.num_demos]
+    if args.num_demos != None:
+        demos = list(hdf5_root["data"].keys())[:args.num_demos]
+    else:
+        demos = list(hdf5_root["data"].keys())
     for demo in tqdm(demos, desc="Rolling out demos"):
         demo_id = demo.replace("demo_", "")
         video_path_cam1 = os.path.join(args.output_dir, f"demo_{demo_id}_cam1.mp4")
@@ -96,7 +99,7 @@ if __name__ == "__main__":
     parser.add_argument('--hdf5_path', type=str, default='data/manipulation_demos/pseudo_label_datasets/square_d0_pseudo_actions_debug.hdf5', 
                         help='Path to video dataset directory')
     parser.add_argument('--output_dir', type=str, default='visualizations/dataset_vis', help='Path to output directory')
-    parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
+    parser.add_argument('--num_demos', type=int, default=None, help='Number of demos to process. None means all demos.')
     parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
     parser.add_argument('--delta_actions', action='store_true', help='Use delta actions')
     
