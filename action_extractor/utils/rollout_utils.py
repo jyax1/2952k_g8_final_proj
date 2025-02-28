@@ -98,8 +98,6 @@ def infer_actions_and_rollout(root_h,
                 verbose=verbose
             )
     else:
-        import time
-        start = time.time()
         all_hand_poses = get_poses_from_pointclouds(
             point_clouds_points,
             point_clouds_colors,
@@ -109,8 +107,6 @@ def infer_actions_and_rollout(root_h,
             debug_dir=os.path.join(output_dir, f"rendered_pose_estimations_{demo_id}"),
             icp_method=icp_method
         )
-        end = time.time()
-        print(f"get_poses_from_pointclouds took {end - start} seconds")
         
         if verbose:
             # Compare estimated poses with ground truth poses for debug/calibration

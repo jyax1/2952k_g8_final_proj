@@ -200,21 +200,6 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     policy_freq = control_freq
     
     is_robosuite_env = EnvUtils.is_robosuite_env(env_meta)
-    
-    render_offscreen = True if args.verbose else False
-    
-    env_roll_out = create_env_from_metadata(env_meta=env_meta, render_offscreen=render_offscreen) # Separate env for roll-out
-    
-    if args.verbose:
-        env_roll_out = VideoRecordingWrapper(
-            env_roll_out,
-            video_recoder=VideoRecorder.create_h264(fps=20, codec="h264", input_pix_fmt="rgb24", crf=22),
-            steps_per_render=1,
-            width=CAMERA_WIDTH,
-            height=CAMERA_HEIGHT,
-            mode="rgb_array",
-            camera_name='frontview',
-        )
 
     # list of all demonstration episodes (sorted in increasing number order)
     f = h5py.File(args.hdf5_path, "r")
@@ -276,8 +261,6 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             pointcloud_points = traj['obs']['pointcloud_points']
             pointcloud_colors = traj['obs']['pointcloud_colors']
                 
-            import time
-            start = time.time()
             all_hand_poses = get_poses_from_pointclouds(
                 [pointcloud_points[i] for i in range(len(pointcloud_points))],
                 [pointcloud_colors[i] for i in range(len(pointcloud_colors))],
@@ -287,8 +270,6 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
                 debug_dir='debug',
                 icp_method=args.icp_method,
             )
-            end = time.time()
-            print(f"get_poses_from_pointclouds took {end - start} seconds")
             
             if not args.delta_actions:
                 actions_for_demo = poses_to_absolute_actions(
