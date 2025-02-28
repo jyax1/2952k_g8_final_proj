@@ -198,21 +198,10 @@ def get_poses_from_pointclouds(
     model_in_mm=True,
     dbscan_eps=0.02,
     dbscan_min_points=20,
-    # base_orientation_quat=np.array([0.9968959, -0.02899202, 0.07318948, 0.00115383]),
-    # base_orientation_quat=np.array([0.70409597, -0.07225323, 0.03125232, 0.70572773]),
     base_orientation_quat=np.array([ 0.61854268,  0.78458513,  0.03966061, -0.01606732]),
-    # [ 0.61854268  0.78458513  0.03966061 -0.01606732] for swap_xy = np.array([
-    #     [0.0, -1.0, 0.0, 0.0],
-    #     [-1.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 1.0, 0.0],
-    #     [0.0, 0.0, 0.0, 1.0]
-    # ])
     max_orientation_angle=np.pi / 8,
     verbose=True,
     icp_method="updown",
-    # New parameter: how far below the "lowest" surface we place the final reference point (meters).
-    # Example: 0.01 -> 10 mm below.
-    # offset=[0.0, 0.002, 0.078],
     offset=[-0.002, 0, 0.078]
 ):
     """

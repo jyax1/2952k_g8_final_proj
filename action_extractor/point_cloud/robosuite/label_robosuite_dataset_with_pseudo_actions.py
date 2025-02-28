@@ -255,9 +255,19 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             initial_state_list.append(initial_state)
             states_list.append(states)
             actions_list.append(actions)
-
-        with multiprocessing.Pool(args.num_workers) as pool:
-            trajs = pool.map(worker, [[env_meta, CAMERAS_FOR_POLICY + ADDITIONAL_CAMERAS_FOR_POINT_CLOUD, initial_state_list[j], states_list[j], actions_list[j]] for j in range(len(initial_state_list))]) 
+            
+        tasks = [
+            [env_meta, CAMERAS_FOR_POLICY + ADDITIONAL_CAMERAS_FOR_POINT_CLOUD, 
+             initial_state_list[j], states_list[j], actions_list[j]]
+            for j in range(len(initial_state_list))
+        ]
+        
+        if args.num_workers == 1:
+            # Process tasks sequentially if only one worker is specified
+            trajs = [worker(task) for task in tasks]
+        else:
+            with multiprocessing.Pool(args.num_workers) as pool:
+                trajs = pool.map(worker, tasks)
 
         for j, ind in enumerate(range(i, end)):
             ep = demos[ind]
@@ -265,78 +275,39 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             
             pointcloud_points = traj['obs']['pointcloud_points']
             pointcloud_colors = traj['obs']['pointcloud_colors']
+                
+            import time
+            start = time.time()
+            all_hand_poses = get_poses_from_pointclouds(
+                pointcloud_points,
+                pointcloud_colors,
+                model_path = "data/meshes/panda_hand_mesh/panda-hand.ply",
+                verbose=args.verbose, # debug this function with visualize_pseudo_actions_rollouts.py
+                offset=POSITIONAL_OFFSET,
+                debug_dir='debug',
+                icp_method=args.icp_method,
+            )
+            end = time.time()
+            print(f"get_poses_from_pointclouds took {end - start} seconds")
             
-            success = False
-            k = 0
-            
-            if args.max_num_trials == 0:
-                all_hand_poses = get_poses_from_pointclouds(
-                    pointcloud_points,
-                    pointcloud_colors,
-                    model_path = "data/meshes/panda_hand_mesh/panda-hand.ply",
-                    verbose=False, # debug this function with visualize_pseudo_actions_rollouts.py
-                    offset=POSITIONAL_OFFSET,
-                    debug_dir='debug',
-                    icp_method=args.icp_method,
+            if not args.delta_actions:
+                actions_for_demo = poses_to_absolute_actions(
+                    poses=all_hand_poses,
+                    gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
+                    control_freq = control_freq,
+                    policy_freq = policy_freq,
+                    smooth=args.smooth
                 )
-                
-                if not args.delta_actions:
-                    actions_for_demo = poses_to_absolute_actions(
-                        poses=all_hand_poses,
-                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
-                        control_freq = control_freq,
-                        policy_freq = policy_freq,
-                        smooth=args.smooth
-                    )
-                else:
-                    actions_for_demo = poses_to_delta_actions(
-                        poses=all_hand_poses,
-                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
-                        smooth=False,
-                        translation_scaling=80.0,
-                        rotation_scaling=9.0,
-                    )    
-            
-            while not success and k < args.max_num_trials:
-            
-                all_hand_poses = get_poses_from_pointclouds(
-                    pointcloud_points,
-                    pointcloud_colors,
-                    model_path = "data/meshes/panda_hand_mesh/panda-hand.ply",
-                    verbose=False, # debug this function with visualize_pseudo_actions_rollouts.py
-                    offset=POSITIONAL_OFFSET,
-                    debug_dir='debug',
-                    icp_method=args.icp_method,
+            else:
+                actions_for_demo = poses_to_delta_actions(
+                    poses=all_hand_poses,
+                    gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
+                    smooth=False,
+                    translation_scaling=80.0,
+                    rotation_scaling=9.0,
                 )
-                
-                if not args.delta_actions:
-                    actions_for_demo = poses_to_absolute_actions(
-                        poses=all_hand_poses,
-                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
-                        control_freq = control_freq,
-                        policy_freq = policy_freq,
-                        smooth=args.smooth
-                    )
-                else:
-                    actions_for_demo = poses_to_delta_actions(
-                        poses=all_hand_poses,
-                        gripper_actions=[traj['actions'][i][-1] for i in range(len(traj['actions']))],
-                        smooth=False,
-                        translation_scaling=80.0,
-                        rotation_scaling=9.0,
-                    )
-                
-                env_roll_out.reset()
-                env_roll_out.reset_to(initial_state_list[j])
-                
-                success = roll_out(env_roll_out, actions_for_demo, verbose = args.verbose, file_name = f'{ep}_trial_{k}.mp4')
-                
-                if success:
-                    break
-                k += 1
             
             traj["actions"] = actions_for_demo
-            result_str = f"demo_{ind}: {f'success after {k} trials' if success else f'fail after {k} trials'}"
             
             exclude_cameras_from_obs(traj, ADDITIONAL_CAMERAS_FOR_POINT_CLOUD)
             # store transitions
@@ -360,9 +331,6 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
             total_samples += traj["actions"].shape[0]
             print("ep {}: wrote {} transitions to group {}".format(ind, ep_data_grp.attrs["num_samples"], ep))
-            
-            if args.max_num_trials > 0: # We don't do rollouts if max_num_trials is 0
-                print(result_str)
         
         del trajs
 
@@ -405,8 +373,6 @@ def main():
                         help="If set, visualize for debugging purposes.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
                         help="ICP method used for pose estimation.")
-    parser.add_argument('--max_num_trials', type=int, default=0, 
-                        help='Maximum number of trials to attempt for each demo to verify rollout success. If 0, no rollouts performed.')
     parser.add_argument("--compress", action='store_true',
                         help="Compress observations with gzip option in hdf5")
 
