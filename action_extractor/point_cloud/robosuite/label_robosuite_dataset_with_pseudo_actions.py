@@ -117,10 +117,10 @@ def extract_trajectory(
         # get next observation
         if t == traj_len:
             # play final action to get next observation for last timestep
-            next_obs, _, _, _ = env.step(actions[t - 1])
+            next_obs, _, _, _ = env.step(actions[t - 1], get_point_clouds=True)
         else:
             # reset to simulator state to get observation
-            next_obs = env.reset_to({"states" : states[t]})
+            next_obs = env.reset_to({"states" : states[t]}, get_point_clouds=True)
 
         # infer reward signal
         # note: our tasks use reward r(s'), reward AFTER transition, so this is
