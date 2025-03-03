@@ -335,14 +335,32 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             
             exclude_cameras_from_obs(traj, ADDITIONAL_CAMERAS_FOR_POINT_CLOUD)
             # store transitions
+            
+            # Instead of creating ep_data_grp from scratch, do this:
+            ep_in = f["data"][ep]                         # old data
+            ep_data_grp = data_grp.create_group(ep)       # new group in output file
+
+            # Copy the entire original episode from the old file into the new group
+            f.copy(ep_in, ep_data_grp)
+
+            # Now remove ONLY the old "actions" dataset
+            del ep_data_grp["actions"]
+
+            # Overwrite with your newly computed actions_for_demo
+            ep_data_grp.create_dataset("actions", data=np.array(actions_for_demo))
+
+            # Update metadata if you like (e.g. num_samples)
+            ep_data_grp.attrs["num_samples"] = actions_for_demo.shape[0]
+
+            print(f"ep {ind}: labeled with pseudo-actions, wrote {actions_for_demo.shape[0]} transitions to group {ep}")
 
             # IMPORTANT: keep name of group the same as source file, to make sure that filter keys are
             #            consistent as well
-            ep_data_grp = data_grp.create_group(ep)
-            ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
-            ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
-            ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
-            ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
+            # ep_data_grp = data_grp.create_group(ep)
+            # ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
+            # ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
+            # ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
+            # ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
             # for k in traj["obs"]:
             #     if args.compress:
             #         ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]), compression="gzip")
@@ -350,11 +368,12 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             #         ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
 
             # episode metadata
-            if is_robosuite_env:
-                ep_data_grp.attrs["model_file"] = traj["initial_state_dict"]["model"] # model xml for this episode
-            ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
-            total_samples += traj["actions"].shape[0]
-            print("ep {}: wrote {} transitions to group {}".format(ind, ep_data_grp.attrs["num_samples"], ep))
+            # if is_robosuite_env:
+            #     ep_data_grp.attrs["model_file"] = traj["initial_state_dict"]["model"] # model xml for this episode
+            # ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
+            # total_samples += traj["actions"].shape[0]
+            
+            # print("ep {}: wrote {} transitions to group {}".format(ind, ep_data_grp.attrs["num_samples"], ep))
         
         del trajs
 
