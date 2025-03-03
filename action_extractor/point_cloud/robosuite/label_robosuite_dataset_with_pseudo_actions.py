@@ -98,7 +98,7 @@ def extract_trajectory(
 
     # load the initial state
     env.reset()
-    insert_camera_info(initial_state)
+    # insert_camera_info(initial_state) Don't need if we already have obs dataset
     obs = env.reset_to(initial_state)
 
     traj = dict(
@@ -343,11 +343,11 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
             ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
             ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
             ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
-            for k in traj["obs"]:
-                if args.compress:
-                    ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]), compression="gzip")
-                else:
-                    ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
+            # for k in traj["obs"]:
+            #     if args.compress:
+            #         ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]), compression="gzip")
+            #     else:
+            #         ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
 
             # episode metadata
             if is_robosuite_env:
