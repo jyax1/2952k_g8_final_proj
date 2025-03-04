@@ -109,3 +109,32 @@ def insert_camera_info(xml_string: str) -> str:
     xml_string['model'] = xml_string['model'][:insert_index] + new_cameras_xml + xml_string['model'][insert_index:]
     
     return xml_string
+
+import xml.etree.ElementTree as ET
+
+def recolor_robot(xml_string: str, target_rgba: str = "0 0 0 1") -> str:
+    """
+    Given a MuJoCo XML string, update every visual <geom> element belonging to the robot
+    so that its RGBA is set to target_rgba.
+    
+    We assume that robot visual geoms have names that start with "robot0_g" and contain "_vis".
+    
+    Returns the modified XML string.
+    """
+    # Parse the XML string into an ElementTree
+    root = ET.fromstring(xml_string)
+    
+    # Iterate over all <geom> elements.
+    for geom in root.iter("geom"):
+        # We only want to override geoms that are for visual rendering.
+        # We'll check if:
+        #   - The geom has group="1" (convention for visual geoms)
+        #   - Its name indicates it is a robot visual geom, e.g. name starts with "robot0_g" and includes "_vis"
+        name = geom.get("name", "")
+        group = geom.get("group", "")
+        if group == "1" and re.search(r"^robot0_g.*_vis", name):
+            # Override or insert the rgba attribute.
+            geom.set("rgba", target_rgba)
+    
+    # Convert the tree back to a string.
+    return ET.tostring(root, encoding="unicode")

@@ -55,7 +55,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 from robomimic.envs.env_base import EnvBase
-from action_extractor.utils.robosuite_data_processing_utils import replace_all_lights, recolor_gripper, insert_camera_info
+from action_extractor.utils.robosuite_data_processing_utils import replace_all_lights, recolor_gripper, recolor_robot, insert_camera_info
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -295,6 +295,7 @@ def dataset_states_to_obs(args):
             if is_robosuite_env:
                 xml_str = f["data/{}".format(ep)].attrs["model_file"]
                 xml_str = replace_all_lights(xml_str)
+                xml_str = recolor_robot(xml_str)
                 xml_str = recolor_gripper(xml_str)
                 initial_state["model"] = xml_str
             actions = f["data/{}/actions".format(ep)][()]

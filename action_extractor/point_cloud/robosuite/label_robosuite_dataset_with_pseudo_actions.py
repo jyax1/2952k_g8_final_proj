@@ -384,7 +384,7 @@ def main():
                              "If None, modifies in-place; else copies first.")
     parser.add_argument("--num_demos", type=int, default=None,
                         help="Number of demos to process (if None, do all).")
-    parser.add_argument("--num_workers", type=int, default=16, # Maximum num_workers suitable for my machine
+    parser.add_argument("--num_workers", type=int, default=1,
                         help="Number of workers for parallel saving")
     parser.add_argument("--delta_actions", action="store_true",
                         help="If set, use poses_to_delta_actions instead of absolute actions.")
