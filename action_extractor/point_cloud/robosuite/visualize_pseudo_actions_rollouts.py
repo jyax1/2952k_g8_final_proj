@@ -57,16 +57,15 @@ def imitate_trajectory_with_action_identifier(
     
     cameras = ['fronttableview', 'sidetableview'] # For visualization
 
-    # 1) Load the dataset.
-    hdf5_files = glob(f"{dataset_path}/**/*.hdf5", recursive=True)
-    hdf5_roots = [h5py.File(fp, "r") for fp in hdf5_files]
+    # 1) Load the dataset. 
+    hdf5_root = h5py.File(args.dataset_path, "r")
 
     # 2) Initialize rendering environments.
     try:
         # Try using the first file found in hdf5_files
-        env_meta = get_env_metadata_from_dataset(dataset_path=hdf5_files[0])
+        env_meta = get_env_metadata_from_dataset(dataset_path=args.dataset_path)
     except Exception as e:
-        print(f"Failed to get environment metadata from {hdf5_files[0]}: {e}")
+        print(f"Failed to get environment metadata from {args.dataset_path}: {e}")
 
         # If it fails, switch to the parent directory of dataset_path
         parent_path = os.path.dirname(dataset_path)
@@ -96,7 +95,7 @@ def imitate_trajectory_with_action_identifier(
 
     # Create a rendering environment (we'll use it to obtain image dimensions and camera parameters).
     env_camera0 = create_env_from_metadata(env_meta=env_meta, render_offscreen=True)
-    example_image = hdf5_roots[0]["data"]["demo_0"]["obs"][f"{cameras[0]}_image"][0]
+    example_image = hdf5_root["data"]["demo_0"]["obs"][f"{cameras[0]}_image"][0]
     camera_height, camera_width = example_image.shape[:2]
 
     # 7) Initialize rendering environments for at least two cameras.
@@ -127,101 +126,99 @@ def imitate_trajectory_with_action_identifier(
     
     n_success = 0
     total_n = 0
+    
+    demos = list(hdf5_root["data"].keys())[:num_demos] if num_demos else list(hdf5_root["data"].keys())
 
-    # 7) Repeat for all demos.
-    for root_h in hdf5_roots:
-        demos = list(root_h["data"].keys())[:num_demos] if num_demos else list(root_h["data"].keys())
+    for demo in tqdm(demos, desc="Processing demos"):
+        demo_id = demo.replace("demo_", "")
+        upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
+        upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
+        lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
+        lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
+        combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
 
-        for demo in tqdm(demos, desc="Processing demos"):
-            demo_id = demo.replace("demo_", "")
-            upper_left_video_path  = os.path.join(output_dir, f"{demo_id}_upper_left.mp4")
-            upper_right_video_path = os.path.join(output_dir, f"{demo_id}_upper_right.mp4")
-            lower_left_video_path  = os.path.join(output_dir, f"{demo_id}_lower_left.mp4")
-            lower_right_video_path = os.path.join(output_dir, f"{demo_id}_lower_right.mp4")
-            combined_video_path    = os.path.join(output_dir, f"{demo_id}_combined.mp4")
+        obs_group = hdf5_root["data"][demo]["obs"]
+        num_samples = obs_group[f"{cameras[0]}_image"].shape[0]
 
-            obs_group = root_h["data"][demo]["obs"]
-            num_samples = obs_group[f"{cameras[0]}_image"].shape[0]
-
-            cameras_frames = {}
-            for camera in cameras:
-                cameras_frames[camera] = [obs_group[f"{camera}_image"][i] for i in range(num_samples)]
-                    
-            with imageio.get_writer(upper_left_video_path, fps=20) as writer:
-                for frame in cameras_frames[cameras[0]]:
-                    writer.append_data(frame)
-            with imageio.get_writer(lower_left_video_path, fps=20) as writer:
-                for frame in cameras_frames[cameras[1]]:
-                    writer.append_data(frame)
-            
-            point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
-            point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
-            
-            if verbose:
-                save_point_clouds_as_ply(point_clouds_points, point_clouds_colors, output_dir=os.path.join(output_dir, f"pointclouds_{demo_id}"))
-            
-            success = False
-            i = 0
-            
-            # 3) Estimate gripper poses from point clouds.
-            # 4) Estimate pseudo actions from gripper poses.
-            # 5) Roll out pseudo actions in the environment.
-            while not success and i < max_num_trials:
-                infer_actions_and_rollout(
-                    root_h,
-                    demo,
-                    env_camera0,
-                    env_camera1,
-                    point_clouds_points,
-                    point_clouds_colors,
-                    hand_mesh,
-                    upper_right_video_path,
-                    lower_right_video_path,
-                    output_dir,
-                    demo_id,
-                    policy_freq=policy_freq,
-                    smooth=smooth,
-                    verbose=verbose,
-                    num_samples=num_samples,
-                    absolute_actions=absolute_actions,
-                    ground_truth=ground_truth,
-                    offset=offset,
-                    icp_method=icp_method
-                )
-
-                # Success check
-                success = env_camera0.is_success()["task"]
-                if success:
-                    n_success += 1
-                else:
-                    policy_freq = change_policy_freq(policy_freq) 
-                    # This is to demonstrate that we can change the policy frequency to obtain trajectory
-                    # that would success in open-loop rollout
-                    print(f"Retrying with policy frequency {policy_freq} Hz...")
-                    
-                i += 1
-            
-            total_n += 1
-            
-            result_str = f"demo_{demo_id}: {f'success after {i} trials' if success else f'fail after {i} trials'}"
-
-            # Immediately append to the results file in "a" (append) mode
-            with open(results_file_path, "a") as f:
-                f.write(result_str + "\n")
-
-            # 6) Save the video.
-            # Combine videos from all cameras
-            combine_videos_quadrants(
-                upper_left_video_path,
+        cameras_frames = {}
+        for camera in cameras:
+            cameras_frames[camera] = [obs_group[f"{camera}_image"][i] for i in range(num_samples)]
+                
+        with imageio.get_writer(upper_left_video_path, fps=20) as writer:
+            for frame in cameras_frames[cameras[0]]:
+                writer.append_data(frame)
+        with imageio.get_writer(lower_left_video_path, fps=20) as writer:
+            for frame in cameras_frames[cameras[1]]:
+                writer.append_data(frame)
+        
+        point_clouds_points = [points for points in obs_group[f"pointcloud_points"]]
+        point_clouds_colors = [colors for colors in obs_group[f"pointcloud_colors"]]
+        
+        if verbose:
+            save_point_clouds_as_ply(point_clouds_points, point_clouds_colors, output_dir=os.path.join(output_dir, f"pointclouds_{demo_id}"))
+        
+        success = False
+        i = 0
+        
+        # 3) Estimate gripper poses from point clouds.
+        # 4) Estimate pseudo actions from gripper poses.
+        # 5) Roll out pseudo actions in the environment.
+        while not success and i < max_num_trials:
+            infer_actions_and_rollout(
+                hdf5_root,
+                demo,
+                env_camera0,
+                env_camera1,
+                point_clouds_points,
+                point_clouds_colors,
+                hand_mesh,
                 upper_right_video_path,
-                lower_left_video_path,
                 lower_right_video_path,
-                combined_video_path
+                output_dir,
+                demo_id,
+                policy_freq=policy_freq,
+                smooth=smooth,
+                verbose=verbose,
+                num_samples=num_samples,
+                absolute_actions=absolute_actions,
+                ground_truth=ground_truth,
+                offset=offset,
+                icp_method=icp_method
             )
-            os.remove(upper_left_video_path)
-            os.remove(upper_right_video_path)
-            os.remove(lower_left_video_path)
-            os.remove(lower_right_video_path)
+
+            # Success check
+            success = env_camera0.is_success()["task"]
+            if success:
+                n_success += 1
+            else:
+                policy_freq = change_policy_freq(policy_freq) 
+                # This is to demonstrate that we can change the policy frequency to obtain trajectory
+                # that would success in open-loop rollout
+                print(f"Retrying with policy frequency {policy_freq} Hz...")
+                
+            i += 1
+        
+        total_n += 1
+        
+        result_str = f"demo_{demo_id}: {f'success after {i} trials' if success else f'fail after {i} trials'}"
+
+        # Immediately append to the results file in "a" (append) mode
+        with open(results_file_path, "a") as f:
+            f.write(result_str + "\n")
+
+        # 6) Save the video.
+        # Combine videos from all cameras
+        combine_videos_quadrants(
+            upper_left_video_path,
+            upper_right_video_path,
+            lower_left_video_path,
+            lower_right_video_path,
+            combined_video_path
+        )
+        os.remove(upper_left_video_path)
+        os.remove(upper_right_video_path)
+        os.remove(lower_left_video_path)
+        os.remove(lower_right_video_path)
 
     # 8) Save the results to a text file.
     success_rate = (n_success / total_n)*100 if total_n else 0
@@ -249,7 +246,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Estimate pseudo actions from video demonstrations, and roll-out the pseudo actions for visualization.")
     
-    parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos/point_cloud_datasets', help='Path to point cloud dataset directory')
+    parser.add_argument('--dataset_path', type=str, default='data/manipulation_demos/point_cloud_datasets/square_d0_sample.hdf5', help='Path to point cloud dataset directory')
     parser.add_argument('--output_dir', type=str, default='visualizations/pseudo_action_rollouts/example_rollout', help='Path to output directory')
     parser.add_argument('--num_demos', type=int, default=1, help='Number of demos to process')
     parser.add_argument('--save_webp', action='store_true', help='Store videos in webp format')
