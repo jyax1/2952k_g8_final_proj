@@ -26,7 +26,6 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.env_utils as EnvUtils
 from robomimic.utils.env_utils import create_env_from_metadata
 from robomimic.utils.file_utils import get_env_metadata_from_dataset
-from action_extractor.point_cloud.generate_point_clouds_from_dataset import reconstruct_pointclouds_from_obs_group
 from action_extractor.utils.poses_to_actions import (
     poses_to_absolute_actions,
     poses_to_delta_actions

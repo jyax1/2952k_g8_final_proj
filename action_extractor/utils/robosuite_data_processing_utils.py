@@ -112,29 +112,38 @@ def insert_camera_info(xml_string: str) -> str:
 
 import xml.etree.ElementTree as ET
 
-def recolor_robot(xml_string: str, target_rgba: str = "0 0 0 1") -> str:
+def recolor_robot(xml_string: str, 
+                  target_rgba: str = "0 0 0 1", 
+                  target_specular: str = "0", 
+                  target_shininess: str = "0") -> str:
     """
     Given a MuJoCo XML string, update every visual <geom> element belonging to the robot
-    so that its RGBA is set to target_rgba.
+    so that its inline RGBA attribute is set to target_rgba. In addition, update all
+    <material> elements that define specular and shininess so that they are set to
+    target_specular and target_shininess respectively.
     
-    We assume that robot visual geoms have names that start with "robot0_g" and contain "_vis".
+    We assume that robot visual geoms have names that contain "_vis" and belong to group "1".
     
     Returns the modified XML string.
     """
-    # Parse the XML string into an ElementTree
+    # Parse the XML string into an ElementTree.
     root = ET.fromstring(xml_string)
     
-    # Iterate over all <geom> elements.
+    # Update visual <geom> elements.
+    # Only modify geoms with group="1" and a name that includes "_vis".
     for geom in root.iter("geom"):
-        # We only want to override geoms that are for visual rendering.
-        # We'll check if:
-        #   - The geom has group="1" (convention for visual geoms)
-        #   - Its name indicates it is a robot visual geom, e.g. name starts with "robot0_g" and includes "_vis"
         name = geom.get("name", "")
         group = geom.get("group", "")
         if group == "1" and re.search(r"^robot0_g.*_vis", name):
             # Override or insert the rgba attribute.
             geom.set("rgba", target_rgba)
     
-    # Convert the tree back to a string.
+    # Update <material> elements to set specular and shininess.
+    for material in root.iter("material"):
+        mat_name = material.get("name", "")
+        if mat_name.startswith("robot0_"):
+            material.set("specular", target_specular)
+            material.set("shininess", target_shininess)
+    
+    # Convert the modified tree back to a string.
     return ET.tostring(root, encoding="unicode")
