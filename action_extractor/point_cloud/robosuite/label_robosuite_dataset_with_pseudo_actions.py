@@ -235,7 +235,9 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     # output file in same directory as input file
     output_path = os.path.join(os.path.dirname(args.hdf5_path), args.output_hdf5_name)
     f_out = h5py.File(output_path, "w")
-    data_grp = f_out.create_group("data")
+    # Copy the entire "data" group from the original file to the output file.
+    f.copy("data", f_out, name="data")
+    data_grp = f_out["data"]
     print("input file: {}".format(args.hdf5_path))
     print("output file: {}".format(output_path))
 
@@ -331,31 +333,44 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
                     results_txt.write(result_str + "\n")
             
             # store transitions
-            ep_in = f["data"][ep]
-            f.copy(ep_in, data_grp, name=ep)
-            
-            ep_data_grp = data_grp[ep]
+            demo_grp = data_grp[ep]
+            del demo_grp["actions"]
 
-            del ep_data_grp["actions"]
-
-            # Overwrite with your newly computed actions_for_demo
+            # Concatenate the last row, as before, and then create a new dataset
             actions_for_demo = np.concatenate([actions_for_demo, actions_for_demo[-1:]], axis=0)
-            
-            ep_data_grp.create_dataset("actions", data=np.array(actions_for_demo))
+            demo_grp.create_dataset("actions", data=np.array(actions_for_demo))
 
             total_samples += actions_for_demo.shape[0]
             
             print(f"ep {ind}: labeled with pseudo-actions, wrote {actions_for_demo.shape[0]} transitions to group {ep}")
         
         del trajs
-
-    # copy over all filter keys that exist in the original hdf5
-    if "mask" in f:
-        f.copy("mask", f_out)
+ 
+    # # copy over all filter keys that exist in the original hdf5
+    # if "mask" in f:
+    #     f.copy("mask", f_out)
+    
+    # Delete any demos that were not processed (when args.num_demos is set)
+    all_demos_in_output = list(data_grp.keys())
+    for demo in all_demos_in_output:
+        if demo not in demos:
+            del data_grp[demo]
 
     # global metadata
     data_grp.attrs["total"] = total_samples
-    data_grp.attrs["env_args"] = json.dumps(env.serialize(), indent=4) # environment info
+    
+    env_args_str = data_grp.attrs["env_args"]
+    
+    if not args.delta_actions:
+        env_args = json.loads(env_args_str)
+
+        # Update the control_delta flag to False
+        env_args["env_kwargs"]["controller_configs"]["control_delta"] = False
+
+        # Write the updated JSON back to the attribute
+        data_grp.attrs["env_args"] = json.dumps(env_args, indent=4)
+    
+    # data_grp.attrs["env_args"] = json.dumps(env.serialize(), indent=4) # environment info
     print("Wrote {} trajectories to {}".format(len(demos), output_path))
 
     f.close()

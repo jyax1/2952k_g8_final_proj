@@ -36,6 +36,11 @@ def compute_position_orientation_differences(actions1, actions2):
     T1 = actions1.shape[0]
     T2 = actions2.shape[0]
     T_common = min(T1, T2)
+    
+    print(actions1.shape)
+    print(actions2.shape)
+    
+    exit()
 
     # Slice if lengths differ
     a1 = actions1[:T_common]
