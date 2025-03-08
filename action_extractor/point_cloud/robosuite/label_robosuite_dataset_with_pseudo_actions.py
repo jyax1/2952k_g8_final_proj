@@ -13,7 +13,6 @@ import os
 import argparse
 import h5py
 import json
-from tqdm import tqdm
 import numpy as np
 from copy import deepcopy
 
