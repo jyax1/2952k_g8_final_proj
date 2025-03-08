@@ -147,3 +147,52 @@ def recolor_robot(xml_string: str,
     
     # Convert the modified tree back to a string.
     return ET.tostring(root, encoding="unicode")
+
+def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
+    """
+    Convert a state from one robot to another by replacing all robot-related 
+    elements in the source XML with those from the target environment.
+    
+    Args:
+        source_state (dict): Original state dict with keys "model" (XML string) and "states" (flattened array).
+        target_env: Environment whose robot configuration you want to use.
+        robot_prefix (str): Prefix for robot-related bodies (default "robot0").
+    
+    Returns:
+        dict: Modified state with the updated model XML and updated state vector.
+    """
+    # Get XML strings from source state and target environment.
+    source_xml = source_state["model"]
+    target_xml = target_env.env.sim.model.get_xml()
+
+    # Parse XML trees.
+    source_tree = ET.fromstring(source_xml)
+    target_tree = ET.fromstring(target_xml)
+
+    # Locate the worldbody elements.
+    source_worldbody = source_tree.find("worldbody")
+    target_worldbody = target_tree.find("worldbody")
+
+    # Remove all bodies in the source worldbody that belong to the robot (by name).
+    for body in list(source_worldbody):
+        name = body.get("name", "")
+        if name.startswith(robot_prefix):
+            source_worldbody.remove(body)
+
+    # Append all robot bodies from the target worldbody into the source.
+    for body in list(target_worldbody):
+        name = body.get("name", "")
+        if name.startswith(robot_prefix):
+            source_worldbody.append(body)
+
+    # Convert the modified tree back to a string.
+    new_xml = ET.tostring(source_tree, encoding="unicode")
+
+    # Update the state vector.
+    # Here, we simply query the target simulation for its current state.
+    # (Depending on your application you may want to do something different.)
+    new_state = {
+        "model": new_xml,
+        "states": target_env.env.sim.get_state().flatten()
+    }
+    return new_state

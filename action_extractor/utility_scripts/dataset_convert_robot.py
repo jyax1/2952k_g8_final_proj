@@ -28,7 +28,10 @@ from copy import deepcopy
 # Import robomimic/robosuite utilities.
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
-from robomimic.envs.env_base import EnvBase
+
+from xml.etree import ElementTree as ET
+
+from action_extractor.utils.robosuite_data_processing_utils import convert_robot_in_state
 
 # You may need to import additional functions if needed, for instance:
 # from action_extractor.utils.robosuite_data_processing_utils import recolor_robot, recolor_gripper
@@ -38,6 +41,7 @@ def convert_dataset(args):
     # Load the original environment metadata from the dataset.
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     # Update the robot type in the environment kwargs.
+    env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
     env_meta['env_kwargs']['robots'] = args.new_robot
 
     # Create the new environment for data processing.
@@ -84,6 +88,8 @@ def convert_dataset(args):
             initial_xml = demo_grp_in.attrs["model_file"]
             # Optionally update xml string (e.g., recolor_robot) here.
             initial_state["model"] = initial_xml
+            
+        initial_state = convert_robot_in_state(initial_state, new_env)
 
         new_env.reset()  # make sure the environment is ready
         new_env.reset_to(initial_state)
