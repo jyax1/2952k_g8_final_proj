@@ -188,17 +188,41 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
         if name.startswith(robot_prefix):
             source_worldbody.append(body)
 
-    # Now copy the target's matte material into the source's <asset> section.
+    # --- Replace robot-related assets in <asset> ---
     source_asset = source_tree.find("asset")
     target_asset = target_tree.find("asset")
-    # Find the matte material in the target
-    matte_material = target_asset.find("material[@name='robot0_robot_matte']")
-    if matte_material is not None:
-        # Only append if not already present.
-        if source_asset.find("material[@name='robot0_robot_matte']") is None:
-            source_asset.append(copy.deepcopy(matte_material))
-    else:
-        print("Warning: target material 'robot0_robot_matte' not found.")
+
+    # Remove any asset element (mesh or material) whose name starts with the robot prefix.
+    for elem in list(source_asset):
+        if elem.tag in ["mesh", "material"]:
+            if elem.get("name", "").startswith(robot_prefix):
+                source_asset.remove(elem)
+
+    # Append all robot-related asset elements from the target.
+    for elem in list(target_asset):
+        if elem.tag in ["mesh", "material"]:
+            if elem.get("name", "").startswith(robot_prefix):
+                source_asset.append(copy.deepcopy(elem))
+    
+    # --- Replace the actuator section ---
+    source_actuator = source_tree.find("actuator")
+    target_actuator = target_tree.find("actuator")
+    if source_actuator is not None:
+        # Remove the entire actuator section.
+        parent = source_tree  # actuators are direct children of <mujoco>
+        parent.remove(source_actuator)
+    if target_actuator is not None:
+        # Insert a copy of the target actuator section.
+        # We try to insert it before the <sensor> section if present.
+        sensor = source_tree.find("sensor")
+        actuator_copy = copy.deepcopy(target_actuator)
+        if sensor is not None:
+            # Get index of sensor in parent's children list.
+            parent = list(source_tree)
+            sensor_index = parent.index(sensor)
+            source_tree.insert(sensor_index, actuator_copy)
+        else:
+            source_tree.append(actuator_copy)
 
     # Convert the modified tree back to a string.
     new_xml = ET.tostring(source_tree, encoding="unicode")

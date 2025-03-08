@@ -33,10 +33,6 @@ from xml.etree import ElementTree as ET
 
 from action_extractor.utils.robosuite_data_processing_utils import convert_robot_in_state
 
-# You may need to import additional functions if needed, for instance:
-# from action_extractor.utils.robosuite_data_processing_utils import recolor_robot, recolor_gripper
-# (if you want to update the XML string)
-
 def convert_dataset(args):
     # Load the original environment metadata from the dataset.
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
@@ -48,7 +44,7 @@ def convert_dataset(args):
     # We do not need image processing here, so we can set camera_names to an empty list.
     new_env = EnvUtils.create_env_for_data_processing(
         env_meta=env_meta,
-        camera_names=[],  # not using cameras here
+        camera_names=['frontview'],  # not using cameras here
         camera_height=args.camera_height,
         camera_width=args.camera_width,
         reward_shaping=False,
@@ -79,35 +75,34 @@ def convert_dataset(args):
         new_states_list = []
 
         # Reset the environment using the first state from the demo.
-        # The initial state is stored in old_states[0]. In our case, we assume that
-        # the state is a flattened MuJoCo state that can be fed to env.reset_to().
         initial_state = {"states": old_states[0]}
-        # (If the dataset also stores a model XML in attributes, you can update it here.)
-        # For instance:
         if "model_file" in demo_grp_in.attrs:
             initial_xml = demo_grp_in.attrs["model_file"]
-            # Optionally update xml string (e.g., recolor_robot) here.
             initial_state["model"] = initial_xml
             
+        # Update the state with the new robot configuration.
         initial_state = convert_robot_in_state(initial_state, new_env)
 
-        new_env.reset()  # make sure the environment is ready
+        new_env.reset()  # Ensure the environment is ready
         new_env.reset_to(initial_state)
         # Record the initial state from the new environment.
-        # We assume new_env.get_state() returns a flat state vector.
-        new_state = new_env.get_state()  # Adjust if needed, e.g., new_env.sim.get_state()
+        new_state = new_env.env.sim.get_state().flatten()
+        # Convert to a NumPy array with a specific numeric type.
+        # new_state = np.asarray(new_state, dtype=np.float32)
         new_states_list.append(new_state)
 
         # Now, iterate over the actions to update the state.
         for t in range(T):
-            # Execute action t in the new environment.
-            # If env.step returns (obs, reward, done, info) then we discard everything except the state.
-            _, _, done, _ = new_env.step(actions[t])
+            obs, _, done, _ = new_env.step(actions[t])
             new_state = new_env.get_state()
+            new_state = new_env.env.sim.get_state().flatten()
             new_states_list.append(new_state)
-            # Optionally, you could check for 'done' and break early if desired.
+            # Optionally, you could break if done is true.
 
-        new_states = np.array(new_states_list)  # shape (T+1, state_dim)
+        success = new_env.is_success()["task"]
+        print(f"success: {success} for demo {demo}")
+        # Use np.stack instead of np.array to ensure a regular numeric array.
+        new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
         num_samples = actions.shape[0]
         total_samples += num_samples
 
@@ -115,7 +110,6 @@ def convert_dataset(args):
         demo_grp_out = data_grp.create_group(demo)
         demo_grp_out.create_dataset("actions", data=actions)
         demo_grp_out.create_dataset("states", data=new_states)
-        # Copy attributes such as model_file and num_samples.
         if "model_file" in demo_grp_in.attrs:
             demo_grp_out.attrs["model_file"] = demo_grp_in.attrs["model_file"]
         demo_grp_out.attrs["num_samples"] = num_samples
@@ -144,12 +138,8 @@ def main():
                         help="Camera height (if applicable; not used here but required by env creation)")
     parser.add_argument("--camera_width", type=int, default=84,
                         help="Camera width (if applicable; not used here but required by env creation)")
-    # You can add other flags (e.g., number of demos to process) as needed.
-    parser.add_argument("--n", type=int, default=None,
-                        help="Stop after n trajectories are processed (optional)")
 
     args = parser.parse_args()
-
     convert_dataset(args)
 
 if __name__ == "__main__":
