@@ -1,4 +1,5 @@
 import re
+import copy
 
 def recolor_gripper(xml_string: str) -> str:
     """
@@ -151,13 +152,15 @@ def recolor_robot(xml_string: str,
 def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     """
     Convert a state from one robot to another by replacing all robot-related 
-    elements in the source XML with those from the target environment.
-    
+    elements in the source XML with those from the target environment, and 
+    also copy over the matte material used for the robot.
+
     Args:
-        source_state (dict): Original state dict with keys "model" (XML string) and "states" (flattened array).
-        target_env: Environment whose robot configuration you want to use.
+        source_state (dict): Original state dict with keys "model" (XML string)
+                             and "states" (flattened array).
+        target_env: Environment whose robot configuration (and assets) you want to use.
         robot_prefix (str): Prefix for robot-related bodies (default "robot0").
-    
+
     Returns:
         dict: Modified state with the updated model XML and updated state vector.
     """
@@ -169,28 +172,38 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     source_tree = ET.fromstring(source_xml)
     target_tree = ET.fromstring(target_xml)
 
-    # Locate the worldbody elements.
+    # Replace robot bodies in the <worldbody>:
     source_worldbody = source_tree.find("worldbody")
     target_worldbody = target_tree.find("worldbody")
 
-    # Remove all bodies in the source worldbody that belong to the robot (by name).
+    # Remove all bodies in the source worldbody that belong to the robot.
     for body in list(source_worldbody):
         name = body.get("name", "")
         if name.startswith(robot_prefix):
             source_worldbody.remove(body)
 
-    # Append all robot bodies from the target worldbody into the source.
+    # Append all robot bodies from the target worldbody.
     for body in list(target_worldbody):
         name = body.get("name", "")
         if name.startswith(robot_prefix):
             source_worldbody.append(body)
 
+    # Now copy the target's matte material into the source's <asset> section.
+    source_asset = source_tree.find("asset")
+    target_asset = target_tree.find("asset")
+    # Find the matte material in the target
+    matte_material = target_asset.find("material[@name='robot0_robot_matte']")
+    if matte_material is not None:
+        # Only append if not already present.
+        if source_asset.find("material[@name='robot0_robot_matte']") is None:
+            source_asset.append(copy.deepcopy(matte_material))
+    else:
+        print("Warning: target material 'robot0_robot_matte' not found.")
+
     # Convert the modified tree back to a string.
     new_xml = ET.tostring(source_tree, encoding="unicode")
 
-    # Update the state vector.
-    # Here, we simply query the target simulation for its current state.
-    # (Depending on your application you may want to do something different.)
+    # For the state vector, we query the target simulation (you may adjust this as needed).
     new_state = {
         "model": new_xml,
         "states": target_env.env.sim.get_state().flatten()
