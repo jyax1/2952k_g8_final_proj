@@ -164,72 +164,128 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     Returns:
         dict: Modified state with the updated model XML and updated state vector.
     """
-    # Get XML strings from source state and target environment.
+    # 1) Get XML strings from source state and target environment.
     source_xml = source_state["model"]
     target_xml = target_env.env.sim.model.get_xml()
 
-    # Parse XML trees.
+    # 2) Parse XML trees.
     source_tree = ET.fromstring(source_xml)
     target_tree = ET.fromstring(target_xml)
 
-    # Replace robot bodies in the <worldbody>:
+    # -------------------------------------------------------------------------
+    # 3) Replace robot bodies in the <worldbody>, but do so "in place" so they
+    #    appear in the same location (index) they were originally, rather than
+    #    always at the end.
+    # -------------------------------------------------------------------------
     source_worldbody = source_tree.find("worldbody")
     target_worldbody = target_tree.find("worldbody")
 
-    # Remove all bodies in the source worldbody that belong to the robot.
-    for body in list(source_worldbody):
+    # First, gather a list of all child bodies in source_worldbody
+    source_bodies = list(source_worldbody)
+
+    # Identify which indices correspond to robot bodies
+    robot_indices = []
+    for i, body in enumerate(source_bodies):
         name = body.get("name", "")
         if name.startswith(robot_prefix):
-            source_worldbody.remove(body)
+            robot_indices.append(i)
 
-    # Append all robot bodies from the target worldbody.
+    # Remove these robot bodies from the list, going backwards so indices don't shift
+    for i in reversed(robot_indices):
+        del source_bodies[i]
+
+    # Determine where in the list we want to re-insert the new robot bodies
+    if robot_indices:
+        # e.g. insert at the earliest occurrence
+        insert_index = min(robot_indices)
+    else:
+        # if no robot bodies found, just append at the end
+        insert_index = len(source_bodies)
+
+    # Collect the corresponding robot bodies from the target
+    target_robot_bodies = []
     for body in list(target_worldbody):
         name = body.get("name", "")
         if name.startswith(robot_prefix):
-            source_worldbody.append(body)
+            # copy them so we don't mutate the original
+            target_robot_bodies.append(copy.deepcopy(body))
 
-    # --- Replace robot-related assets in <asset> ---
+    # Insert them back into the source bodies list at the chosen index
+    for i, new_body in enumerate(target_robot_bodies):
+        source_bodies.insert(insert_index + i, new_body)
+
+    # Finally, overwrite the source_worldbody’s children with our updated list
+    source_worldbody[:] = source_bodies
+
+    # -------------------------------------------------------------------------
+    # 4) Replace robot-related assets in <asset>, same as you already do.
+    # -------------------------------------------------------------------------
     source_asset = source_tree.find("asset")
     target_asset = target_tree.find("asset")
 
-    # Remove any asset element (mesh or material) whose name starts with the robot prefix.
+    # Remove any asset (mesh or material) whose name starts with the robot prefix
     for elem in list(source_asset):
         if elem.tag in ["mesh", "material"]:
             if elem.get("name", "").startswith(robot_prefix):
                 source_asset.remove(elem)
 
-    # Append all robot-related asset elements from the target.
+    # Append all robot-related asset elements from the target
     for elem in list(target_asset):
         if elem.tag in ["mesh", "material"]:
             if elem.get("name", "").startswith(robot_prefix):
                 source_asset.append(copy.deepcopy(elem))
     
-    # --- Replace the actuator section ---
+    # -------------------------------------------------------------------------
+    # 5) Replace the entire <actuator> section with the target's actuator
+    # -------------------------------------------------------------------------
     source_actuator = source_tree.find("actuator")
     target_actuator = target_tree.find("actuator")
+
     if source_actuator is not None:
-        # Remove the entire actuator section.
-        parent = source_tree  # actuators are direct children of <mujoco>
+        parent = source_tree  # <actuator> is direct child of <mujoco>
         parent.remove(source_actuator)
+
     if target_actuator is not None:
-        # Insert a copy of the target actuator section.
-        # We try to insert it before the <sensor> section if present.
+        # We try to insert it before <sensor> if present
         sensor = source_tree.find("sensor")
         actuator_copy = copy.deepcopy(target_actuator)
         if sensor is not None:
-            # Get index of sensor in parent's children list.
             parent = list(source_tree)
             sensor_index = parent.index(sensor)
             source_tree.insert(sensor_index, actuator_copy)
         else:
             source_tree.append(actuator_copy)
 
-    # Convert the modified tree back to a string.
+    # -------------------------------------------------------------------------
+    # 6) Convert the modified tree back to a string, and build the new state dict
+    # -------------------------------------------------------------------------
     new_xml = ET.tostring(source_tree, encoding="unicode")
-
-    # For the state vector, we query the target simulation (you may adjust this as needed).
     new_state = {
         "model": new_xml,
-        "states": target_env.env.sim.get_state().flatten()
+        # If you literally want the EXACT state from source_state, keep:
+        "states": source_state['states']
+        # Or if you want to adopt the target environment’s state vector:
+        # "states": target_env.env.sim.get_state().flatten()
     }
     return new_state
+
+import difflib
+def compare_xml_strings(source_xml, new_xml):
+    """
+    Compare two XML strings and print their differences to the console.
+    """
+    # Convert each XML string into a list of lines
+    source_lines = source_xml.splitlines(keepends=True)
+    new_lines = new_xml.splitlines(keepends=True)
+
+    # Use difflib.unified_diff to produce a unified diff
+    diff = difflib.unified_diff(
+        source_lines,
+        new_lines,
+        fromfile='source_xml',
+        tofile='new_xml'
+    )
+
+    # Print the diff line by line
+    for line in diff:
+        print(line, end='')

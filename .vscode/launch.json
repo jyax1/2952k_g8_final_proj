@@ -346,7 +346,8 @@
             "console": "integratedTerminal",
             "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/square/ph/low_dim_v141.hdf5",
             "--output_name=square_d0_first1_test.hdf5",
-            "--new_robot=IIWA"
+            "--new_robot=IIWA",
+            "--verbose"
         ]
         },
 
