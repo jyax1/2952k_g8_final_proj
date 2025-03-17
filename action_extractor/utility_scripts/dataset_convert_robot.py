@@ -31,8 +31,38 @@ import imageio
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 
+from action_extractor.utils.angles_utils import *
+
 from xml.etree import ElementTree as ET
 from action_extractor.utils.robosuite_data_processing_utils import *
+
+def save_state_mask(diff_array: np.ndarray, filename: str = "state_mask.npy", directory: str = "utils", threshold: float = 1e-6):
+    """
+    Process the difference array into a binary mask (zeros and ones) and save it as an .npy file.
+    
+    Args:
+        diff_array (np.ndarray): Difference array (initial_state['states'] - new_state).
+        filename (str): Filename for the saved mask.
+        directory (str): Directory where the mask file will be saved.
+        threshold (float): Threshold to consider a change significant.
+        
+    Returns:
+        np.ndarray: The binary mask array.
+    """
+    # Create the binary mask: 1 if the absolute difference is greater than threshold, else 0.
+    mask = (np.abs(diff_array) > threshold).astype(np.uint8)
+    
+    # Ensure the target directory exists.
+    os.makedirs(directory, exist_ok=True)
+    
+    # Build the full path.
+    filepath = os.path.join(directory, filename)
+    
+    # Save the mask to an .npy file.
+    np.save(filepath, mask)
+    print(f"Mask saved to {filepath}")
+    
+    return mask
 
 def convert_dataset(args):
     # Load the original environment metadata from the dataset.
@@ -90,31 +120,44 @@ def convert_dataset(args):
         xml_str = recolor_gripper(xml_str)
         initial_state["model"] = xml_str
         
+        new_env.reset()
+        
         # Update the state with the new robot configuration.
         initial_state = convert_robot_in_state(initial_state, new_env)
-
-        new_env.reset()  # Ensure the environment is ready
         obs = new_env.reset_to(initial_state)
-        # If reset_to() returns None, then get observation from get_obs().
-        if obs is None:
-            obs = new_env.get_obs()
+
+        initial_goal_pos = demo_grp_in['obs']['robot0_eef_pos'][0]
+        initial_goal_ori_quat = demo_grp_in['obs']['robot0_eef_quat'][0]
+        initial_goal_pose_quat = np.concatenate((initial_goal_pos, initial_goal_ori_quat), axis=0)
+
+        current_pose_quat = new_env.env.robots[0].recent_ee_pose.last
+        current_pos = current_pose_quat[:3]
+
+        # while not np.allclose(initial_goal_pos, current_pos, atol=0.001):
+        #     # Compute delta command in the axis-angle space for the orientation
+        #     delta_pos = (initial_goal_pos - current_pos) / np.linalg.norm(initial_goal_pos - current_pos)
+        #     delta_ori = np.array([0, 0, 0])
+        #     delta_action = np.concatenate((delta_pos, delta_ori, np.array([-1])), axis=0)
+        #     obs, _, _, _ = new_env.step(delta_action)
+            
+        #     # Update the current command
+        #     current_pose_quat = new_env.env.robots[0].recent_ee_pose.last
+        #     current_pos = current_pose_quat[:3]
 
         if args.verbose:
             # Save the initial frame.
             frames.append(obs['frontview_image'])
-
-        # Record the initial state from the new environment.
+            
         new_state = new_env.env.sim.get_state().flatten()
         new_states_list.append(new_state)
 
         # Replay actions.
         for t in range(T):
-            obs, _, done, _ = new_env.step(actions[t])
+            obs, _, _, _ = new_env.step(actions[t])
             new_state = new_env.env.sim.get_state().flatten()
             new_states_list.append(new_state)
             if args.verbose:
                 frames.append(obs['frontview_image'])
-            # Optionally, you could break out of the loop if done is True.
 
         success = new_env.is_success()["task"]
         print(f"success: {success} for demo {demo}")

@@ -160,7 +160,6 @@ def poses_to_absolute_actions(
         position = np.array([px, py, pz])
 
         # --- Compute orientation: poses[i] -> poses[i+1] ---
-        R_i  = poses[i][:3, :3]
         R_i1 = poses[i+1][:3, :3]
         
         rvec = rotation_matrix_to_angle_axis(R_i1)

@@ -1,6 +1,8 @@
 import re
 import copy
 
+import numpy as np
+
 def recolor_gripper(xml_string: str) -> str:
     """
     Given a MuJoCo XML string, replace the RGBA for:
@@ -167,6 +169,12 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     # 1) Get XML strings from source state and target environment.
     source_xml = source_state["model"]
     target_xml = target_env.env.sim.model.get_xml()
+    
+    source_states = source_state['states']
+    target_states = target_env.env.sim.get_state().flatten()
+    loaded_mask = np.load("action_extractor/utils/robot_state_mask.npy")
+    new_states = source_states.copy()
+    new_states[loaded_mask == 1] = target_states[loaded_mask == 1]
 
     # 2) Parse XML trees.
     source_tree = ET.fromstring(source_xml)
@@ -263,7 +271,7 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     new_state = {
         "model": new_xml,
         # If you literally want the EXACT state from source_state, keep:
-        "states": source_state['states']
+        "states": new_states
         # Or if you want to adopt the target environment’s state vector:
         # "states": target_env.env.sim.get_state().flatten()
     }
