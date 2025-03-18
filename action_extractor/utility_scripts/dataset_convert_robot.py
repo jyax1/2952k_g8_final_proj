@@ -127,6 +127,10 @@ def convert_dataset(args):
     data_grp = f_out.create_group("data")
 
     total_samples = 0
+    
+    # <<-- ADDED: Initialize the conversion status dictionary for each demo.
+    conversion_status = {}
+    # -->> 
 
     # Loop over each demonstration.
     for demo in demos:
@@ -134,7 +138,6 @@ def convert_dataset(args):
         old_states = demo_grp_in["states"][()]  # shape (T, state_dim)
         actions = demo_grp_in["actions"][()]      # shape (T, action_dim)
         T = actions.shape[0]
-        new_states_list = []
 
         # Prepare video recording if verbose.
         if args.verbose:
@@ -204,21 +207,23 @@ def convert_dataset(args):
         new_state = initialization_env.env.sim.get_state().flatten()
         
         new_env.reset()
-        initial_state['states'] = new_state
-        
-        new_states_list.append(new_state)
         
         success = False
+        n_success = 0
         
         policy_freq = 20
 
-        while not success:
+        max_attempts = 6
+        while not success and max_attempts > 0:
+            max_attempts -= 1
         # Replay actions.
             obs = new_env.reset_to(initial_state)
+            new_states_list = []
+            new_states_list.append(initial_state['states'])
             if args.verbose:
                     frames.append(obs['frontview_image'])
-            real_T = T * (20 // policy_freq)
-            for t in range(real_T):
+            policy_T = T * (20 // policy_freq)
+            for t in range(policy_T):
                 obs, _, _, _ = new_env.step(get_abs_action(demo_grp_in, t, policy_freq))
                 new_state = new_env.env.sim.get_state().flatten()
                 new_states_list.append(new_state)
@@ -229,9 +234,18 @@ def convert_dataset(args):
             if success:
                 print(f"success for demo {demo} with policy frequency {policy_freq}")
             else:
-                policy_freq = change_policy_freq(policy_freq) 
+                policy_freq = change_policy_freq(policy_freq, random_choice=False) 
                 print(f"retrying with policy frequency {policy_freq} for demo {demo}")
             
+        if not success:
+            print(f"Failed to convert demo {demo} after multiple attempts.")
+        else:
+            success += 1
+
+        # <<-- ADDED: Record the conversion status for this demo.
+        conversion_status[demo] = success
+        # -->> 
+
         new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
         num_samples = actions.shape[0]
         total_samples += num_samples
@@ -255,8 +269,14 @@ def convert_dataset(args):
             print(f"Saved video for {demo} to {video_path}")
 
     # Set global attributes.
+    print(f"Success rate: {n_success / len(demos) * 100:.2f}%")
     data_grp.attrs["total"] = total_samples
     data_grp.attrs["env_args"] = json.dumps(new_env.serialize(), indent=4)
+    
+    # <<-- ADDED: Save the conversion status dictionary as an attribute.
+    data_grp.attrs["conversion_status"] = json.dumps(conversion_status)
+    # -->> 
+    
     print(f"Wrote {len(demos)} demos with total {total_samples} samples to {output_path}")
 
     f_in.close()

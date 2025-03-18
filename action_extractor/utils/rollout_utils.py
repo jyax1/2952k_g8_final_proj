@@ -9,14 +9,20 @@ import numpy as np
 import os
 
 
-def change_policy_freq(policy_freq):
+def change_policy_freq(policy_freq, random_choice=True):
     current_policy_freq = policy_freq
 
-    # Filter out the old policy_freq
-    valid_options = [opt for opt in POLICY_FREQS if opt != current_policy_freq]
+    if random_choice:
+        # Filter out the old policy_freq
+        valid_options = [opt for opt in POLICY_FREQS if opt != current_policy_freq]
+        result = random.choice(valid_options)
+        
+    else:
+        index = POLICY_FREQS.index(current_policy_freq)
+        result = POLICY_FREQS[index-1]
 
     # Randomly pick a new policy_freq
-    return random.choice(valid_options)
+    return result
 
 def roll_out_and_save_video(env, 
              actions_for_demo, 
