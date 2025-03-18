@@ -27,16 +27,35 @@ import numpy as np
 from copy import deepcopy
 import imageio
 
+from scipy.spatial.transform import Rotation as R
+
 # Import robomimic/robosuite utilities.
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 
 from action_extractor.utils.angles_utils import *
+from action_extractor.utils.rollout_utils import *
 
 from xml.etree import ElementTree as ET
 from action_extractor.utils.robosuite_data_processing_utils import *
 
-def save_state_mask(diff_array: np.ndarray, filename: str = "state_mask.npy", directory: str = "utils", threshold: float = 1e-6):
+def get_abs_action(demo_grp_in, index, policy_freq=20):
+    repetition = 20 // policy_freq
+    goal_pos_list = [pos for pos in demo_grp_in['obs']['robot0_eef_pos'] for _ in range(repetition)]
+    goal_ori_quat_list = [quat for quat in demo_grp_in['obs']['robot0_eef_quat'] for _ in range(repetition)]
+    gripper_action_list = [action[-1] for action in demo_grp_in['actions'] for _ in range(repetition)]
+    
+    goal_pos = goal_pos_list[index]
+    goal_ori_quat = goal_ori_quat_list[index] # rotated by 90 degrees around the z axis counter clockwise
+    goal_ori_quat = (R.from_euler('z', 90, degrees=True) * R.from_quat(goal_ori_quat)).as_quat() # correct rotation
+    
+    goal_ori_axisangle = quat2axisangle(goal_ori_quat)
+    goal_pose_axisangle = np.concatenate((goal_pos, goal_ori_axisangle), axis=0)
+    
+    gripper_action = gripper_action_list[index]
+    return np.concatenate((goal_pose_axisangle, np.array([gripper_action])), axis=0)
+
+def save_state_mask(diff_array: np.ndarray, filename: str = "robot_state_mask.npy", directory: str = "action_extractor/utils", threshold: float = 1e-4):
     """
     Process the difference array into a binary mask (zeros and ones) and save it as an .npy file.
     
@@ -74,6 +93,7 @@ def convert_dataset(args):
     # Create the new environment for data processing.
     # Even though we don’t need images for the conversion, we set a camera name
     # so that we can record the 'frontview_image' if --verbose is enabled.
+    env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
     new_env = EnvUtils.create_env_for_data_processing(
         env_meta=env_meta,
         camera_names=['frontview'],
@@ -81,7 +101,15 @@ def convert_dataset(args):
         camera_width=args.camera_width,
         reward_shaping=False,
     )
-
+    env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
+    initialization_env = EnvUtils.create_env_for_data_processing(
+        env_meta=env_meta,
+        camera_names=['frontview'],
+        camera_height=args.camera_height,
+        camera_width=args.camera_width,
+        reward_shaping=False,
+    )
+    
     # If verbose is set, prepare the debug directory.
     if args.verbose:
         debug_dir = os.path.join("debug", "robot_conversion")
@@ -120,54 +148,97 @@ def convert_dataset(args):
         xml_str = recolor_gripper(xml_str)
         initial_state["model"] = xml_str
         
-        new_env.reset()
+        initialization_env.reset()
         
         # Update the state with the new robot configuration.
-        initial_state = convert_robot_in_state(initial_state, new_env)
-        obs = new_env.reset_to(initial_state)
-
-        initial_goal_pos = demo_grp_in['obs']['robot0_eef_pos'][0]
-        initial_goal_ori_quat = demo_grp_in['obs']['robot0_eef_quat'][0]
-        initial_goal_pose_quat = np.concatenate((initial_goal_pos, initial_goal_ori_quat), axis=0)
-
-        current_pose_quat = new_env.env.robots[0].recent_ee_pose.last
-        current_pos = current_pose_quat[:3]
-
-        # while not np.allclose(initial_goal_pos, current_pos, atol=0.001):
-        #     # Compute delta command in the axis-angle space for the orientation
-        #     delta_pos = (initial_goal_pos - current_pos) / np.linalg.norm(initial_goal_pos - current_pos)
-        #     delta_ori = np.array([0, 0, 0])
-        #     delta_action = np.concatenate((delta_pos, delta_ori, np.array([-1])), axis=0)
-        #     obs, _, _, _ = new_env.step(delta_action)
-            
-        #     # Update the current command
-        #     current_pose_quat = new_env.env.robots[0].recent_ee_pose.last
-        #     current_pos = current_pose_quat[:3]
-
+        initial_state = convert_robot_in_state(initial_state, initialization_env)
+        obs = initialization_env.reset_to(initial_state)
+        
         if args.verbose:
             # Save the initial frame.
             frames.append(obs['frontview_image'])
             
-        new_state = new_env.env.sim.get_state().flatten()
-        new_states_list.append(new_state)
+        current_pose_quat = initialization_env.env.robots[0].recent_ee_pose.last
 
-        # Replay actions.
-        for t in range(T):
-            obs, _, _, _ = new_env.step(actions[t])
-            new_state = new_env.env.sim.get_state().flatten()
-            new_states_list.append(new_state)
+        # initial_goal_pos = current_pos # preserve initial gripper position
+        initial_goal_pos = demo_grp_in['obs']['robot0_eef_pos'][0]
+        # initial_goal_ori_quat = initialization_env.env.sim.data.get_body_xquat("gripper0_right_gripper") # preserve initial gripper orientation
+        initial_goal_ori_quat = demo_grp_in['obs']['robot0_eef_quat'][0] # rotated by 90 degrees around the z axis counter clockwise
+        initial_goal_ori_quat = (R.from_euler('z', 90, degrees=True) * R.from_quat(initial_goal_ori_quat)).as_quat() # correct rotation
+        
+        initial_goal_pose_quat = np.concatenate((initial_goal_pos, initial_goal_ori_quat), axis=0)
+        
+        initial_goal_ori_axisangle = quat2axisangle(initial_goal_ori_quat)
+        initial_goal_pose_axisangle = np.concatenate((initial_goal_pos, initial_goal_ori_axisangle), axis=0)
+        abs_action = np.concatenate((initial_goal_pose_axisangle, np.array([-1])), axis=0)
+        
+        stationary_count = 0
+        stationary_threshold = 10  # number of iterations to consider as "stationary"
+        prev_pose_quat = None
+
+        while not np.allclose(current_pose_quat, initial_goal_pose_quat, atol=0.00005):
+            # Compute delta command in the axis-angle space for the orientation
+            obs, _, _, _ = initialization_env.step(abs_action)
+            
             if args.verbose:
                 frames.append(obs['frontview_image'])
+            
+            # Check if current_pose_quat has changed significantly from the previous iteration
+            if prev_pose_quat is not None:
+                # Adjust the tolerance (e.g., 1e-6) as needed based on your precision requirements
+                if np.allclose(current_pose_quat, prev_pose_quat, atol=1e-6):
+                    stationary_count += 1
+                else:
+                    stationary_count = 0  # reset counter if a significant change is detected
+            
+            # Update the previous pose for the next iteration
+            prev_pose_quat = current_pose_quat.copy()
+            
+            # Break if the pose has remained stationary for a number of iterations
+            if stationary_count >= stationary_threshold:
+                break
+            
+            # Update the current command
+            current_pose_quat = initialization_env.env.robots[0].recent_ee_pose.last
+            
+        new_state = initialization_env.env.sim.get_state().flatten()
+        
+        new_env.reset()
+        initial_state['states'] = new_state
+        
+        new_states_list.append(new_state)
+        
+        success = False
+        
+        policy_freq = 20
 
-        success = new_env.is_success()["task"]
-        print(f"success: {success} for demo {demo}")
+        while not success:
+        # Replay actions.
+            obs = new_env.reset_to(initial_state)
+            if args.verbose:
+                    frames.append(obs['frontview_image'])
+            real_T = T * (20 // policy_freq)
+            for t in range(real_T):
+                obs, _, _, _ = new_env.step(get_abs_action(demo_grp_in, t, policy_freq))
+                new_state = new_env.env.sim.get_state().flatten()
+                new_states_list.append(new_state)
+                if args.verbose:
+                    frames.append(obs['frontview_image'])
+
+            success = new_env.is_success()["task"]
+            if success:
+                print(f"success for demo {demo} with policy frequency {policy_freq}")
+            else:
+                policy_freq = change_policy_freq(policy_freq) 
+                print(f"retrying with policy frequency {policy_freq} for demo {demo}")
+            
         new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
         num_samples = actions.shape[0]
         total_samples += num_samples
 
         # Write the demo to the output dataset.
         demo_grp_out = data_grp.create_group(demo)
-        demo_grp_out.create_dataset("actions", data=actions)
+        # demo_grp_out.create_dataset("actions", data=actions)
         demo_grp_out.create_dataset("states", data=new_states)
         if "model_file" in demo_grp_in.attrs:
             demo_grp_out.attrs["model_file"] = demo_grp_in.attrs["model_file"]

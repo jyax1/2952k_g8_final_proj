@@ -36,6 +36,26 @@ def quat2axisangle(quat):
     axis = quat[:3] / den
     return axis * angle
 
+def quat2axisangle_wxyz(quat):
+    """
+    Convert quaternion [w, x, y, z] to axis-angle [rx, ry, rz].
+    """
+    w = quat[0]
+    # Clamp w to the valid range [-1, 1]
+    if w > 1.0:
+        w = 1.0
+    elif w < -1.0:
+        w = -1.0
+
+    angle = 2.0 * math.acos(w)
+    den = math.sqrt(1.0 - w * w)
+    if den < 1e-12:
+        return np.zeros(3, dtype=np.float32)
+
+    # Use the vector part which is now at indices 1:4
+    axis = quat[1:4] / den
+    return axis * angle
+
 
 def quat_multiply(q1, q0):
     """
@@ -137,6 +157,63 @@ def quaternion_normalize(q):
     if norm < 1e-12:
         raise ValueError("Cannot normalize a near-zero quaternion.")
     return q / norm
+
+def quat_exp(q):
+    """
+    Computes the exponential of a pure quaternion (with zero scalar part) given in [x, y, z, w] order.
+    The function assumes the input q represents an axis-angle vector in its vector part (q[:3])
+    and q[3] is 0.
+    
+    Parameters:
+        q (np.array): A quaternion [x, y, z, w] with w assumed to be 0.
+    
+    Returns:
+        np.array: A unit quaternion in [x, y, z, w] order representing the rotation.
+    """
+    # Extract the vector part
+    v = q[:3]
+    theta = np.linalg.norm(v)
+    
+    # When theta is near zero, return the identity quaternion to avoid division by zero.
+    if theta < 1e-8:
+        return np.array([0.0, 0.0, 0.0, 1.0])
+    else:
+        # Compute the scaled vector part and the scalar part
+        v_scaled = (np.sin(theta) / theta) * v
+        return np.concatenate([v_scaled, [np.cos(theta)]])
+    
+def quat_log(q):
+    """
+    Computes the logarithm of a unit quaternion given in [x, y, z, w] order.
+    Returns a pure quaternion (with scalar part 0) in [x, y, z, 0] order that represents the rotation vector.
+    
+    For a unit quaternion q = [v, w] where:
+        - v = [x, y, z] = sin(theta) * (rotation axis)
+        - w = cos(theta)
+    the logarithm is defined as:
+    
+        log(q) = [theta * (v / ||v||), 0]   if ||v|| > 0
+               = [0, 0, 0, 0]              if ||v|| is close to 0
+               
+    where theta = arccos(w).
+    
+    Parameters:
+        q (np.array): Unit quaternion in [x, y, z, w] order.
+        
+    Returns:
+        np.array: Pure quaternion representing the logarithm of q in [x, y, z, 0] order.
+    """
+    v = q[:3]
+    w = np.clip(q[3], -1.0, 1.0)  # Clamp w to avoid numerical issues with arccos
+    theta = np.arccos(w)
+    sin_theta = np.sin(theta)
+    
+    if sin_theta < 1e-8:
+        # If the rotation angle is very small, return a zero rotation vector.
+        return np.array([0.0, 0.0, 0.0, 0.0])
+    else:
+        return np.concatenate([(theta * v / sin_theta), [0.0]])
+
 
 def transform_hand_orientation_to_world(q_WO, q_in_hand):
     """
