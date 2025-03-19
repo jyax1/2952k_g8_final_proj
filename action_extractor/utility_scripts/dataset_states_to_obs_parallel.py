@@ -153,7 +153,7 @@ def extract_trajectory(
         # get next observation
         if t == traj_len:
             # play final action to get next observation for last timestep
-            next_obs, _, _, _ = env.step(actions[t - 1])
+            next_obs, _, _, _ = env.step(actions[-1])
         else:
             # reset to simulator state to get observation
             next_obs = env.reset_to({"states" : states[t]})
@@ -235,7 +235,6 @@ def dataset_states_to_obs(args):
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
-    env_meta['env_kwargs']['robots'] = args.robot
     camera_names = ['agentview', 'frontview', 'fronttableview', 'robot0_eye_in_hand']
     additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
     camera_names = camera_names + additional_camera_for_voxel
@@ -295,9 +294,10 @@ def dataset_states_to_obs(args):
             initial_state = dict(states=states[0])
             if is_robosuite_env:
                 xml_str = f["data/{}".format(ep)].attrs["model_file"]
-                xml_str = replace_all_lights(xml_str)
-                xml_str = recolor_robot(xml_str)
-                xml_str = recolor_gripper(xml_str)
+                if env_meta['env_kwargs']['robots'] == 'Panda':
+                    xml_str = replace_all_lights(xml_str)
+                    xml_str = recolor_robot(xml_str)
+                    xml_str = recolor_gripper(xml_str)
                 initial_state["model"] = xml_str
             actions = f["data/{}/actions".format(ep)][()]
 
@@ -420,13 +420,6 @@ if __name__ == "__main__":
         type=int,
         default=128,
         help="(optional) width of image observations",
-    )
-    
-    parser.add_argument(
-        "--robot",
-        type=str,
-        default='Panda',
-        help="(optional) robot to use in renderings",
     )
 
     # specifies how the "done" signal is written. If "0", then the "done" signal is 1 wherever 

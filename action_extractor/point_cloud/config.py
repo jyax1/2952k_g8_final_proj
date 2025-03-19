@@ -1,5 +1,5 @@
 # [ROBOSUITE] reasonable options of policy frequencies
-POLICY_FREQS = [1, 2, 4, 5, 10, 20]
+POLICY_FREQS = [5, 10, 20]
 
 # [ROBOSUITE] This offset is empirically determined, and describes the positional relationship between
 # the gripper hand's center and the position of the eef site, which is the coordinate system

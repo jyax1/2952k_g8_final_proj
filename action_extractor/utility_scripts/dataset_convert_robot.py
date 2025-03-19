@@ -128,15 +128,19 @@ def convert_dataset(args):
 
     total_samples = 0
     
+    n_success = 0
+    
     # <<-- ADDED: Initialize the conversion status dictionary for each demo.
     conversion_status = {}
     # -->> 
 
     # Loop over each demonstration.
+    if args.num_demos is not None:
+        demos = demos[:args.num_demos]
     for demo in demos:
         demo_grp_in = f_in["data"][demo]
         old_states = demo_grp_in["states"][()]  # shape (T, state_dim)
-        actions = demo_grp_in["actions"][()]      # shape (T, action_dim)
+        actions = copy.deepcopy(demo_grp_in["actions"][()])      # shape (T, action_dim)
         T = actions.shape[0]
 
         # Prepare video recording if verbose.
@@ -155,6 +159,7 @@ def convert_dataset(args):
         
         # Update the state with the new robot configuration.
         initial_state = convert_robot_in_state(initial_state, initialization_env)
+        new_model_file = initial_state['model']
         obs = initialization_env.reset_to(initial_state)
         
         if args.verbose:
@@ -209,24 +214,24 @@ def convert_dataset(args):
         new_env.reset()
         
         success = False
-        n_success = 0
         
         policy_freq = 20
 
-        max_attempts = 6
+        max_attempts = 4
         while not success and max_attempts > 0:
             max_attempts -= 1
         # Replay actions.
+            actions = np.array([action for action in demo_grp_in["actions"][()] for _ in range(20 // policy_freq)])
             obs = new_env.reset_to(initial_state)
             new_states_list = []
-            new_states_list.append(initial_state['states'])
+            # new_states_list.append(initial_state['states'])
             if args.verbose:
                     frames.append(obs['frontview_image'])
             policy_T = T * (20 // policy_freq)
             for t in range(policy_T):
-                obs, _, _, _ = new_env.step(get_abs_action(demo_grp_in, t, policy_freq))
                 new_state = new_env.env.sim.get_state().flatten()
                 new_states_list.append(new_state)
+                obs, _, _, _ = new_env.step(get_abs_action(demo_grp_in, t, policy_freq))
                 if args.verbose:
                     frames.append(obs['frontview_image'])
 
@@ -235,15 +240,16 @@ def convert_dataset(args):
                 print(f"success for demo {demo} with policy frequency {policy_freq}")
             else:
                 policy_freq = change_policy_freq(policy_freq, random_choice=False) 
-                print(f"retrying with policy frequency {policy_freq} for demo {demo}")
+                if max_attempts > 0:
+                    print(f"retrying with policy frequency {policy_freq} for demo {demo}")
             
         if not success:
             print(f"Failed to convert demo {demo} after multiple attempts.")
         else:
-            success += 1
+            n_success += 1
 
         # <<-- ADDED: Record the conversion status for this demo.
-        conversion_status[demo] = success
+        conversion_status[demo] = bool(success)
         # -->> 
 
         new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
@@ -252,13 +258,12 @@ def convert_dataset(args):
 
         # Write the demo to the output dataset.
         demo_grp_out = data_grp.create_group(demo)
-        # demo_grp_out.create_dataset("actions", data=actions)
+        demo_grp_out.create_dataset("actions", data=actions)
         demo_grp_out.create_dataset("states", data=new_states)
-        if "model_file" in demo_grp_in.attrs:
-            demo_grp_out.attrs["model_file"] = demo_grp_in.attrs["model_file"]
+        demo_grp_out.attrs["model_file"] = new_model_file
         demo_grp_out.attrs["num_samples"] = num_samples
 
-        print(f"Processed {demo}: {num_samples} transitions.")
+        print(f"Processed {demo}: {num_samples} transitions.\n")
 
         # If verbose, save the video.
         if args.verbose:
@@ -269,7 +274,6 @@ def convert_dataset(args):
             print(f"Saved video for {demo} to {video_path}")
 
     # Set global attributes.
-    print(f"Success rate: {n_success / len(demos) * 100:.2f}%")
     data_grp.attrs["total"] = total_samples
     data_grp.attrs["env_args"] = json.dumps(new_env.serialize(), indent=4)
     
@@ -278,6 +282,8 @@ def convert_dataset(args):
     # -->> 
     
     print(f"Wrote {len(demos)} demos with total {total_samples} samples to {output_path}")
+    
+    print(f"Success rate: {n_success / len(demos) * 100:.2f}%")
 
     f_in.close()
     f_out.close()
@@ -290,6 +296,8 @@ def main():
                         help="Path to input HDF5 dataset")
     parser.add_argument("--output_name", type=str, required=True,
                         help="Name of output HDF5 dataset")
+    parser.add_argument("--num_demos", type=int, default=None,
+                        help="Number of demos to process (default: all)")
     parser.add_argument("--new_robot", type=str, required=True,
                         help="New robot name to use (will override env_meta['env_kwargs']['robots'])")
     parser.add_argument("--camera_height", type=int, default=480,

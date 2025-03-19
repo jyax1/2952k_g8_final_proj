@@ -328,13 +328,12 @@
             "request": "launch",
             "program": "action_extractor/utility_scripts/dataset_states_to_obs_parallel.py",
             "console": "integratedTerminal",
-            "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/square/ph/low_dim_v141.hdf5",
+            "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/square/ph/square_d0_convert_iiwa.hdf5",
             "--camera_height=84",
             "--camera_width=84",
             "--output_name=square_d0_first1_test.hdf5",
             "--compress",
-            "--num_workers=1",
-            "--robot=IIWA"
+            "--num_workers=1"
         ]
         },
 
@@ -345,7 +344,7 @@
             "program": "action_extractor/utility_scripts/dataset_convert_robot.py",
             "console": "integratedTerminal",
             "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/square/ph/low_dim_v141.hdf5",
-            "--output_name=square_d0_first1_test.hdf5",
+            "--output_name=square_d0_convert_debug.hdf5",
             "--new_robot=Panda",
             "--verbose"
         ]
