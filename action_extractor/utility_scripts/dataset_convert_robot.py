@@ -224,6 +224,7 @@ def convert_dataset(args):
             actions = np.array([action for action in demo_grp_in["actions"][()] for _ in range(20 // policy_freq)])
             obs = new_env.reset_to(initial_state)
             new_states_list = []
+            new_actions_list = []
             # new_states_list.append(initial_state['states'])
             if args.verbose:
                     frames.append(obs['frontview_image'])
@@ -231,7 +232,9 @@ def convert_dataset(args):
             for t in range(policy_T):
                 new_state = new_env.env.sim.get_state().flatten()
                 new_states_list.append(new_state)
-                obs, _, _, _ = new_env.step(get_abs_action(demo_grp_in, t, policy_freq))
+                action = get_abs_action(demo_grp_in, t, policy_freq)
+                new_actions_list.append(action)
+                obs, _, _, _ = new_env.step(action)
                 if args.verbose:
                     frames.append(obs['frontview_image'])
 
@@ -253,12 +256,14 @@ def convert_dataset(args):
         # -->> 
 
         new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
+        assert len(new_states_list) == len(new_actions_list)
+        new_actions = np.stack(new_actions_list)
         num_samples = actions.shape[0]
         total_samples += num_samples
 
         # Write the demo to the output dataset.
         demo_grp_out = data_grp.create_group(demo)
-        demo_grp_out.create_dataset("actions", data=actions)
+        demo_grp_out.create_dataset("actions", data=new_actions)
         demo_grp_out.create_dataset("states", data=new_states)
         demo_grp_out.attrs["model_file"] = new_model_file
         demo_grp_out.attrs["num_samples"] = num_samples

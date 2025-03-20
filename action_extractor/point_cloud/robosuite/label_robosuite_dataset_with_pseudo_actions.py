@@ -245,7 +245,7 @@ def label_dataset_with_pseudo_actions(args: argparse.Namespace) -> None:
     n_success = 0
     total_n = 0
     
-    for i in range(17, len(demos), args.num_workers):
+    for i in range(0, len(demos), args.num_workers):
         end = min(i + args.num_workers, len(demos))
         initial_state_list = []
         states_list = []
