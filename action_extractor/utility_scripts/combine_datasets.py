@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-import os
 import argparse
 import h5py
-import numpy as np
+import json
 
 def combine_datasets(dataset1_path, dataset2_path, num_demos_to_add, output_path):
     with h5py.File(dataset1_path, 'r') as f1, \
@@ -15,13 +14,17 @@ def combine_datasets(dataset1_path, dataset2_path, num_demos_to_add, output_path
 
         # Get sorted demo keys (assumes groups are named "demo_0", "demo_1", etc.)
         demos2 = list(f2["data"].keys())
+        # demos_success = json.loads(f2["data"].attrs["demos_success"])
         demo_lengths = []
         for demo in demos2:
             actions = f2["data"][demo]["actions"]
             traj_length = len(actions)
+            # success =demos_success[demo]
             demo_lengths.append((demo, traj_length))
             
-        demo_lengths.sort(key=lambda x: x[1], reverse=True)
+        demo_lengths.sort(key=lambda x: x[1], reverse=True) # Prefer longer
+        # demo_lengths.sort(key=lambda x: not x[2]) # Prefer success 
+        # demo_lengths.sort(key=lambda x: (not x[2], x[1])) # Prefer success and shorter
         
         num_to_add = num_demos_to_add
         selected_demos = demo_lengths[:num_to_add]

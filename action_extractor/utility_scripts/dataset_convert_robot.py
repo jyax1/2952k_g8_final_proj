@@ -283,7 +283,7 @@ def convert_dataset(args):
     data_grp.attrs["env_args"] = json.dumps(new_env.serialize(), indent=4)
     
     # <<-- ADDED: Save the conversion status dictionary as an attribute.
-    data_grp.attrs["conversion_status"] = json.dumps(conversion_status)
+    data_grp.attrs["demos_success"] = json.dumps(conversion_status)
     # -->> 
     
     print(f"Wrote {len(demos)} demos with total {total_samples} samples to {output_path}")
