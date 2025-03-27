@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import h5py
-import json
+import random
 
 def combine_datasets(dataset1_path, dataset2_path, num_demos_to_add, output_path):
     with h5py.File(dataset1_path, 'r') as f1, \
@@ -22,12 +22,10 @@ def combine_datasets(dataset1_path, dataset2_path, num_demos_to_add, output_path
             # success =demos_success[demo]
             demo_lengths.append((demo, traj_length))
             
-        demo_lengths.sort(key=lambda x: x[1], reverse=True) # Prefer longer
-        # demo_lengths.sort(key=lambda x: not x[2]) # Prefer success 
-        # demo_lengths.sort(key=lambda x: (not x[2], x[1])) # Prefer success and shorter
-        
-        num_to_add = num_demos_to_add
-        selected_demos = demo_lengths[:num_to_add]
+        if len(demo_lengths) < num_demos_to_add:
+            raise ValueError("Not enough demos in dataset2 to sample from.")
+
+        selected_demos = random.sample(demo_lengths, num_demos_to_add)
         
         # Create output file by copying the entire "data" group from dataset1
         f1.copy("data", f_out, name="data")
@@ -59,8 +57,12 @@ def main():
     parser.add_argument("--num_demos_to_add", type=int, required=True,
                     help="Number of demos to add from dataset2")
     parser.add_argument("--output", type=str, required=True, help="Path for the output combined dataset (HDF5 file)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (optional)")
+
     
     args = parser.parse_args()
+    if args.seed is not None:
+        random.seed(args.seed)
     combine_datasets(args.dataset1, args.dataset2, args.num_demos_to_add, args.output)
 
 if __name__ == "__main__":

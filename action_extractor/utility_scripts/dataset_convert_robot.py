@@ -217,7 +217,7 @@ def convert_dataset(args):
         
         policy_freq = 20
 
-        max_attempts = 4
+        max_attempts = 1
         while not success and max_attempts > 0:
             max_attempts -= 1
         # Replay actions.
@@ -251,10 +251,6 @@ def convert_dataset(args):
         else:
             n_success += 1
 
-        # <<-- ADDED: Record the conversion status for this demo.
-        conversion_status[demo] = bool(success)
-        # -->> 
-
         new_states = np.stack(new_states_list)  # shape (T+1, state_dim)
         assert len(new_states_list) == len(new_actions_list)
         new_actions = np.stack(new_actions_list)
@@ -281,10 +277,6 @@ def convert_dataset(args):
     # Set global attributes.
     data_grp.attrs["total"] = total_samples
     data_grp.attrs["env_args"] = json.dumps(new_env.serialize(), indent=4)
-    
-    # <<-- ADDED: Save the conversion status dictionary as an attribute.
-    data_grp.attrs["demos_success"] = json.dumps(conversion_status)
-    # -->> 
     
     print(f"Wrote {len(demos)} demos with total {total_samples} samples to {output_path}")
     
