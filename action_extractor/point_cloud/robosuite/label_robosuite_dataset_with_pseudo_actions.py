@@ -413,8 +413,6 @@ def main():
                         help="If not None, process the specified demo for debugging purposes.")
     parser.add_argument("--icp_method", type=str, default="multiscale", choices=["multiscale", "updown"],
                         help="ICP method used for pose estimation.")
-    parser.add_argument("--compress", action='store_true',
-                        help="Compress observations with gzip option in hdf5")
 
     args = parser.parse_args()
 
