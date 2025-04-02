@@ -234,7 +234,7 @@ def dataset_states_to_obs(args):
     store_point_cloud = args.store_point_cloud
     # create environment to use for data processing
     env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=args.dataset)
-    original_gripper = env_meta['env_kwargs']['gripper_types']
+    # original_gripper = env_meta['env_kwargs']['gripper_types']
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
     camera_names = ['agentview', 'frontview', 'fronttableview', 'robot0_eye_in_hand']
     additional_camera_for_voxel = [] if store_voxel or store_point_cloud else []
@@ -295,10 +295,9 @@ def dataset_states_to_obs(args):
             initial_state = dict(states=states[0])
             if is_robosuite_env:
                 xml_str = f["data/{}".format(ep)].attrs["model_file"]
-                if env_meta['env_kwargs']['robots'] == 'Panda':
-                    xml_str = replace_all_lights(xml_str)
-                    xml_str = recolor_robot(xml_str)
-                    xml_str = recolor_gripper(xml_str)
+                xml_str = replace_all_lights(xml_str)
+                xml_str = recolor_robot(xml_str)
+                xml_str = recolor_gripper(xml_str)
                 initial_state["model"] = xml_str
             actions = f["data/{}/actions".format(ep)][()]
 

@@ -16,4 +16,5 @@ if __name__ == '__main__':
     hdf5_file = "/home/yilong/Documents/mimicgen/datasets/core/square_d0.hdf5"
     hdf5_file = "/home/yilong/Documents/mimicgen/datasets/robot/square_d0_ur5e.hdf5"
     hdf5_file = "/home/yilong/Documents/mimicgen/datasets/robot/square_d0_iiwa.hdf5"
+    hdf5_file = "/home/yilong/Documents/robo/robomimic_3d/datasets/lift/mh/low_dim_v141.hdf5"
     count_demonstrations(hdf5_file)
