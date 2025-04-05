@@ -328,10 +328,10 @@
             "request": "launch",
             "program": "action_extractor/utility_scripts/dataset_states_to_obs_parallel.py",
             "console": "integratedTerminal",
-            "args": ["--dataset=/home/yilong/Documents/mimicgen/datasets/robot/square_d0_iiwa.hdf5",
+            "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/can/ph/low_dim_v141.hdf5",
             "--camera_height=84",
             "--camera_width=84",
-            "--output_name=square_d0_obs_orig_black_matte0.0_mimicgeniiwa_16.hdf5",
+            "--output_name=debug.hdf5",
             "--compress",
             "--num_workers=1"
         ]

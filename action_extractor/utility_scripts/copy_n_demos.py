@@ -56,9 +56,25 @@ def copy_n_demos_only(source_path, target_path, n):
         
         print(f"Found {len(all_demos_sorted)} total demos. Copying {len(demos_to_copy)} demos...")
         
+        total_samples = 0  # <-- Initialize total counter here
+        
         for demo_name in tqdm(demos_to_copy, desc="Copying demos"):
             # Copy the entire group for that demo
             fsrc.copy(fsrc['data'][demo_name], fdst['data'], name=demo_name)
+            
+            # Read the demo group from the source file to get the transition count
+            demo_grp_in = fsrc['data'][demo_name]
+            if "actions" in demo_grp_in:
+                actions = demo_grp_in["actions"][()]  # shape (T, action_dim)
+                total_samples += actions.shape[0]       # T is the number of transitions
+            else:
+                print(f"Warning: Demo '{demo_name}' does not have an 'actions' dataset; skipping count.")
+        
+        print(f"Total samples from copied demos: {total_samples}")
+
+        # Set the global attribute 'total' in the 'data' group of the target file.
+        fdst['data'].attrs["total"] = total_samples
+        print(f"Set global attribute 'total' to {total_samples} in 'data' group.")
         
         print(f"Done copying {len(demos_to_copy)} demos into {target_path}.")
 
