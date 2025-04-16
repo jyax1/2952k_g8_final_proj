@@ -16,3 +16,6 @@ src
 
 # VS Code settings
 .vscode/
+
+# Slurm scripts
+slurm_scripts/

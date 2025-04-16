@@ -81,9 +81,11 @@ In the video saved, the left two quadrants are the ground truth, while the right
 action_extractor/
 ├── action_extractor/       # Main package
 │   ├── utility_scripts/    # Utility scripts for data processing
-│   └── point_cloud/       # Core pose estimation code
+│   ├── point_cloud/        # Core point cloud based pose estimation code
+│   └── ...
 ├── requirements.txt        # Project dependencies
-└── README.md              # This file
+├── README.md               # This file
+└── ...
 ```
 
 ## Common Issues
