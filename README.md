@@ -87,7 +87,7 @@ action_extractor/
 
 MIT License
 
-## Citation
+<!-- ## Citation
 
 If you use this code in your research, please cite:
 ```bibtex
@@ -96,4 +96,4 @@ If you use this code in your research, please cite:
     author={Your Name},
     year={2024}
 }
-```
+``` -->
