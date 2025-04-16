@@ -15,6 +15,7 @@ pillow>=10.4.0
 imageio>=2.35.0
 imageio-ffmpeg>=0.5.1
 moviepy>=1.0.3
+av>=10.0.0  # Added for video processing
 -e git+https://github.com/hassony2/torch_videovision.git@785a810d1df2ccab6901fb98b38e358433e7b17a#egg=torchvideotransforms
 
 # Data Management & Processing
@@ -24,8 +25,10 @@ pandas>=2.0.0
 tqdm>=4.66.0
 
 # Robotics & Simulation
--e git+ssh://git@github.com/yilongsong/robomimic_3d.git@f4779e15ad469be1b1f785ec97abb04365b3beff#egg=robomimic
--e git+ssh://git@github.com/yilongsong/robosuite.git@1f8e6d411dbc89b21519e473fc96caf0279779fa#egg=robosuite
+gym>=0.21.0
+gymnasium>=0.29.1
+-e git+ssh://git@github.com/yilongsong/robomimic_ae.git@ea5159875219bf0589d4930b97bb78c2f097765f#egg=robomimic
+-e git+ssh://git@github.com/yilongsong/robosuite_ae.git@114b9c4d23cedf3edc183b94b8fd1474addb9318#egg=robosuite
 -e git+https://github.com/ARISE-Initiative/robosuite-task-zoo@74eab7f88214c21ca1ae8617c2b2f8d19718a9ed#egg=robosuite_task_zoo
 mujoco>=2.3.0
 mujoco-py>=2.1.2

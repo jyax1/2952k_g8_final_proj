@@ -2,6 +2,7 @@
 README.md
 debug_xvfb.sh
 environment.yml
+pyproject.toml
 requirements.txt
 setup.cfg
 setup.py

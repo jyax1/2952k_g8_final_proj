@@ -24,6 +24,10 @@ conda install pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
     python3-dev \
     libglew-dev \
     libosmesa6-dev \
@@ -42,9 +46,14 @@ echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/.mujoco/mujoco210/bin' >> ~/
 source ~/.bashrc
 ```
 
-### 5. Install Python dependencies
+### 5. Install Python dependencies and action_extractor
 ```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Install action_extractor in development mode
+pip install -e .
+pip install "cython<3"
 ```
 
 ## Quick Start
@@ -60,10 +69,7 @@ wget https://example.com/sample_dataset.hdf5 -O data/manipulation_demos/point_cl
 
 ### 2. Run demo visualization
 ```bash
-python action_extractor/point_cloud/robosuite/visualize_pseudo_actions_rollouts.py \
-    --dataset_path data/manipulation_demos/point_cloud_datasets/square_d0_sample.hdf5 \
-    --output_dir visualizations/pseudo_action_rollouts/example_rollout \
-    --num_demos 1
+python action_extractor/point_cloud/robosuite/visualize_pseudo_actions_rollouts.py
 ```
 
 ## Project Structure
