@@ -9,3 +9,10 @@ data/manipulation_demos/point_cloud_datasets
 data/manipulation_demos/pseudo_label_datasets
 logs/**
 src
+
+# Python package files
+*.egg-info/
+*.egg
+
+# VS Code settings
+.vscode/
