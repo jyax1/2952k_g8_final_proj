@@ -343,9 +343,9 @@
             "request": "launch",
             "program": "action_extractor/utility_scripts/dataset_convert_robot.py",
             "console": "integratedTerminal",
-            "args": ["--dataset=/home/yilong/Documents/robo/robomimic_3d/datasets/square/ph/low_dim_v141.hdf5",
-            "--output_name=square_d0_convert_debug.hdf5",
-            "--new_robot=Panda",
+            "args": ["--dataset=/home/yilong/Documents/datasets/source/coffee_d0_abs_obs.hdf5",
+            "--output_name=coffee_d0_abs_obs_iiwa.hdf5",
+            "--new_robot=IIWA",
             "--verbose"
         ]
         },

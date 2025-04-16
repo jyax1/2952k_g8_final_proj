@@ -173,6 +173,8 @@ def convert_robot_in_state(source_state, target_env, robot_prefix="robot0"):
     source_states = source_state['states']
     target_states = target_env.env.sim.get_state().flatten()
     loaded_mask = np.load("action_extractor/utils/robot_state_mask.npy")
+    if len(loaded_mask) < len(source_states):
+        loaded_mask = np.pad(loaded_mask, (0, len(source_states) - len(loaded_mask)), 'constant', constant_values=0)
     new_states = source_states.copy()
     new_states[loaded_mask == 1] = target_states[loaded_mask == 1]
 

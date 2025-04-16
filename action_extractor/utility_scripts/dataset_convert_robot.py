@@ -89,6 +89,8 @@ def convert_dataset(args):
     # Update the robot type in the environment kwargs.
     env_meta['env_kwargs']['gripper_types'] = 'PandaGripper'
     env_meta['env_kwargs']['robots'] = args.new_robot
+    
+    original_controller_type_delta = env_meta["env_kwargs"]["controller_configs"]["control_delta"]
 
     # Create the new environment for data processing.
     # Even though we don’t need images for the conversion, we set a camera name
@@ -129,10 +131,6 @@ def convert_dataset(args):
     total_samples = 0
     
     n_success = 0
-    
-    # <<-- ADDED: Initialize the conversion status dictionary for each demo.
-    conversion_status = {}
-    # -->> 
 
     # Loop over each demonstration.
     if args.num_demos is not None:
@@ -217,7 +215,7 @@ def convert_dataset(args):
         
         policy_freq = 20
 
-        max_attempts = 1
+        max_attempts = 2
         while not success and max_attempts > 0:
             max_attempts -= 1
         # Replay actions.
@@ -232,7 +230,10 @@ def convert_dataset(args):
             for t in range(policy_T):
                 new_state = new_env.env.sim.get_state().flatten()
                 new_states_list.append(new_state)
-                action = get_abs_action(demo_grp_in, t, policy_freq)
+                if original_controller_type_delta:
+                    action = get_abs_action(demo_grp_in, t, policy_freq)
+                else:
+                    action = actions[t]
                 new_actions_list.append(action)
                 obs, _, _, _ = new_env.step(action)
                 if args.verbose:
