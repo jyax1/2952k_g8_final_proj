@@ -64,13 +64,16 @@ pip install "cython<3"
 mkdir -p data/manipulation_demos/point_cloud_datasets
 
 # Download sample dataset (replace with actual download command)
-wget https://example.com/sample_dataset.hdf5 -O data/manipulation_demos/point_cloud_datasets/square_d0_sample.hdf5
+wget https://huggingface.co/datasets/yilongsong/action-extractor-demos/resolve/main/square_d0_sample.hdf5 \
+-O data/manipulation_demos/point_cloud_datasets/square_d0_sample.hdf5
 ```
 
 ### 2. Run demo visualization
 ```bash
 python action_extractor/point_cloud/robosuite/visualize_pseudo_actions_rollouts.py
 ```
+
+In the video saved, the left two quadrants are the ground truth, while the right two quadrants are visualizations of the rollout using the estimated pose!
 
 ## Project Structure
 

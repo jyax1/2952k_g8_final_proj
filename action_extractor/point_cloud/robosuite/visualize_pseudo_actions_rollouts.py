@@ -9,7 +9,6 @@ python visualize_pseudo_actions_rollouts.py
 '''
 
 import os
-import numpy as np
 import imageio
 from glob import glob
 from tqdm import tqdm
@@ -239,6 +238,7 @@ def imitate_trajectory_with_action_identifier(
             except Exception as e:
                 print(f"Error converting {mp4_file}: {e}")
 
+    print(f"Videos saved to {output_dir}")
     print(f"Wrote results to {os.path.join(output_dir, 'trajectory_results.txt')}")
 
 
