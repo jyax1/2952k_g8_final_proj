@@ -1,13 +1,18 @@
-# Action Extractor
+# G8: Action Extractor
 
-Code for paper **Imitation Learning with Precisely Labeled Human Demonstrations**
+Hi, 
+This is Yilong and Angel, also G8 for Brown University's CSCI 2952K 3D CV course. 
+Here is the code base for our final report paper **Imitation Learning with Precisely Labeled Human Demonstrations**
 
-## Installation
+Have fun demoing!
+05.13.2025
+
+## Installation and Setup
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/action_extractor.git
-cd action_extractor
+git clone https://github.com/yourusername/2952k_g8_final_proj.git
+cd 2952k_g8_final_proj
 ```
 
 ### 2. Create and activate conda environment
